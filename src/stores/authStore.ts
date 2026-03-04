@@ -12,7 +12,9 @@ import type {
   AuthTokens,
   Organization,
   Environment,
+  ControlPlaneRegionId,
 } from '../types';
+import { DEFAULT_REGION_ID } from '../config/regions';
 
 // --- State ---
 export interface AuthState {
@@ -20,6 +22,7 @@ export interface AuthState {
   tokens: AuthTokens | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  selectedRegion: ControlPlaneRegionId;
   currentOrganization: Organization | null;
   currentEnvironment: Environment | null;
   organizations: Organization[];
@@ -31,6 +34,7 @@ export interface AuthActions {
   login: (user: User, tokens: AuthTokens) => void;
   logout: () => void;
   refreshToken: (tokens: AuthTokens) => void;
+  setSelectedRegion: (region: ControlPlaneRegionId) => void;
   switchOrganization: (organization: Organization) => void;
   switchEnvironment: (environment: Environment) => void;
   loadSession: (user: User, tokens: AuthTokens) => void;
@@ -46,6 +50,7 @@ const initialState: AuthState = {
   tokens: null,
   isAuthenticated: false,
   isLoading: false,
+  selectedRegion: DEFAULT_REGION_ID,
   currentOrganization: null,
   currentEnvironment: null,
   organizations: [],
@@ -74,6 +79,11 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       refreshToken: (tokens: AuthTokens) =>
         set({
           tokens,
+        }),
+
+      setSelectedRegion: (region: ControlPlaneRegionId) =>
+        set({
+          selectedRegion: region,
         }),
 
       switchOrganization: (organization: Organization) =>
@@ -124,6 +134,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       // Only persist user profile and org/env selection for session restoration.
       partialize: (state) => ({
         user: state.user,
+        selectedRegion: state.selectedRegion,
         currentOrganization: state.currentOrganization,
         currentEnvironment: state.currentEnvironment,
         organizations: state.organizations,

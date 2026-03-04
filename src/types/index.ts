@@ -690,6 +690,16 @@ export interface B2BTransaction {
   errorMessage?: string;
 }
 
+// --- Control Plane Regions ---
+export type ControlPlaneRegionId = 'us' | 'eu1' | 'ca1' | 'jp1';
+
+export interface ControlPlaneRegion {
+  id: ControlPlaneRegionId;
+  label: string;
+  url: string;
+  notes: string;
+}
+
 // --- Settings ---
 export interface AppSettings {
   theme: 'light' | 'dark' | 'system';

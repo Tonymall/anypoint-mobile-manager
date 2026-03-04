@@ -1,6 +1,7 @@
 // ============================================================
 // Anypoint Mobile Platform - Login Screen
-// Username/password authentication with SSO and biometric options
+// Username/password authentication with region selector,
+// SSO, and biometric options
 // ============================================================
 
 import React, { useState, useCallback } from 'react';
@@ -10,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Pressable,
 } from 'react-native';
 import {
   Text,
@@ -20,12 +22,15 @@ import {
   useTheme,
   ActivityIndicator,
   Divider,
+  Menu,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useAuthStore } from '../../stores';
 import * as authService from '../../services/authService';
-import type { AuthTokens, User } from '../../types';
+import { setRegion } from '../../services/api';
+import { CONTROL_PLANE_REGIONS, getRegionById } from '../../config/regions';
+import type { AuthTokens, User, ControlPlaneRegionId } from '../../types';
 
 interface LoginScreenProps {
   navigation: any;
@@ -40,6 +45,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [biometricEnabled, setBiometricEnabled] = useState<boolean>(false);
 
+  // --- Region State ---
+  const selectedRegion = useAuthStore((state) => state.selectedRegion);
+  const setSelectedRegion = useAuthStore((state) => state.setSelectedRegion);
+  const [regionMenuVisible, setRegionMenuVisible] = useState(false);
+
   // --- UI State ---
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -50,6 +60,15 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const setIsLoadingStore = useAuthStore((state) => state.setIsLoading);
 
   // --- Handlers ---
+  const handleRegionSelect = useCallback(
+    async (regionId: ControlPlaneRegionId) => {
+      setSelectedRegion(regionId);
+      await setRegion(regionId);
+      setRegionMenuVisible(false);
+    },
+    [setSelectedRegion],
+  );
+
   const handleLogin = useCallback(async () => {
     if (!username.trim() || !password.trim()) {
       setErrorMessage('Please enter both username and password.');
@@ -62,6 +81,9 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
     setErrorMessage('');
 
     try {
+      // Ensure the API client points to the selected region
+      await setRegion(selectedRegion);
+
       const tokens: AuthTokens = await authService.login({
         username: username.trim(),
         password,
@@ -82,7 +104,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       setIsLoading(false);
       setIsLoadingStore(false);
     }
-  }, [username, password, login, setIsLoadingStore]);
+  }, [username, password, selectedRegion, login, setIsLoadingStore]);
 
   const handleSSOLogin = useCallback(() => {
     navigation.navigate('SSOLogin');
@@ -97,6 +119,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   }, []);
 
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
+  const currentRegion = getRegionById(selectedRegion);
 
   // --- Render ---
   return (
@@ -139,6 +162,67 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
         {/* Login Form */}
         <View style={styles.formContainer}>
+          {/* Region Selector */}
+          <Menu
+            visible={regionMenuVisible}
+            onDismiss={() => setRegionMenuVisible(false)}
+            anchor={
+              <Pressable
+                onPress={() => setRegionMenuVisible(true)}
+                disabled={isLoading}
+              >
+                <View
+                  style={[
+                    styles.regionSelector,
+                    {
+                      borderColor: theme.colors.outline,
+                      backgroundColor: theme.colors.surface,
+                    },
+                  ]}
+                >
+                  <View style={styles.regionLeft}>
+                    <Icon
+                      name="earth"
+                      size={20}
+                      color={theme.colors.primary}
+                    />
+                    <View style={styles.regionTextContainer}>
+                      <Text
+                        variant="labelSmall"
+                        style={{ color: theme.colors.onSurfaceVariant }}
+                      >
+                        Control Plane
+                      </Text>
+                      <Text
+                        variant="bodyMedium"
+                        style={{ color: theme.colors.onSurface }}
+                      >
+                        {currentRegion.label} — {currentRegion.notes}
+                      </Text>
+                    </View>
+                  </View>
+                  <Icon
+                    name="chevron-down"
+                    size={20}
+                    color={theme.colors.onSurfaceVariant}
+                  />
+                </View>
+              </Pressable>
+            }
+            contentStyle={{ backgroundColor: theme.colors.surface }}
+          >
+            {CONTROL_PLANE_REGIONS.map((region) => (
+              <Menu.Item
+                key={region.id}
+                title={`${region.label} — ${region.notes}`}
+                leadingIcon={
+                  selectedRegion === region.id ? 'check' : 'earth'
+                }
+                onPress={() => handleRegionSelect(region.id)}
+              />
+            ))}
+          </Menu>
+
           <TextInput
             label="Username"
             value={username}
@@ -253,7 +337,12 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
         {/* Loading Overlay */}
         {isLoading && (
-          <View style={styles.loadingOverlay}>
+          <View
+            style={[
+              styles.loadingOverlay,
+              { backgroundColor: theme.dark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.6)' },
+            ]}
+          >
             <ActivityIndicator
               animating
               size="large"
@@ -316,6 +405,25 @@ const styles = StyleSheet.create({
     maxWidth: 400,
     alignSelf: 'center',
   },
+  regionSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  regionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  regionTextContainer: {
+    marginLeft: 12,
+    flex: 1,
+  },
   input: {
     marginBottom: 16,
   },
@@ -369,7 +477,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.6)',
   },
   snackbar: {
     marginBottom: 16,
