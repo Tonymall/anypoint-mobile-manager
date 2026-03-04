@@ -1,23 +1,30 @@
 // ============================================================
 // Root Layout - App Entry Point
-// Provides theme, navigation, and auth-gated routing
+// Provides theme, navigation, and data layer
 // ============================================================
 
 import React, { useEffect, useState } from 'react';
 import { useColorScheme } from 'react-native';
-import { Stack } from 'expo-router';
+import { Slot } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { lightTheme, darkTheme } from '../src/theme';
 import { useAppStore } from '../src/stores/appStore';
 import { useAuthStore } from '../src/stores/authStore';
-import { restoreRegion } from '../src/services/api';
+import {
+  restoreRegion,
+  setOrganizationHeader,
+  setEnvironmentHeader,
+  getStoredAccessToken,
+} from '../src/services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { QueryProvider } from '../src/providers/QueryProvider';
 
 export default function RootLayout() {
   const systemScheme = useColorScheme();
   const themeSetting = useAppStore((s) => s.settings.theme);
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const [ready, setReady] = useState(false);
 
   // Determine active theme
@@ -25,24 +32,61 @@ export default function RootLayout() {
     themeSetting === 'dark' || (themeSetting === 'system' && systemScheme === 'dark');
   const theme = isDark ? darkTheme : lightTheme;
 
-  // Restore persisted region on startup
+  // Wait for Zustand hydration + validate token on startup
   useEffect(() => {
-    restoreRegion().finally(() => setReady(true));
+    async function restore() {
+      // Wait for Zustand persist to finish rehydrating
+      const hasHydrated = useAuthStore.persist?.hasHydrated?.();
+      if (!hasHydrated) {
+        await new Promise<void>((resolve) => {
+          const unsub = useAuthStore.persist.onFinishHydration(() => {
+            unsub();
+            resolve();
+          });
+          if (useAuthStore.persist.hasHydrated()) {
+            unsub();
+            resolve();
+          }
+        });
+      }
+
+      // Remove old stale storage keys
+      await AsyncStorage.multiRemove([
+        'anypoint-auth-storage',
+        'anypoint-auth-v2',
+      ]).catch(() => {});
+
+      await restoreRegion();
+      const token = await getStoredAccessToken();
+      const state = useAuthStore.getState();
+
+      if (!token) {
+        if (state.isAuthenticated) {
+          state.logout();
+        }
+      } else {
+        if (state.currentOrganization) {
+          setOrganizationHeader(state.currentOrganization.id);
+        }
+        if (state.currentEnvironment) {
+          setEnvironmentHeader(state.currentEnvironment.id);
+        }
+      }
+      setReady(true);
+    }
+    restore();
   }, []);
 
   if (!ready) return null;
 
   return (
     <SafeAreaProvider>
-      <PaperProvider theme={theme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          {isAuthenticated ? (
-            <Stack.Screen name="(main)" />
-          ) : (
-            <Stack.Screen name="(auth)" />
-          )}
-        </Stack>
-      </PaperProvider>
+      <QueryProvider>
+        <PaperProvider theme={theme}>
+          <StatusBar style={isDark ? 'light' : 'dark'} />
+          <Slot />
+        </PaperProvider>
+      </QueryProvider>
     </SafeAreaProvider>
   );
 }

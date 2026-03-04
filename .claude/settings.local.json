@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(where node)",
+      "Bash(node --version)",
+      "Bash(cmd.exe /c \"npx tsc --noEmit 2>&1\")",
+      "Bash(cmd.exe /c \"npx tsc --noEmit\")",
+      "Bash(\"/c/Program Files/nodejs/npx.cmd\" tsc --noEmit --project \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager\\\\tsconfig.json\")",
+      "Bash(export PATH=\"/c/Program Files/nodejs:$PATH\")",
+      "Bash(npx tsc --noEmit --project \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager\\\\tsconfig.json\")",
+      "Bash(npx tsc --noEmit)",
+      "Bash(ls /c/Users/xTony/Documents/Projects/anypoint-mobile-manager/app/\\\\\\(main\\\\\\)/)",
+      "Bash(ls /c/Users/xTony/Documents/Projects/anypoint-mobile-manager/app/\\\\\\(auth\\\\\\)/)",
+      "Bash(where npx)",
+      "Bash(echo \"PATH: $PATH\")",
+      "Bash(export PATH=\"/c/Program Files/nodejs:/c/Users/xTony/AppData/Roaming/npm:$PATH\")",
+      "Bash(cmd /c \"npx tsc --noEmit 2>&1\")",
+      "Bash(cmd /c \"npx tsc --noEmit\")",
+      "Bash(npx.cmd tsc --noEmit)",
+      "Bash(node node_modules/.bin/tsc --noEmit)",
+      "Bash(export PATH=\"/c/Program Files/nodejs:/mingw64/usr/bin:/usr/bin:$PATH\")",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)"
+    ]
+  }
+}

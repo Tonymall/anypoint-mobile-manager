@@ -19,6 +19,7 @@ const API_MANAGER_BASE = '/apimanager/api/v1';
 
 /**
  * List all managed API instances for the given organization and environment.
+ * API Manager returns { assets: [...], total } or similar shapes.
  */
 export async function getManagedAPIs(
   organizationId: string,
@@ -29,12 +30,33 @@ export async function getManagedAPIs(
     sort?: string;
     query?: string;
   },
-): Promise<PaginatedResponse<ManagedAPI>> {
-  const { data } = await api.get<PaginatedResponse<ManagedAPI>>(
+): Promise<ManagedAPI[]> {
+  const { data } = await api.get(
     `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis`,
     { params },
   );
-  return data;
+  // Handle various Anypoint API Manager response shapes
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') {
+    const d = data as any;
+    const list = d.assets ?? d.instances ?? d.apis ?? d.data ?? d.items ?? [];
+    // The API Manager returns { assets: [{ apis: [...], assetId, ... }] }
+    // Each asset group contains a nested `apis` array with the actual instances.
+    // Flatten them into a single list of API instances.
+    if (Array.isArray(list) && list.length > 0 && Array.isArray(list[0]?.apis)) {
+      return list.flatMap((asset: any) =>
+        (asset.apis ?? []).map((instance: any) => ({
+          ...instance,
+          // Carry asset-level fields down to each instance for convenience
+          assetId: instance.assetId ?? asset.assetId,
+          assetVersion: instance.assetVersion ?? asset.assetVersion,
+          groupId: instance.groupId ?? asset.groupId,
+        })),
+      );
+    }
+    return list;
+  }
+  return [];
 }
 
 /**

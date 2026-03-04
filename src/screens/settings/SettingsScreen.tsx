@@ -2,7 +2,8 @@
 // Settings Screen - App preferences, region, theme, logout
 // ============================================================
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
+import { useRouter } from 'expo-router';
 import { StyleSheet, View, ScrollView } from 'react-native';
 import {
   Text,
@@ -14,8 +15,14 @@ import {
   RadioButton,
   Portal,
   Dialog,
+  Avatar,
+  Surface,
 } from 'react-native-paper';
+import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuthStore } from '../../stores/authStore';
 import { useAppStore } from '../../stores/appStore';
@@ -26,15 +33,22 @@ import type { ControlPlaneRegionId } from '../../types';
 
 const SettingsScreen: React.FC = () => {
   const theme = useTheme();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const user = useAuthStore((s) => s.user);
   const selectedRegion = useAuthStore((s) => s.selectedRegion);
   const setSelectedRegion = useAuthStore((s) => s.setSelectedRegion);
   const logout = useAuthStore((s) => s.logout);
+  const currentOrg = useAuthStore((s) => s.currentOrganization);
+  const currentEnv = useAuthStore((s) => s.currentEnvironment);
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
+  const queryClient = useQueryClient();
 
   const [regionDialogVisible, setRegionDialogVisible] = useState(false);
   const [themeDialogVisible, setThemeDialogVisible] = useState(false);
+  const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   const currentRegion = getRegionById(selectedRegion);
@@ -58,13 +72,26 @@ const SettingsScreen: React.FC = () => {
 
   const handleLogout = useCallback(async () => {
     setLoggingOut(true);
+    setLogoutDialogVisible(false);
     try {
       await authService.logout();
     } finally {
+      queryClient.clear();
       logout();
       setLoggingOut(false);
     }
-  }, [logout]);
+  }, [logout, queryClient]);
+
+  const handleSwitchOrg = useCallback(() => {
+    // Go back to org selection - keeps user/tokens but resets authenticated state
+    useAuthStore.setState({ isAuthenticated: false, currentOrganization: undefined, currentEnvironment: undefined });
+    router.replace('/(auth)/select-org' as any);
+  }, [router]);
+
+  const handleSwitchEnv = useCallback(() => {
+    useAuthStore.setState({ isAuthenticated: false, currentEnvironment: undefined });
+    router.replace('/(auth)/select-env' as any);
+  }, [router]);
 
   const themeLabel =
     settings.theme === 'system'
@@ -73,64 +100,123 @@ const SettingsScreen: React.FC = () => {
         ? 'Dark'
         : 'Light';
 
+  const themeIcon =
+    settings.theme === 'dark'
+      ? 'weather-night'
+      : settings.theme === 'light'
+        ? 'white-balance-sunny'
+        : 'theme-light-dark';
+
+  const initials = user
+    ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`
+    : '?';
+
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      style={styles.container}
+      contentContainerStyle={{ paddingTop: insets.top }}
       showsVerticalScrollIndicator={false}
     >
-      {/* Account Section */}
+      {/* Profile Header */}
+      <Surface style={styles.profileCard} elevation={2}>
+        <Avatar.Text
+          size={64}
+          label={initials}
+          style={{ backgroundColor: theme.colors.primaryContainer }}
+          labelStyle={{ color: theme.colors.primary, fontWeight: '700' }}
+        />
+        <Text variant="titleLarge" style={[styles.profileName, { color: theme.colors.onSurface }]}>
+          {user ? `${user.firstName} ${user.lastName}` : 'User'}
+        </Text>
+        <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+          {user?.email ?? ''}
+        </Text>
+        <View style={styles.profileChips}>
+          <View style={[styles.profileChip, { backgroundColor: theme.colors.primaryContainer }]}>
+            <Icon name="domain" size={14} color={theme.colors.primary} />
+            <Text variant="labelSmall" style={{ color: theme.colors.primary, marginLeft: 4 }}>
+              {currentOrg?.name ?? user?.organizationName ?? 'N/A'}
+            </Text>
+          </View>
+          <View style={[styles.profileChip, { backgroundColor: theme.colors.secondaryContainer }]}>
+            <Icon name="earth" size={14} color={theme.colors.secondary} />
+            <Text variant="labelSmall" style={{ color: theme.colors.secondary, marginLeft: 4 }}>
+              {currentRegion.label}
+            </Text>
+          </View>
+        </View>
+        {currentEnv && (
+          <View style={[styles.profileChip, { backgroundColor: currentEnv.isProduction ? '#3FB95018' : '#D2992218', marginTop: 8 }]}>
+            <Icon name={currentEnv.isProduction ? 'shield-check' : 'test-tube'} size={14} color={currentEnv.isProduction ? '#3FB950' : '#D29922'} />
+            <Text variant="labelSmall" style={{ color: currentEnv.isProduction ? '#3FB950' : '#D29922', marginLeft: 4 }}>
+              {currentEnv.name}
+            </Text>
+          </View>
+        )}
+      </Surface>
+
+      {/* Organization Section */}
       <List.Section>
-        <List.Subheader>Account</List.Subheader>
+        <List.Subheader style={styles.sectionHeader}>Organization</List.Subheader>
         <List.Item
-          title={user ? `${user.firstName} ${user.lastName}` : 'User'}
-          description={user?.email ?? ''}
-          left={(props) => <List.Icon {...props} icon="account-circle" />}
+          title="Switch Organization"
+          description={currentOrg?.name ?? 'Not selected'}
+          left={(props) => <List.Icon {...props} icon="domain" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={handleSwitchOrg}
+          style={styles.listItem}
         />
         <List.Item
-          title="Organization"
-          description={user?.organizationName ?? 'N/A'}
-          left={(props) => <List.Icon {...props} icon="domain" />}
+          title="Switch Environment"
+          description={currentEnv?.name ?? 'Not selected'}
+          left={(props) => <List.Icon {...props} icon="server" />}
+          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          onPress={handleSwitchEnv}
+          style={styles.listItem}
         />
       </List.Section>
 
-      <Divider />
+      <Divider style={styles.sectionDivider} />
 
       {/* Connection Section */}
       <List.Section>
-        <List.Subheader>Connection</List.Subheader>
+        <List.Subheader style={styles.sectionHeader}>Connection</List.Subheader>
         <List.Item
           title="Control Plane"
           description={`${currentRegion.label} — ${currentRegion.notes}`}
           left={(props) => <List.Icon {...props} icon="earth" />}
           right={(props) => <List.Icon {...props} icon="chevron-right" />}
           onPress={() => setRegionDialogVisible(true)}
+          style={styles.listItem}
         />
         <List.Item
           title="API Endpoint"
           description={currentRegion.url}
           left={(props) => <List.Icon {...props} icon="link-variant" />}
+          style={styles.listItem}
         />
       </List.Section>
 
-      <Divider />
+      <Divider style={styles.sectionDivider} />
 
       {/* Appearance */}
       <List.Section>
-        <List.Subheader>Appearance</List.Subheader>
+        <List.Subheader style={styles.sectionHeader}>Appearance</List.Subheader>
         <List.Item
           title="Theme"
           description={themeLabel}
-          left={(props) => <List.Icon {...props} icon="palette" />}
+          left={(props) => <List.Icon {...props} icon={themeIcon} />}
           right={(props) => <List.Icon {...props} icon="chevron-right" />}
           onPress={() => setThemeDialogVisible(true)}
+          style={styles.listItem}
         />
       </List.Section>
 
-      <Divider />
+      <Divider style={styles.sectionDivider} />
 
       {/* Notifications */}
       <List.Section>
-        <List.Subheader>Notifications</List.Subheader>
+        <List.Subheader style={styles.sectionHeader}>Notifications</List.Subheader>
         <List.Item
           title="Push Notifications"
           left={(props) => <List.Icon {...props} icon="bell" />}
@@ -142,6 +228,7 @@ const SettingsScreen: React.FC = () => {
               }
             />
           )}
+          style={styles.listItem}
         />
         <List.Item
           title="Critical Alerts"
@@ -159,6 +246,7 @@ const SettingsScreen: React.FC = () => {
               }
             />
           )}
+          style={styles.listItem}
         />
         <List.Item
           title="Deployment Updates"
@@ -176,37 +264,33 @@ const SettingsScreen: React.FC = () => {
               }
             />
           )}
+          style={styles.listItem}
         />
       </List.Section>
 
-      <Divider />
+      <Divider style={styles.sectionDivider} />
 
       {/* Security */}
       <List.Section>
-        <List.Subheader>Security</List.Subheader>
+        <List.Subheader style={styles.sectionHeader}>Security</List.Subheader>
         <List.Item
           title="Biometric Authentication"
+          description="Coming soon"
           left={(props) => <List.Icon {...props} icon="fingerprint" />}
-          right={() => (
-            <Switch
-              value={settings.biometricEnabled}
-              onValueChange={(val) =>
-                updateSettings({ biometricEnabled: val })
-              }
-            />
-          )}
+          style={[styles.listItem, { opacity: 0.5 }]}
         />
       </List.Section>
 
-      <Divider />
+      <Divider style={styles.sectionDivider} />
 
       {/* About */}
       <List.Section>
-        <List.Subheader>About</List.Subheader>
+        <List.Subheader style={styles.sectionHeader}>About</List.Subheader>
         <List.Item
           title="Version"
           description="1.0.0"
           left={(props) => <List.Icon {...props} icon="information" />}
+          style={styles.listItem}
         />
       </List.Section>
 
@@ -214,12 +298,13 @@ const SettingsScreen: React.FC = () => {
       <View style={styles.logoutContainer}>
         <Button
           mode="outlined"
-          onPress={handleLogout}
+          onPress={() => setLogoutDialogVisible(true)}
           loading={loggingOut}
           disabled={loggingOut}
           icon="logout"
           textColor={theme.colors.error}
           style={[styles.logoutButton, { borderColor: theme.colors.error }]}
+          contentStyle={styles.logoutButtonContent}
         >
           Sign Out
         </Button>
@@ -230,6 +315,7 @@ const SettingsScreen: React.FC = () => {
         <Dialog
           visible={regionDialogVisible}
           onDismiss={() => setRegionDialogVisible(false)}
+          style={styles.dialog}
         >
           <Dialog.Title>Select Control Plane</Dialog.Title>
           <Dialog.Content>
@@ -257,6 +343,7 @@ const SettingsScreen: React.FC = () => {
         <Dialog
           visible={themeDialogVisible}
           onDismiss={() => setThemeDialogVisible(false)}
+          style={styles.dialog}
         >
           <Dialog.Title>Choose Theme</Dialog.Title>
           <Dialog.Content>
@@ -274,21 +361,82 @@ const SettingsScreen: React.FC = () => {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
+      {/* Logout Confirmation Dialog */}
+      <Portal>
+        <Dialog
+          visible={logoutDialogVisible}
+          onDismiss={() => setLogoutDialogVisible(false)}
+          style={styles.dialog}
+        >
+          <Dialog.Title>Sign Out</Dialog.Title>
+          <Dialog.Content>
+            <Text variant="bodyMedium">
+              Are you sure you want to sign out? You will need to enter your credentials again to access the platform.
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setLogoutDialogVisible(false)}>Cancel</Button>
+            <Button onPress={handleLogout} textColor={theme.colors.error}>Sign Out</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </ScrollView>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  logoutContainer: {
-    padding: 24,
-    paddingBottom: 48,
-  },
-  logoutButton: {
-    borderRadius: 8,
-  },
-});
+const createStyles = (theme: MD3Theme) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.colors.background,
+    },
+    profileCard: {
+      margin: 16,
+      padding: 24,
+      borderRadius: 20,
+      alignItems: 'center',
+      backgroundColor: theme.colors.surface,
+    },
+    profileName: {
+      fontWeight: '700',
+      marginTop: 12,
+      marginBottom: 4,
+    },
+    profileChips: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 12,
+    },
+    profileChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 14,
+    },
+    sectionHeader: {
+      fontWeight: '600',
+    },
+    sectionDivider: {
+      marginHorizontal: 16,
+    },
+    listItem: {
+      paddingHorizontal: 8,
+    },
+    logoutContainer: {
+      padding: 24,
+      paddingBottom: 48,
+    },
+    logoutButton: {
+      borderRadius: 12,
+    },
+    logoutButtonContent: {
+      paddingVertical: 4,
+    },
+    dialog: {
+      borderRadius: 20,
+    },
+  });
 
 export default SettingsScreen;

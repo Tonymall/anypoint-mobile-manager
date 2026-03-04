@@ -39,7 +39,7 @@ export interface AppActions {
 
 // --- Default Settings ---
 const defaultSettings: AppSettings = {
-  theme: 'system',
+  theme: 'dark',
   biometricEnabled: false,
   pushNotificationsEnabled: true,
   notificationPreferences: {

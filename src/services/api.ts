@@ -167,12 +167,14 @@ api.interceptors.response.use(
       }
 
       // Use currentBaseUrl so the refresh goes to the correct control plane
+      const params = new URLSearchParams();
+      params.append('grant_type', 'refresh_token');
+      params.append('refresh_token', refreshToken);
+
       const { data } = await axios.post(
         `${currentBaseUrl}/accounts/api/v2/oauth2/token`,
-        {
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-        },
+        params,
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
       );
 
       const newAccessToken: string = data.access_token;
@@ -188,6 +190,9 @@ api.interceptors.response.use(
     } catch (refreshError) {
       processQueue(refreshError, null);
       await clearTokens();
+      // Trigger store logout so the app returns to the login screen
+      const { useAuthStore } = require('../stores/authStore');
+      useAuthStore.getState().logout();
       return Promise.reject(refreshError);
     } finally {
       isRefreshing = false;

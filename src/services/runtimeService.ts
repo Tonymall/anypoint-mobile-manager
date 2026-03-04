@@ -18,17 +18,24 @@ const RUNTIME_BASE = '/armui/api/v1';
 
 /**
  * List all applications for the current environment.
+ * CloudHub v2 returns an array of applications directly.
  */
 export async function getApplications(params?: {
   environmentId?: string;
   offset?: number;
   limit?: number;
-}): Promise<PaginatedResponse<Application>> {
-  const { data } = await api.get<PaginatedResponse<Application>>(
+}): Promise<Application[]> {
+  const { data } = await api.get(
     `${CLOUDHUB_BASE}/applications`,
     { params },
   );
-  return data;
+  // CloudHub returns an array directly; handle any shape gracefully
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === 'object') {
+    const d = data as any;
+    return d.data ?? d.applications ?? d.items ?? [];
+  }
+  return [];
 }
 
 /**

@@ -70,7 +70,7 @@ export interface Environment {
 }
 
 // --- Applications (Runtime Manager) ---
-export type AppStatus = 'STARTED' | 'STOPPED' | 'FAILED' | 'DEPLOYING' | 'UNDEPLOYING' | 'PARTIALLY_STARTED';
+export type AppStatus = 'STARTED' | 'STOPPED' | 'FAILED' | 'DEPLOYING' | 'UNDEPLOYING' | 'PARTIALLY_STARTED' | 'UNDEPLOYED';
 export type DeploymentTarget = 'cloudhub' | 'rtf' | 'hybrid' | 'cloudhub2';
 
 export interface Application {

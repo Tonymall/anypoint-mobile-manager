@@ -17,6 +17,7 @@ import {
   Snackbar,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useRouter } from 'expo-router';
 
 interface SSOProvider {
   id: 'okta' | 'azure_ad' | 'saml';
@@ -46,12 +47,9 @@ const SSO_PROVIDERS: SSOProvider[] = [
   },
 ];
 
-interface SSOLoginScreenProps {
-  navigation: any;
-}
-
-const SSOLoginScreen: React.FC<SSOLoginScreenProps> = ({ navigation }) => {
+const SSOLoginScreen: React.FC = () => {
   const theme = useTheme();
+  const router = useRouter();
 
   // --- State ---
   const [selectedProvider, setSelectedProvider] = useState<string>('okta');
@@ -66,9 +64,9 @@ const SSOLoginScreen: React.FC<SSOLoginScreenProps> = ({ navigation }) => {
       setShowWebView(false);
       setIsLoading(false);
     } else {
-      navigation.goBack();
+      router.back();
     }
-  }, [navigation, showWebView]);
+  }, [router, showWebView]);
 
   const handleContinue = useCallback(() => {
     setIsLoading(true);

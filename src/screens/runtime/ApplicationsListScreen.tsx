@@ -1,6 +1,6 @@
 // ============================================================
 // Runtime Manager - Applications List Screen
-// Lists all deployed applications with filtering and search
+// Lists all deployed applications with search & single-row filters
 // ============================================================
 
 import React, { useState, useCallback, useMemo } from 'react';
@@ -16,202 +16,39 @@ import {
   Card,
   Text,
   Chip,
-  FAB,
   Badge,
   Icon,
   useTheme,
   Divider,
+  Portal,
+  Modal,
+  RadioButton,
+  Button,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
+import { useRouter } from 'expo-router';
 
-import type { Application, AppStatus, DeploymentTarget } from '../../types';
+import type { Application, AppStatus } from '../../types';
 import { statusColors } from '../../theme';
-
-// --- Mock Data ---
-const MOCK_APPLICATIONS: Application[] = [
-  {
-    id: 'app-001',
-    name: 'order-processing-api',
-    domain: 'order-processing-api.us-e2.cloudhub.io',
-    status: 'STARTED',
-    deploymentTarget: 'cloudhub',
-    lastUpdateTime: '2026-03-03T08:15:00Z',
-    fileName: 'order-processing-api-2.4.1.jar',
-    muleVersion: '4.6.2',
-    region: 'us-east-2',
-    workers: {
-      type: { name: 'Micro', weight: 0.1, cpu: '0.1 vCores', memory: '500 MB' },
-      amount: 2,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 42, memoryUsage: 310, memoryTotal: 500, threadCount: 28 },
-    properties: { 'env': 'production', 'db.host': 'rds-prod.amazonaws.com' },
-    persistentQueues: true,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-002',
-    name: 'customer-sapi',
-    domain: 'customer-sapi.us-e2.cloudhub.io',
-    status: 'STARTED',
-    deploymentTarget: 'cloudhub',
-    lastUpdateTime: '2026-03-02T14:30:00Z',
-    fileName: 'customer-sapi-1.8.0.jar',
-    muleVersion: '4.6.2',
-    region: 'us-east-2',
-    workers: {
-      type: { name: 'Small', weight: 0.2, cpu: '0.2 vCores', memory: '1 GB' },
-      amount: 1,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 18, memoryUsage: 512, memoryTotal: 1024, threadCount: 15 },
-    properties: { 'env': 'production' },
-    persistentQueues: false,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-003',
-    name: 'payment-gateway',
-    domain: 'payment-gateway.us-e1.cloudhub.io',
-    status: 'FAILED',
-    deploymentTarget: 'cloudhub',
-    lastUpdateTime: '2026-03-03T06:45:00Z',
-    fileName: 'payment-gateway-3.1.2.jar',
-    muleVersion: '4.5.4',
-    region: 'us-east-1',
-    workers: {
-      type: { name: 'Medium', weight: 1, cpu: '1 vCore', memory: '1.5 GB' },
-      amount: 2,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 0, memoryUsage: 0, memoryTotal: 1536, threadCount: 0 },
-    properties: { 'env': 'production', 'stripe.api.key': '****' },
-    persistentQueues: true,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-004',
-    name: 'inventory-sync-worker',
-    domain: 'inventory-sync-worker.runtime-fabric.local',
-    status: 'STARTED',
-    deploymentTarget: 'rtf',
-    lastUpdateTime: '2026-03-01T20:00:00Z',
-    fileName: 'inventory-sync-worker-1.2.0.jar',
-    muleVersion: '4.6.2',
-    region: 'us-west-2',
-    workers: {
-      type: { name: 'Large', weight: 2, cpu: '2 vCores', memory: '3.5 GB' },
-      amount: 3,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 65, memoryUsage: 2800, memoryTotal: 3584, threadCount: 54 },
-    properties: { 'env': 'production', 'warehouse.endpoint': 'https://wms.internal.com' },
-    persistentQueues: true,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-005',
-    name: 'notification-service',
-    domain: 'notification-service.hybrid.local',
-    status: 'STOPPED',
-    deploymentTarget: 'hybrid',
-    lastUpdateTime: '2026-02-28T12:00:00Z',
-    fileName: 'notification-service-2.0.5.jar',
-    muleVersion: '4.4.0',
-    region: 'eu-west-1',
-    workers: {
-      type: { name: 'Small', weight: 0.2, cpu: '0.2 vCores', memory: '1 GB' },
-      amount: 1,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 0, memoryUsage: 0, memoryTotal: 1024, threadCount: 0 },
-    properties: { 'env': 'staging' },
-    persistentQueues: false,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-006',
-    name: 'shipping-eapi',
-    domain: 'shipping-eapi.us-e2.cloudhub.io',
-    status: 'DEPLOYING',
-    deploymentTarget: 'cloudhub',
-    lastUpdateTime: '2026-03-03T09:02:00Z',
-    fileName: 'shipping-eapi-1.0.0-SNAPSHOT.jar',
-    muleVersion: '4.6.2',
-    region: 'us-east-2',
-    workers: {
-      type: { name: 'Micro', weight: 0.1, cpu: '0.1 vCores', memory: '500 MB' },
-      amount: 1,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 0, memoryUsage: 0, memoryTotal: 500, threadCount: 0 },
-    properties: {},
-    persistentQueues: false,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-007',
-    name: 'analytics-collector',
-    domain: 'analytics-collector.runtime-fabric.local',
-    status: 'STARTED',
-    deploymentTarget: 'rtf',
-    lastUpdateTime: '2026-02-27T16:45:00Z',
-    fileName: 'analytics-collector-4.2.1.jar',
-    muleVersion: '4.6.1',
-    region: 'us-east-1',
-    workers: {
-      type: { name: 'XLarge', weight: 4, cpu: '4 vCores', memory: '7.5 GB' },
-      amount: 2,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 78, memoryUsage: 5800, memoryTotal: 7680, threadCount: 120 },
-    properties: { 'env': 'production', 'kafka.brokers': 'kafka-01:9092,kafka-02:9092' },
-    persistentQueues: true,
-    loggingEnabled: true,
-  },
-  {
-    id: 'app-008',
-    name: 'crm-sync-batch',
-    domain: 'crm-sync-batch.hybrid.local',
-    status: 'STARTED',
-    deploymentTarget: 'hybrid',
-    lastUpdateTime: '2026-03-02T22:30:00Z',
-    fileName: 'crm-sync-batch-1.5.3.jar',
-    muleVersion: '4.5.4',
-    region: 'eu-central-1',
-    workers: {
-      type: { name: 'Medium', weight: 1, cpu: '1 vCore', memory: '1.5 GB' },
-      amount: 1,
-      remainingOrgWorkers: 8,
-    },
-    monitoring: { cpuUsage: 35, memoryUsage: 890, memoryTotal: 1536, threadCount: 22 },
-    properties: { 'env': 'production', 'sfdc.username': 'integration@acme.com' },
-    persistentQueues: true,
-    loggingEnabled: true,
-  },
-];
+import { useApplications } from '../../hooks/queries';
+import { getAppName, getAppId, getMuleVersion, getLastUpdateTime, getWorkerInfo, getDeploymentTarget } from '../../utils/appHelpers';
+import LoadingState from '../../components/common/LoadingState';
+import ErrorState from '../../components/common/ErrorState';
 
 // --- Filter Definitions ---
 type StatusFilter = AppStatus | 'ALL';
-type TargetFilter = DeploymentTarget | 'ALL';
 
-const STATUS_FILTERS: { label: string; value: StatusFilter }[] = [
-  { label: 'All', value: 'ALL' },
-  { label: 'Started', value: 'STARTED' },
+const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
+  { label: 'All Statuses', value: 'ALL' },
+  { label: 'Running', value: 'STARTED' },
   { label: 'Stopped', value: 'STOPPED' },
   { label: 'Failed', value: 'FAILED' },
   { label: 'Deploying', value: 'DEPLOYING' },
-];
-
-const TARGET_FILTERS: { label: string; value: TargetFilter }[] = [
-  { label: 'All Targets', value: 'ALL' },
-  { label: 'CloudHub', value: 'cloudhub' },
-  { label: 'RTF', value: 'rtf' },
-  { label: 'Hybrid', value: 'hybrid' },
+  { label: 'Undeployed', value: 'UNDEPLOYED' },
 ];
 
 // --- Helpers ---
-const getStatusColor = (status: AppStatus): string => {
+const getStatusColor = (status: string): string => {
   switch (status) {
     case 'STARTED':
       return statusColors.started;
@@ -220,48 +57,35 @@ const getStatusColor = (status: AppStatus): string => {
     case 'FAILED':
       return statusColors.failed;
     case 'DEPLOYING':
-      return statusColors.deploying;
     case 'UNDEPLOYING':
       return statusColors.deploying;
     case 'PARTIALLY_STARTED':
       return statusColors.pending;
+    case 'UNDEPLOYED':
+      return '#78716C';
     default:
       return statusColors.stopped;
   }
 };
 
-const getTargetIcon = (target: DeploymentTarget): string => {
-  switch (target) {
-    case 'cloudhub':
-    case 'cloudhub2':
-      return 'cloud';
-    case 'rtf':
-      return 'server';
-    case 'hybrid':
-      return 'desktop-tower';
-    default:
-      return 'help-circle';
+const getStatusLabel = (status: string): string => {
+  switch (status) {
+    case 'STARTED': return 'Running';
+    case 'STOPPED': return 'Stopped';
+    case 'FAILED': return 'Failed';
+    case 'DEPLOYING': return 'Deploying';
+    case 'UNDEPLOYING': return 'Undeploying';
+    case 'PARTIALLY_STARTED': return 'Partial';
+    case 'UNDEPLOYED': return 'Undeployed';
+    default: return status;
   }
 };
 
-const getTargetLabel = (target: DeploymentTarget): string => {
-  switch (target) {
-    case 'cloudhub':
-      return 'CloudHub';
-    case 'cloudhub2':
-      return 'CloudHub 2.0';
-    case 'rtf':
-      return 'Runtime Fabric';
-    case 'hybrid':
-      return 'Hybrid';
-    default:
-      return target;
-  }
-};
-
-const formatRelativeTime = (dateString: string): string => {
+const formatRelativeTime = (raw: any): string => {
+  if (!raw) return '';
+  const date = typeof raw === 'number' ? new Date(raw) : new Date(raw);
+  if (isNaN(date.getTime())) return '';
   const now = new Date();
-  const date = new Date(dateString);
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
@@ -275,96 +99,120 @@ const formatRelativeTime = (dateString: string): string => {
 };
 
 // --- Component ---
-const ApplicationsListScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+const ApplicationsListScreen: React.FC = () => {
   const theme = useTheme();
+  const router = useRouter();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
-  const [targetFilter, setTargetFilter] = useState<TargetFilter>('ALL');
-  const [refreshing, setRefreshing] = useState(false);
-  const [applications] = useState<Application[]>(MOCK_APPLICATIONS);
+  const [filterVisible, setFilterVisible] = useState(false);
+
+  const {
+    data: applications,
+    isLoading,
+    error,
+    refetch,
+    isRefetching,
+  } = useApplications();
+
+  const appsList = applications ?? [];
+
+  // Count apps by status for filter badges
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    appsList.forEach((app: any) => {
+      const s = app.status ?? 'UNKNOWN';
+      counts[s] = (counts[s] ?? 0) + 1;
+    });
+    return counts;
+  }, [appsList]);
 
   const filteredApps = useMemo(() => {
-    return applications.filter((app) => {
+    return appsList.filter((app: any) => {
+      const name = getAppName(app);
+      const domain = app.domain ?? '';
       const matchesSearch =
         searchQuery === '' ||
-        app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        app.domain.toLowerCase().includes(searchQuery.toLowerCase());
+        name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        domain.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesStatus = statusFilter === 'ALL' || app.status === statusFilter;
-      const matchesTarget = targetFilter === 'ALL' || app.deploymentTarget === targetFilter;
-      return matchesSearch && matchesStatus && matchesTarget;
+      return matchesSearch && matchesStatus;
     });
-  }, [applications, searchQuery, statusFilter, targetFilter]);
+  }, [appsList, searchQuery, statusFilter]);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1500);
-  }, []);
+  const activeFilterLabel = statusFilter === 'ALL'
+    ? `All (${appsList.length})`
+    : `${getStatusLabel(statusFilter)} (${statusCounts[statusFilter] ?? 0})`;
 
   const renderApplicationCard = useCallback(
     ({ item }: ListRenderItemInfo<Application>) => {
-      const color = getStatusColor(item.status);
+      const app = item as any;
+      const color = getStatusColor(app.status);
+      const appName = getAppName(app);
+      const muleVer = getMuleVersion(app);
+      const workerInfo = getWorkerInfo(app);
+      const target = getDeploymentTarget(app);
 
       return (
         <Card
           style={styles.appCard}
-          mode="elevated"
-          onPress={() => navigation.navigate('ApplicationDetail', { app: item })}
+          mode="contained"
+          onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: getAppId(app) } })}
         >
           <Card.Content style={styles.cardContent}>
             <View style={styles.cardHeader}>
-              <View style={styles.cardTitleRow}>
-                <Icon
-                  source={getTargetIcon(item.deploymentTarget)}
-                  size={20}
-                  color={theme.colors.primary}
-                />
+              {/* Status indicator + name */}
+              <View style={[styles.statusIndicator, { backgroundColor: color }]} />
+              <View style={styles.appNameWrap}>
                 <Text variant="titleMedium" style={styles.appName} numberOfLines={1}>
-                  {item.name}
+                  {appName}
+                </Text>
+                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }} numberOfLines={1}>
+                  {app.fullDomain ?? app.domain ?? ''}
                 </Text>
               </View>
-              <Badge
-                style={[styles.statusBadge, { backgroundColor: color }]}
-                size={24}
-              >
-                {item.status}
-              </Badge>
+              <View style={[styles.statusChip, { backgroundColor: color + '20', borderColor: color + '40' }]}>
+                <Text style={{ color, fontSize: 11, fontWeight: '700' }}>
+                  {getStatusLabel(app.status)}
+                </Text>
+              </View>
             </View>
 
-            <Divider style={styles.cardDivider} />
-
-            <View style={styles.cardDetails}>
-              <View style={styles.detailRow}>
-                <Icon source="target" size={14} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={styles.detailText}>
-                  {getTargetLabel(item.deploymentTarget)}
+            {/* Info row */}
+            <View style={styles.infoRow}>
+              {app.region && (
+                <View style={styles.infoItem}>
+                  <Icon source="map-marker" size={13} color={theme.colors.onSurfaceVariant} />
+                  <Text variant="bodySmall" style={styles.infoText}>{app.region}</Text>
+                </View>
+              )}
+              {muleVer ? (
+                <View style={styles.infoItem}>
+                  <Icon source="puzzle" size={13} color={theme.colors.onSurfaceVariant} />
+                  <Text variant="bodySmall" style={styles.infoText}>Mule {muleVer}</Text>
+                </View>
+              ) : null}
+              <View style={styles.infoItem}>
+                <Icon source="server" size={13} color={theme.colors.onSurfaceVariant} />
+                <Text variant="bodySmall" style={styles.infoText}>
+                  {workerInfo.amount}x {workerInfo.typeName}
                 </Text>
               </View>
-              <View style={styles.detailRow}>
-                <Icon source="map-marker" size={14} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={styles.detailText}>
-                  {item.region}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Icon source="account-group" size={14} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={styles.detailText}>
-                  {item.workers.amount} x {item.workers.type.name}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Icon source="clock-outline" size={14} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={styles.detailText}>
-                  {formatRelativeTime(item.lastUpdateTime)}
-                </Text>
-              </View>
+              {app.lastUpdateTime && (
+                <View style={styles.infoItem}>
+                  <Icon source="clock-outline" size={13} color={theme.colors.onSurfaceVariant} />
+                  <Text variant="bodySmall" style={styles.infoText}>
+                    {formatRelativeTime(app.lastUpdateTime)}
+                  </Text>
+                </View>
+              )}
             </View>
           </Card.Content>
         </Card>
       );
     },
-    [navigation, styles, theme],
+    [styles, theme, router],
   );
 
   const renderEmptyState = useCallback(
@@ -375,100 +223,121 @@ const ApplicationsListScreen: React.FC<{ navigation: any }> = ({ navigation }) =
           No applications found
         </Text>
         <Text variant="bodyMedium" style={styles.emptySubtitle}>
-          {searchQuery || statusFilter !== 'ALL' || targetFilter !== 'ALL'
+          {searchQuery || statusFilter !== 'ALL'
             ? 'Try adjusting your filters or search query.'
-            : 'Deploy your first application to get started.'}
+            : 'No applications deployed in this environment.'}
         </Text>
       </View>
     ),
-    [searchQuery, statusFilter, targetFilter, styles, theme],
+    [searchQuery, statusFilter, styles, theme],
   );
+
+  if (isLoading) {
+    return <LoadingState message="Loading applications..." />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        message={(error as Error).message}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Searchbar
-        placeholder="Search applications..."
-        onChangeText={setSearchQuery}
-        value={searchQuery}
-        style={styles.searchBar}
-        inputStyle={styles.searchInput}
-      />
-
-      {/* Status filter chips */}
-      <View style={styles.filterSection}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={STATUS_FILTERS}
-          keyExtractor={(item) => item.value}
-          contentContainerStyle={styles.chipRow}
-          renderItem={({ item }) => (
-            <Chip
-              selected={statusFilter === item.value}
-              onPress={() => setStatusFilter(item.value)}
-              style={styles.filterChip}
-              showSelectedOverlay
-              compact
-            >
-              {item.label}
-            </Chip>
-          )}
+      {/* Search + Filter row */}
+      <View style={styles.topBar}>
+        <Searchbar
+          placeholder="Search apps..."
+          onChangeText={setSearchQuery}
+          value={searchQuery}
+          style={styles.searchBar}
+          inputStyle={styles.searchInput}
         />
       </View>
 
-      {/* Target filter chips */}
-      <View style={styles.filterSection}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={TARGET_FILTERS}
-          keyExtractor={(item) => item.value}
-          contentContainerStyle={styles.chipRow}
-          renderItem={({ item }) => (
-            <Chip
-              selected={targetFilter === item.value}
-              onPress={() => setTargetFilter(item.value)}
-              style={styles.filterChip}
-              showSelectedOverlay
-              compact
-              icon={item.value !== 'ALL' ? getTargetIcon(item.value as DeploymentTarget) : undefined}
-            >
-              {item.label}
-            </Chip>
-          )}
-        />
+      {/* Filter chips row */}
+      <View style={styles.filterRow}>
+        <Chip
+          icon="filter-variant"
+          onPress={() => setFilterVisible(true)}
+          style={styles.filterChip}
+          selected={statusFilter !== 'ALL'}
+          showSelectedOverlay
+          compact
+        >
+          {activeFilterLabel}
+        </Chip>
+        {statusFilter !== 'ALL' && (
+          <Chip
+            icon="close"
+            onPress={() => setStatusFilter('ALL')}
+            style={styles.clearChip}
+            compact
+          >
+            Clear
+          </Chip>
+        )}
+        <View style={{ flex: 1 }} />
+        <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
+          {filteredApps.length} app{filteredApps.length !== 1 ? 's' : ''}
+        </Text>
       </View>
-
-      {/* Results count */}
-      <Text variant="labelMedium" style={styles.resultsCount}>
-        {filteredApps.length} application{filteredApps.length !== 1 ? 's' : ''}
-      </Text>
 
       {/* Applications list */}
       <FlatList
         data={filteredApps}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item: any) => getAppId(item)}
         renderItem={renderApplicationCard}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
           <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
+            refreshing={isRefetching}
+            onRefresh={() => refetch()}
             colors={[theme.colors.primary]}
           />
         }
         showsVerticalScrollIndicator={false}
       />
 
-      {/* Deploy FAB */}
-      <FAB
-        icon="rocket-launch"
-        label="Deploy"
-        style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-        color={theme.colors.onPrimary}
-        onPress={() => navigation.navigate('Deploy')}
-      />
+      {/* Filter Modal */}
+      <Portal>
+        <Modal
+          visible={filterVisible}
+          onDismiss={() => setFilterVisible(false)}
+          contentContainerStyle={[styles.filterModal, { backgroundColor: theme.colors.surface }]}
+        >
+          <Text variant="titleMedium" style={{ fontWeight: '700', marginBottom: 16 }}>
+            Filter by Status
+          </Text>
+          <RadioButton.Group
+            value={statusFilter}
+            onValueChange={(v) => {
+              setStatusFilter(v as StatusFilter);
+              setFilterVisible(false);
+            }}
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <RadioButton.Item
+                key={opt.value}
+                label={`${opt.label}${opt.value !== 'ALL' ? ` (${statusCounts[opt.value] ?? 0})` : ` (${appsList.length})`}`}
+                value={opt.value}
+                style={styles.radioItem}
+              />
+            ))}
+          </RadioButton.Group>
+          <Button
+            mode="text"
+            onPress={() => setFilterVisible(false)}
+            style={{ marginTop: 8 }}
+          >
+            Cancel
+          </Button>
+        </Modal>
+      </Portal>
     </View>
   );
 };
@@ -480,79 +349,87 @@ const createStyles = (theme: MD3Theme) =>
       flex: 1,
       backgroundColor: theme.colors.background,
     },
+    topBar: {
+      paddingHorizontal: 16,
+      paddingTop: 12,
+      paddingBottom: 4,
+    },
     searchBar: {
-      margin: 16,
-      marginBottom: 8,
-      elevation: 2,
+      elevation: 0,
+      backgroundColor: theme.colors.surfaceVariant,
+      borderRadius: 14,
     },
     searchInput: {
       fontSize: 14,
     },
-    filterSection: {
-      marginBottom: 4,
-    },
-    chipRow: {
+    filterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
       paddingHorizontal: 16,
+      paddingVertical: 8,
       gap: 8,
     },
     filterChip: {
-      marginRight: 0,
+      borderRadius: 10,
     },
-    resultsCount: {
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      color: theme.colors.onSurfaceVariant,
+    clearChip: {
+      borderRadius: 10,
     },
     listContent: {
       paddingHorizontal: 16,
-      paddingBottom: 96,
+      paddingBottom: 32,
     },
     appCard: {
-      marginBottom: 12,
+      marginBottom: 10,
       backgroundColor: theme.colors.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: theme.colors.surfaceVariant,
     },
     cardContent: {
-      paddingVertical: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 14,
     },
     cardHeader: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: 8,
+      gap: 10,
     },
-    cardTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
+    statusIndicator: {
+      width: 4,
+      height: 36,
+      borderRadius: 2,
+    },
+    appNameWrap: {
       flex: 1,
-      marginRight: 12,
-      gap: 8,
     },
     appName: {
-      flex: 1,
       fontWeight: '600',
+      color: theme.colors.onSurface,
     },
-    statusBadge: {
+    statusChip: {
       paddingHorizontal: 8,
-      borderRadius: 12,
-      fontSize: 10,
-      color: '#FFFFFF',
-      fontWeight: '700',
+      paddingVertical: 3,
+      borderRadius: 8,
+      borderWidth: 1,
     },
-    cardDivider: {
-      marginVertical: 8,
-    },
-    cardDetails: {
+    infoRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 12,
+      marginTop: 10,
+      paddingTop: 10,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.outlineVariant,
     },
-    detailRow: {
+    infoItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 4,
+      gap: 3,
     },
-    detailText: {
+    infoText: {
       color: theme.colors.onSurfaceVariant,
+      fontSize: 12,
     },
     emptyState: {
       alignItems: 'center',
@@ -569,10 +446,13 @@ const createStyles = (theme: MD3Theme) =>
       textAlign: 'center',
       color: theme.colors.onSurfaceVariant,
     },
-    fab: {
-      position: 'absolute',
-      right: 16,
-      bottom: 24,
+    filterModal: {
+      margin: 24,
+      padding: 24,
+      borderRadius: 20,
+    },
+    radioItem: {
+      paddingVertical: 2,
     },
   });
 

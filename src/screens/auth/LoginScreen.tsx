@@ -23,8 +23,10 @@ import {
   ActivityIndicator,
   Divider,
   Menu,
+  Surface,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
 import * as authService from '../../services/authService';
@@ -32,12 +34,9 @@ import { setRegion } from '../../services/api';
 import { CONTROL_PLANE_REGIONS, getRegionById } from '../../config/regions';
 import type { AuthTokens, User, ControlPlaneRegionId } from '../../types';
 
-interface LoginScreenProps {
-  navigation: any;
-}
-
-const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
+const LoginScreen: React.FC = () => {
   const theme = useTheme();
+  const router = useRouter();
 
   // --- Form State ---
   const [username, setUsername] = useState<string>('');
@@ -56,7 +55,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   const [snackbarVisible, setSnackbarVisible] = useState<boolean>(false);
 
   // --- Store ---
-  const login = useAuthStore((state) => state.login);
+  const loginPending = useAuthStore((state) => state.loginPending);
   const setIsLoadingStore = useAuthStore((state) => state.setIsLoading);
 
   // --- Handlers ---
@@ -91,8 +90,9 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
 
       const user: User = await authService.getCurrentUser();
 
-      login(user, tokens);
-      // Navigation to main app is handled by the auth navigator
+      // Store user & tokens but keep isAuthenticated false until org/env selected
+      loginPending(user, tokens);
+      router.push('/(auth)/select-org' as any);
     } catch (error: any) {
       const message =
         error?.response?.data?.message ??
@@ -104,11 +104,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       setIsLoading(false);
       setIsLoadingStore(false);
     }
-  }, [username, password, selectedRegion, login, setIsLoadingStore]);
+  }, [username, password, selectedRegion, loginPending, setIsLoadingStore, router]);
 
   const handleSSOLogin = useCallback(() => {
-    navigation.navigate('SSOLogin');
-  }, [navigation]);
+    router.push('/(auth)/sso');
+  }, [router]);
 
   const handleBiometricToggle = useCallback((value: boolean) => {
     setBiometricEnabled(value);
@@ -142,7 +142,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
           >
             <Icon
               name="api"
-              size={48}
+              size={44}
               color={theme.colors.primary}
             />
           </View>
@@ -161,8 +161,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
         </View>
 
         {/* Login Form */}
-        <View style={styles.formContainer}>
+        <Surface style={[styles.formCard, { backgroundColor: theme.colors.surface }]} elevation={2}>
           {/* Region Selector */}
+          <Text variant="labelMedium" style={[styles.fieldLabel, { color: theme.colors.onSurfaceVariant }]}>
+            Control Plane Region
+          </Text>
           <Menu
             visible={regionMenuVisible}
             onDismiss={() => setRegionMenuVisible(false)}
@@ -176,28 +179,30 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
                     styles.regionSelector,
                     {
                       borderColor: theme.colors.outline,
-                      backgroundColor: theme.colors.surface,
+                      backgroundColor: theme.colors.background,
                     },
                   ]}
                 >
                   <View style={styles.regionLeft}>
-                    <Icon
-                      name="earth"
-                      size={20}
-                      color={theme.colors.primary}
-                    />
+                    <View style={[styles.regionIconWrap, { backgroundColor: theme.colors.primaryContainer }]}>
+                      <Icon
+                        name="earth"
+                        size={18}
+                        color={theme.colors.primary}
+                      />
+                    </View>
                     <View style={styles.regionTextContainer}>
                       <Text
-                        variant="labelSmall"
-                        style={{ color: theme.colors.onSurfaceVariant }}
+                        variant="bodyMedium"
+                        style={{ color: theme.colors.onSurface, fontWeight: '600' }}
                       >
-                        Control Plane
+                        {currentRegion.label}
                       </Text>
                       <Text
-                        variant="bodyMedium"
-                        style={{ color: theme.colors.onSurface }}
+                        variant="bodySmall"
+                        style={{ color: theme.colors.onSurfaceVariant }}
                       >
-                        {currentRegion.label} — {currentRegion.notes}
+                        {currentRegion.notes}
                       </Text>
                     </View>
                   </View>
@@ -216,12 +221,14 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
                 key={region.id}
                 title={`${region.label} — ${region.notes}`}
                 leadingIcon={
-                  selectedRegion === region.id ? 'check' : 'earth'
+                  selectedRegion === region.id ? 'check-circle' : 'earth'
                 }
                 onPress={() => handleRegionSelect(region.id)}
               />
             ))}
           </Menu>
+
+          <Divider style={styles.formDivider} />
 
           <TextInput
             label="Username"
@@ -235,6 +242,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             disabled={isLoading}
             style={styles.input}
             returnKeyType="next"
+            outlineStyle={styles.inputOutline}
           />
 
           <TextInput
@@ -257,10 +265,11 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             style={styles.input}
             returnKeyType="done"
             onSubmitEditing={handleLogin}
+            outlineStyle={styles.inputOutline}
           />
 
-          {/* Biometric Toggle */}
-          <View style={styles.biometricRow}>
+          {/* Biometric Toggle — not yet implemented */}
+          <View style={[styles.biometricRow, { opacity: 0.5 }]}>
             <View style={styles.biometricLabel}>
               <Icon
                 name="fingerprint"
@@ -271,14 +280,12 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
                 variant="bodyMedium"
                 style={[styles.biometricText, { color: theme.colors.onSurfaceVariant }]}
               >
-                Enable Biometric Login
+                Biometric Login
               </Text>
             </View>
-            <Switch
-              value={biometricEnabled}
-              onValueChange={handleBiometricToggle}
-              disabled={isLoading}
-            />
+            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
+              Coming soon
+            </Text>
           </View>
 
           {/* Sign In Button */}
@@ -317,7 +324,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
           >
             Sign in with SSO
           </Button>
-        </View>
+        </Surface>
 
         {/* Footer */}
         <View style={styles.footer}>
@@ -329,7 +336,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
           </Text>
           <Text
             variant="bodySmall"
-            style={{ color: theme.colors.outline }}
+            style={{ color: theme.colors.outline, marginTop: 2 }}
           >
             Version 1.0.0
           </Text>
@@ -382,12 +389,12 @@ const styles = StyleSheet.create({
   },
   brandingContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+    marginBottom: 32,
   },
   logoCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -400,38 +407,56 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-  formContainer: {
+  formCard: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: 420,
     alignSelf: 'center',
+    borderRadius: 20,
+    padding: 24,
+  },
+  fieldLabel: {
+    marginBottom: 8,
+    fontWeight: '600',
   },
   regionSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 14,
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 12,
-    marginBottom: 16,
   },
   regionLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
+  regionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   regionTextContainer: {
     marginLeft: 12,
     flex: 1,
   },
+  formDivider: {
+    marginVertical: 20,
+  },
   input: {
-    marginBottom: 16,
+    marginBottom: 14,
+  },
+  inputOutline: {
+    borderRadius: 10,
   },
   biometricRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
     paddingHorizontal: 4,
   },
   biometricLabel: {
@@ -443,7 +468,7 @@ const styles = StyleSheet.create({
   },
   signInButton: {
     marginBottom: 16,
-    borderRadius: 8,
+    borderRadius: 12,
   },
   signInButtonContent: {
     paddingVertical: 6,
@@ -464,14 +489,14 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
   },
   ssoButton: {
-    borderRadius: 8,
+    borderRadius: 12,
   },
   ssoButtonContent: {
     paddingVertical: 6,
   },
   footer: {
     alignItems: 'center',
-    marginTop: 48,
+    marginTop: 32,
   },
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,

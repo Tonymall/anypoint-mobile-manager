@@ -32,6 +32,8 @@ export interface AuthState {
 // --- Actions ---
 export interface AuthActions {
   login: (user: User, tokens: AuthTokens) => void;
+  loginPending: (user: User, tokens: AuthTokens) => void;
+  completeLogin: () => void;
   logout: () => void;
   refreshToken: (tokens: AuthTokens) => void;
   setSelectedRegion: (region: ControlPlaneRegionId) => void;
@@ -69,6 +71,19 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           tokens,
           isAuthenticated: true,
           isLoading: false,
+        }),
+
+      loginPending: (user: User, tokens: AuthTokens) =>
+        set({
+          user,
+          tokens,
+          isAuthenticated: false,
+          isLoading: false,
+        }),
+
+      completeLogin: () =>
+        set({
+          isAuthenticated: true,
         }),
 
       logout: () =>
@@ -128,17 +143,12 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         }),
     }),
     {
-      name: 'anypoint-auth-storage',
+      name: 'anypoint-auth-v3',
       storage: createJSONStorage(() => AsyncStorage),
-      // Do NOT persist tokens - they should be stored in SecureStore separately.
-      // Only persist user profile and org/env selection for session restoration.
+      // Do NOT persist tokens or isAuthenticated - tokens in SecureStore.
+      // isAuthenticated must always start as false; user must log in each session.
       partialize: (state) => ({
-        user: state.user,
         selectedRegion: state.selectedRegion,
-        currentOrganization: state.currentOrganization,
-        currentEnvironment: state.currentEnvironment,
-        organizations: state.organizations,
-        environments: state.environments,
       }),
     },
   ),

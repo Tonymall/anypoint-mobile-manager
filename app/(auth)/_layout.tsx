@@ -8,6 +8,8 @@ export default function AuthLayout() {
         name="sso"
         options={{ headerShown: true, title: 'Single Sign-On' }}
       />
+      <Stack.Screen name="select-org" />
+      <Stack.Screen name="select-env" />
     </Stack>
   );
 }
