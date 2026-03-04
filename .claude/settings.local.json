@@ -20,7 +20,29 @@
       "Bash(npx.cmd tsc --noEmit)",
       "Bash(node node_modules/.bin/tsc --noEmit)",
       "Bash(export PATH=\"/c/Program Files/nodejs:/mingw64/usr/bin:/usr/bin:$PATH\")",
-      "Bash(node node_modules/typescript/bin/tsc --noEmit)"
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(ls node_modules/.bin/tsc*)",
+      "Bash(echo $PATH)",
+      "Bash(cmd.exe /c \"npx tsc --noEmit && echo SUCCESS || echo FAILED\")",
+      "Bash(cmd.exe /c \"npx expo start --clear 2>&1\")",
+      "Bash(cmd.exe /c \"start npx expo start --clear\")",
+      "Bash(where npm)",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager\\\\node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit)",
+      "Bash(echo \"PATH=$PATH\")",
+      "WebFetch(domain:help.mulesoft.com)",
+      "WebFetch(domain:docs.mulesoft.com)",
+      "WebFetch(domain:anypoint.mulesoft.com)",
+      "WebFetch(domain:www.postman.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:mazhar-ansari.medium.com)",
+      "WebFetch(domain:dzone.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:mulesoftonlinelearning.home.blog)",
+      "WebFetch(domain:help.salesforce.com)",
+      "WebFetch(domain:docs.dynatrace.com)",
+      "Bash(PATH=\"/c/Program Files/nodejs:$PATH\" npx tsc --noEmit)",
+      "Bash(\"/c/Program Files/nodejs/node.exe\" node_modules/typescript/lib/tsc.js --noEmit)",
+      "Bash(echo \"Exit code: $?\")"
     ]
   }
 }

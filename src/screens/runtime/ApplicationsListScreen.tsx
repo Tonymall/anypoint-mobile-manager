@@ -107,6 +107,7 @@ const ApplicationsListScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [filterVisible, setFilterVisible] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'default' | 'az' | 'za'>('default');
 
   const {
     data: applications,
@@ -129,7 +130,7 @@ const ApplicationsListScreen: React.FC = () => {
   }, [appsList]);
 
   const filteredApps = useMemo(() => {
-    return appsList.filter((app: any) => {
+    const filtered = appsList.filter((app: any) => {
       const name = getAppName(app);
       const domain = app.domain ?? '';
       const matchesSearch =
@@ -139,7 +140,20 @@ const ApplicationsListScreen: React.FC = () => {
       const matchesStatus = statusFilter === 'ALL' || app.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [appsList, searchQuery, statusFilter]);
+
+    // Apply sort
+    if (sortOrder === 'az') {
+      return [...filtered].sort((a: any, b: any) =>
+        getAppName(a).localeCompare(getAppName(b)),
+      );
+    }
+    if (sortOrder === 'za') {
+      return [...filtered].sort((a: any, b: any) =>
+        getAppName(b).localeCompare(getAppName(a)),
+      );
+    }
+    return filtered;
+  }, [appsList, searchQuery, statusFilter, sortOrder]);
 
   const activeFilterLabel = statusFilter === 'ALL'
     ? `All (${appsList.length})`
@@ -270,6 +284,20 @@ const ApplicationsListScreen: React.FC = () => {
         >
           {activeFilterLabel}
         </Chip>
+        <Chip
+          icon={sortOrder === 'za' ? 'sort-alphabetical-descending' : 'sort-alphabetical-ascending'}
+          onPress={() =>
+            setSortOrder((prev) =>
+              prev === 'default' ? 'az' : prev === 'az' ? 'za' : 'default',
+            )
+          }
+          style={styles.filterChip}
+          selected={sortOrder !== 'default'}
+          showSelectedOverlay
+          compact
+        >
+          {sortOrder === 'az' ? 'A → Z' : sortOrder === 'za' ? 'Z → A' : 'Sort'}
+        </Chip>
         {statusFilter !== 'ALL' && (
           <Chip
             icon="close"
@@ -365,6 +393,7 @@ const createStyles = (theme: MD3Theme) =>
     filterRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      flexWrap: 'wrap',
       paddingHorizontal: 16,
       paddingVertical: 8,
       gap: 8,
@@ -385,6 +414,7 @@ const createStyles = (theme: MD3Theme) =>
       borderRadius: 14,
       borderWidth: 1,
       borderColor: theme.colors.surfaceVariant,
+      overflow: 'hidden',
     },
     cardContent: {
       paddingVertical: 14,
@@ -421,6 +451,7 @@ const createStyles = (theme: MD3Theme) =>
       paddingTop: 10,
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: theme.colors.outlineVariant,
+      overflow: 'hidden',
     },
     infoItem: {
       flexDirection: 'row',

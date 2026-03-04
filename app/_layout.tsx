@@ -18,6 +18,7 @@ import {
   setOrganizationHeader,
   setEnvironmentHeader,
   getStoredAccessToken,
+  clearTokens,
 } from '../src/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QueryProvider } from '../src/providers/QueryProvider';
@@ -61,10 +62,16 @@ export default function RootLayout() {
       const state = useAuthStore.getState();
 
       if (!token) {
+        // No token stored — ensure clean state
         if (state.isAuthenticated) {
           state.logout();
         }
+      } else if (!state.isAuthenticated) {
+        // Token exists but user is not authenticated (previous session expired)
+        // Clear stale tokens so they don't get attached to login requests
+        await clearTokens();
       } else {
+        // Authenticated with valid token — restore headers
         if (state.currentOrganization) {
           setOrganizationHeader(state.currentOrganization.id);
         }

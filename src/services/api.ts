@@ -100,9 +100,16 @@ api.interceptors.request.use(
       config.baseURL = currentBaseUrl;
     }
 
-    const token = await getStoredAccessToken();
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Skip auth header for login endpoint — also actively REMOVE any
+    // stale Authorization header that might be lingering on Axios defaults.
+    const isLoginRequest = config.url?.includes('/accounts/login');
+    if (isLoginRequest) {
+      delete config.headers.Authorization;
+    } else {
+      const token = await getStoredAccessToken();
+      if (token && config.headers) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
     }
     return config;
   },
@@ -167,13 +174,12 @@ api.interceptors.response.use(
       }
 
       // Use currentBaseUrl so the refresh goes to the correct control plane
-      const params = new URLSearchParams();
-      params.append('grant_type', 'refresh_token');
-      params.append('refresh_token', refreshToken);
+      // Use plain string encoding (URLSearchParams may not serialize in React Native)
+      const body = `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`;
 
       const { data } = await axios.post(
         `${currentBaseUrl}/accounts/api/v2/oauth2/token`,
-        params,
+        body,
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
       );
 
@@ -202,12 +208,54 @@ api.interceptors.response.use(
 
 // ---------- Convenience helpers ----------
 
+/**
+ * Set the Authorization header directly on the api instance.
+ * Called after login to make the token immediately available in memory
+ * without relying on SecureStore read timing.
+ */
+export function setAuthHeader(token: string): void {
+  api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+}
+
 export function setOrganizationHeader(orgId: string): void {
   api.defaults.headers.common['X-ANYPNT-ORG-ID'] = orgId;
 }
 
 export function setEnvironmentHeader(envId: string): void {
   api.defaults.headers.common['X-ANYPNT-ENV-ID'] = envId;
+}
+
+/**
+ * Clear all custom headers (org, env) from the Axios defaults.
+ * Call this during logout to prevent stale headers on re-login.
+ */
+export function clearHeaders(): void {
+  delete api.defaults.headers.common['X-ANYPNT-ORG-ID'];
+  delete api.defaults.headers.common['X-ANYPNT-ENV-ID'];
+}
+
+/**
+ * Full reset of API client state.
+ * Clears tokens from SecureStore, removes ALL custom headers
+ * (including Authorization), and resets the refresh-token state machine.
+ * Call this during logout AND before login to guarantee a clean slate.
+ */
+export async function resetApiState(): Promise<void> {
+  // 1. Clear tokens from SecureStore
+  await clearTokens();
+
+  // 2. Clear ALL custom headers — including Authorization
+  delete api.defaults.headers.common['Authorization'];
+  delete api.defaults.headers.common['X-ANYPNT-ORG-ID'];
+  delete api.defaults.headers.common['X-ANYPNT-ENV-ID'];
+
+  // 3. Reset the token-refresh state machine
+  //    If a refresh was in-flight during logout, reject all queued requests
+  //    and reset the flag so the next session starts clean.
+  if (failedQueue.length > 0) {
+    processQueue(new Error('Session reset'), null);
+  }
+  isRefreshing = false;
 }
 
 export default api;

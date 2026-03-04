@@ -5,24 +5,25 @@ import {
   useTheme,
   ActivityIndicator,
   TouchableRipple,
+  Appbar,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { useAuthStore } from '../../stores/authStore';
 import { useEnvironments } from '../../hooks/queries';
-import { setEnvironmentHeader } from '../../services/api';
+import { setEnvironmentHeader, setOrganizationHeader } from '../../services/api';
 import type { Environment } from '../../types';
 
 const EnvSelectScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const { fromSettings } = useLocalSearchParams<{ fromSettings?: string }>();
 
   const currentOrganization = useAuthStore((s) => s.currentOrganization);
   const switchEnvironment = useAuthStore((s) => s.switchEnvironment);
   const completeLogin = useAuthStore((s) => s.completeLogin);
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
 
   const { data: environments, isLoading, error } = useEnvironments(
     currentOrganization?.id,
@@ -32,12 +33,32 @@ const EnvSelectScreen: React.FC = () => {
     (env: Environment) => {
       switchEnvironment(env);
       setEnvironmentHeader(env.id);
-      completeLogin();
-      // Auth state change triggers Redirect in (main)/_layout
-      router.replace('/(main)' as any);
+      // Also re-set org header in case it was cleared
+      if (currentOrganization?.id) {
+        setOrganizationHeader(currentOrganization.id);
+      }
+
+      if (fromSettings === '1' && isAuthenticated) {
+        // Coming from Settings — navigate explicitly to settings tab
+        // (router.back() doesn't work reliably between tab groups)
+        router.replace('/(main)/settings' as any);
+      } else {
+        // Initial login flow — complete login and navigate to main
+        completeLogin();
+        router.replace('/(main)' as any);
+      }
     },
-    [switchEnvironment, completeLogin, router],
+    [switchEnvironment, completeLogin, router, fromSettings, isAuthenticated, currentOrganization],
   );
+
+  const handleBack = useCallback(() => {
+    if (fromSettings === '1') {
+      // Navigate explicitly to settings (back() loses the active tab)
+      router.replace('/(main)/settings' as any);
+    } else {
+      router.back();
+    }
+  }, [router, fromSettings]);
 
   const getEnvIcon = (env: Environment) => {
     if (env.isProduction) return 'shield-check';
@@ -120,14 +141,14 @@ const EnvSelectScreen: React.FC = () => {
 
   return (
     <View
-      style={[
-        styles.root,
-        {
-          backgroundColor: theme.colors.background,
-          paddingTop: insets.top + 16,
-        },
-      ]}
+      style={[styles.root, { backgroundColor: theme.colors.background }]}
     >
+      {/* Back button header */}
+      <Appbar.Header style={{ backgroundColor: 'transparent', elevation: 0 }}>
+        <Appbar.BackAction onPress={handleBack} />
+        <Appbar.Content title="" />
+      </Appbar.Header>
+
       <View style={styles.header}>
         <View
           style={[
@@ -194,12 +215,11 @@ const EnvSelectScreen: React.FC = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    paddingHorizontal: 20,
   },
   header: {
     alignItems: 'center',
     marginBottom: 28,
-    paddingHorizontal: 12,
+    paddingHorizontal: 32,
   },
   headerIcon: {
     width: 64,
@@ -219,6 +239,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   list: {
+    paddingHorizontal: 20,
     paddingBottom: 32,
   },
   envCard: {

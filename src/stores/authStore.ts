@@ -87,9 +87,12 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         }),
 
       logout: () =>
-        set({
+        set((state) => ({
           ...initialState,
-        }),
+          // Keep the user's region selection — resetting to 'us' causes 403
+          // when an EU1 user signs out and tries to sign back in.
+          selectedRegion: state.selectedRegion,
+        })),
 
       refreshToken: (tokens: AuthTokens) =>
         set({

@@ -1,7 +1,7 @@
 // ============================================================
 // Anypoint Mobile Platform - Login Screen
 // Username/password authentication with region selector,
-// SSO, and biometric options
+// SSO, and biometric options. Non-scrollable steady layout.
 // ============================================================
 
 import React, { useState, useCallback } from 'react';
@@ -10,14 +10,12 @@ import {
   View,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   Pressable,
 } from 'react-native';
 import {
   Text,
   TextInput,
   Button,
-  Switch,
   Snackbar,
   useTheme,
   ActivityIndicator,
@@ -26,23 +24,24 @@ import {
   Surface,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
 import * as authService from '../../services/authService';
-import { setRegion } from '../../services/api';
-import { CONTROL_PLANE_REGIONS, getRegionById } from '../../config/regions';
+import { setRegion, resetApiState } from '../../services/api';
+import { CONTROL_PLANE_REGIONS, getRegionById, getRegionUrl } from '../../config/regions';
 import type { AuthTokens, User, ControlPlaneRegionId } from '../../types';
 
 const LoginScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   // --- Form State ---
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [biometricEnabled, setBiometricEnabled] = useState<boolean>(false);
 
   // --- Region State ---
   const selectedRegion = useAuthStore((state) => state.selectedRegion);
@@ -80,13 +79,20 @@ const LoginScreen: React.FC = () => {
     setErrorMessage('');
 
     try {
+      // Clear ALL stale state from any previous session to prevent 403
+      await resetApiState();
+
       // Ensure the API client points to the selected region
       await setRegion(selectedRegion);
 
-      const tokens: AuthTokens = await authService.login({
-        username: username.trim(),
-        password,
-      });
+      // Build the region URL directly from config — this guarantees the
+      // correct endpoint even if the module-level currentBaseUrl is stale.
+      const regionUrl = getRegionUrl(selectedRegion);
+
+      const tokens: AuthTokens = await authService.login(
+        { username: username.trim(), password },
+        regionUrl,
+      );
 
       const user: User = await authService.getCurrentUser();
 
@@ -110,10 +116,6 @@ const LoginScreen: React.FC = () => {
     router.push('/(auth)/sso');
   }, [router]);
 
-  const handleBiometricToggle = useCallback((value: boolean) => {
-    setBiometricEnabled(value);
-  }, []);
-
   const dismissSnackbar = useCallback(() => {
     setSnackbarVisible(false);
   }, []);
@@ -121,17 +123,13 @@ const LoginScreen: React.FC = () => {
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
   const currentRegion = getRegionById(selectedRegion);
 
-  // --- Render ---
+  // --- Render (non-scrollable, centered layout) ---
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: theme.colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <View style={[styles.content, { paddingTop: insets.top }]}>
         {/* Branding Area */}
         <View style={styles.brandingContainer}>
           <View
@@ -140,11 +138,7 @@ const LoginScreen: React.FC = () => {
               { backgroundColor: theme.colors.primaryContainer },
             ]}
           >
-            <Icon
-              name="api"
-              size={44}
-              color={theme.colors.primary}
-            />
+            <Icon name="api" size={44} color={theme.colors.primary} />
           </View>
           <Text
             variant="headlineMedium"
@@ -185,11 +179,7 @@ const LoginScreen: React.FC = () => {
                 >
                   <View style={styles.regionLeft}>
                     <View style={[styles.regionIconWrap, { backgroundColor: theme.colors.primaryContainer }]}>
-                      <Icon
-                        name="earth"
-                        size={18}
-                        color={theme.colors.primary}
-                      />
+                      <Icon name="earth" size={18} color={theme.colors.primary} />
                     </View>
                     <View style={styles.regionTextContainer}>
                       <Text
@@ -206,11 +196,7 @@ const LoginScreen: React.FC = () => {
                       </Text>
                     </View>
                   </View>
-                  <Icon
-                    name="chevron-down"
-                    size={20}
-                    color={theme.colors.onSurfaceVariant}
-                  />
+                  <Icon name="chevron-down" size={20} color={theme.colors.onSurfaceVariant} />
                 </View>
               </Pressable>
             }
@@ -220,9 +206,7 @@ const LoginScreen: React.FC = () => {
               <Menu.Item
                 key={region.id}
                 title={`${region.label} — ${region.notes}`}
-                leadingIcon={
-                  selectedRegion === region.id ? 'check-circle' : 'earth'
-                }
+                leadingIcon={selectedRegion === region.id ? 'check-circle' : 'earth'}
                 onPress={() => handleRegionSelect(region.id)}
               />
             ))}
@@ -271,11 +255,7 @@ const LoginScreen: React.FC = () => {
           {/* Biometric Toggle — not yet implemented */}
           <View style={[styles.biometricRow, { opacity: 0.5 }]}>
             <View style={styles.biometricLabel}>
-              <Icon
-                name="fingerprint"
-                size={20}
-                color={theme.colors.onSurfaceVariant}
-              />
+              <Icon name="fingerprint" size={20} color={theme.colors.onSurfaceVariant} />
               <Text
                 variant="bodyMedium"
                 style={[styles.biometricText, { color: theme.colors.onSurfaceVariant }]}
@@ -328,46 +308,33 @@ const LoginScreen: React.FC = () => {
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Text
-            variant="bodySmall"
-            style={{ color: theme.colors.onSurfaceVariant }}
-          >
+          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
             MuleSoft Anypoint Platform
           </Text>
-          <Text
-            variant="bodySmall"
-            style={{ color: theme.colors.outline, marginTop: 2 }}
-          >
+          <Text variant="bodySmall" style={{ color: theme.colors.outline, marginTop: 2 }}>
             Version 1.0.0
           </Text>
         </View>
+      </View>
 
-        {/* Loading Overlay */}
-        {isLoading && (
-          <View
-            style={[
-              styles.loadingOverlay,
-              { backgroundColor: theme.dark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.6)' },
-            ]}
-          >
-            <ActivityIndicator
-              animating
-              size="large"
-              color={theme.colors.primary}
-            />
-          </View>
-        )}
-      </ScrollView>
+      {/* Loading Overlay */}
+      {isLoading && (
+        <View
+          style={[
+            styles.loadingOverlay,
+            { backgroundColor: theme.dark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.6)' },
+          ]}
+        >
+          <ActivityIndicator animating size="large" color={theme.colors.primary} />
+        </View>
+      )}
 
       {/* Error Snackbar */}
       <Snackbar
         visible={snackbarVisible}
         onDismiss={dismissSnackbar}
         duration={4000}
-        action={{
-          label: 'Dismiss',
-          onPress: dismissSnackbar,
-        }}
+        action={{ label: 'Dismiss', onPress: dismissSnackbar }}
         style={styles.snackbar}
       >
         {errorMessage}
@@ -381,11 +348,10 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
+  content: {
+    flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 48,
   },
   brandingContainer: {
     alignItems: 'center',

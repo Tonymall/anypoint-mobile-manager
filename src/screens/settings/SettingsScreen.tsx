@@ -74,7 +74,7 @@ const SettingsScreen: React.FC = () => {
     setLoggingOut(true);
     setLogoutDialogVisible(false);
     try {
-      await authService.logout();
+      await authService.logout(); // calls resetApiState() — clears tokens, headers, auth, refresh state
     } finally {
       queryClient.clear();
       logout();
@@ -83,15 +83,18 @@ const SettingsScreen: React.FC = () => {
   }, [logout, queryClient]);
 
   const handleSwitchOrg = useCallback(() => {
-    // Go back to org selection - keeps user/tokens but resets authenticated state
-    useAuthStore.setState({ isAuthenticated: false, currentOrganization: undefined, currentEnvironment: undefined });
-    router.replace('/(auth)/select-org' as any);
+    // Navigate to org selection.
+    // Don't clear org/env state yet — user may press back.
+    // State is cleared in OrgSelectScreen only when user actually selects a new org.
+    router.push({ pathname: '/(auth)/select-org' as any, params: { fromSettings: '1' } });
   }, [router]);
 
   const handleSwitchEnv = useCallback(() => {
-    useAuthStore.setState({ isAuthenticated: false, currentEnvironment: undefined });
-    router.replace('/(auth)/select-env' as any);
-  }, [router]);
+    // Don't clear currentEnvironment — keep it until user picks a new one.
+    // This prevents "Not selected" if the user presses back.
+    queryClient.clear();
+    router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: '1' } });
+  }, [router, queryClient]);
 
   const themeLabel =
     settings.theme === 'system'

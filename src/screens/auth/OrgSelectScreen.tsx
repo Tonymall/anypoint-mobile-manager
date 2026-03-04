@@ -6,23 +6,27 @@ import {
   useTheme,
   ActivityIndicator,
   TouchableRipple,
+  Appbar,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { useOrganizations } from '../../hooks/queries';
-import { setOrganizationHeader } from '../../services/api';
+import { setOrganizationHeader, clearHeaders } from '../../services/api';
 import type { Organization } from '../../types';
 
 const OrgSelectScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { fromSettings } = useLocalSearchParams<{ fromSettings?: string }>();
 
   const switchOrganization = useAuthStore((s) => s.switchOrganization);
   const user = useAuthStore((s) => s.user);
+  const queryClient = useQueryClient();
 
   const { data: organizations, isLoading, error } = useOrganizations();
 
@@ -35,12 +39,24 @@ const OrgSelectScreen: React.FC = () => {
 
   const handleSelect = useCallback(
     (org: Organization) => {
+      // Clear old org data now that user has made a selection
+      queryClient.clear();
+      clearHeaders();
       switchOrganization(org);
       setOrganizationHeader(org.id);
-      router.push('/(auth)/select-env' as any);
+      // Pass fromSettings along so EnvSelectScreen knows the flow origin
+      router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: fromSettings ?? '' } });
     },
-    [switchOrganization, router],
+    [switchOrganization, router, fromSettings, queryClient],
   );
+
+  const handleBack = useCallback(() => {
+    if (fromSettings === '1') {
+      router.replace('/(main)/settings' as any);
+    } else {
+      router.back();
+    }
+  }, [router, fromSettings]);
 
   const renderOrg = useCallback(
     ({ item }: { item: Organization }) => (
@@ -88,14 +104,14 @@ const OrgSelectScreen: React.FC = () => {
 
   return (
     <View
-      style={[
-        styles.root,
-        {
-          backgroundColor: theme.colors.background,
-          paddingTop: insets.top + 16,
-        },
-      ]}
+      style={[styles.root, { backgroundColor: theme.colors.background }]}
     >
+      {/* Back button header */}
+      <Appbar.Header style={{ backgroundColor: 'transparent', elevation: 0 }}>
+        <Appbar.BackAction onPress={handleBack} />
+        <Appbar.Content title="" />
+      </Appbar.Header>
+
       <View style={styles.header}>
         <View
           style={[
@@ -163,12 +179,11 @@ const OrgSelectScreen: React.FC = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    paddingHorizontal: 20,
   },
   header: {
     alignItems: 'center',
     marginBottom: 28,
-    paddingHorizontal: 12,
+    paddingHorizontal: 32,
   },
   headerIcon: {
     width: 64,
@@ -188,6 +203,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   list: {
+    paddingHorizontal: 20,
     paddingBottom: 32,
   },
   orgCard: {
