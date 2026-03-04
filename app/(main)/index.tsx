@@ -1,3 +1,3 @@
-import ApplicationsListScreen from '../../src/screens/runtime/ApplicationsListScreen';
+import DashboardScreen from '../../src/screens/dashboard/DashboardScreen';
 
-export default ApplicationsListScreen;
+export default DashboardScreen;

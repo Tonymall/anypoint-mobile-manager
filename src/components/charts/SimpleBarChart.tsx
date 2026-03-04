@@ -10,6 +10,7 @@ import {
 interface DataPoint {
   x: number;
   y: number;
+  [key: string]: unknown;
 }
 
 interface SimpleBarChartProps {
@@ -29,7 +30,10 @@ const SimpleBarChart: React.FC<SimpleBarChartProps> = ({
 }) => {
   const theme = useTheme();
   const barColor = color ?? theme.colors.primary;
-  const { state, isActive } = useChartPressState({ x: 0, y: { y: 0 } });
+  const { state, isActive } = useChartPressState({
+    x: 0 as never,
+    y: { y: 0 } as never,
+  });
 
   if (!data || data.length === 0) {
     return (
@@ -67,19 +71,19 @@ const SimpleBarChart: React.FC<SimpleBarChartProps> = ({
       {isActive && (
         <View style={styles.tooltipRow}>
           <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-            x: {state.x.value.value.toFixed(1)}
+            x: {(state.x.value.value as number).toFixed(1)}
           </Text>
           <Text variant="labelSmall" style={[styles.tooltipValue, { color: barColor }]}>
-            y: {state.y.y.value.value.toFixed(2)}
+            y: {((state.y as any).y.value.value as number).toFixed(2)}
           </Text>
         </View>
       )}
       <View style={{ height }}>
         <CartesianChart
           data={data}
-          xKey="x"
-          yKeys={['y']}
-          chartPressState={state}
+          xKey={"x" as never}
+          yKeys={["y" as never]}
+          chartPressState={state as any}
           axisOptions={{
             font: null,
             tickCount: { x: data.length, y: 4 },
@@ -87,7 +91,7 @@ const SimpleBarChart: React.FC<SimpleBarChartProps> = ({
             lineColor: theme.colors.outlineVariant,
           }}
         >
-          {({ points, chartBounds }) => (
+          {({ points, chartBounds }: any) => (
             <Bar
               points={points.y}
               chartBounds={chartBounds}

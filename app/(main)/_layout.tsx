@@ -18,6 +18,15 @@ export default function MainLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          title: 'Dashboard',
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="view-dashboard" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="runtime"
+        options={{
           title: 'Runtime',
           tabBarIcon: ({ color, size }) => (
             <Icon name="application-cog" size={size} color={color} />
@@ -30,6 +39,15 @@ export default function MainLayout() {
           title: 'APIs',
           tabBarIcon: ({ color, size }) => (
             <Icon name="api" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="cog" size={size} color={color} />
           ),
         }}
       />
