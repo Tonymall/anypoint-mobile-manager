@@ -3,30 +3,67 @@
 // ============================================================
 // Configured with interceptors for auth token injection,
 // automatic token refresh, and error handling.
+// Supports multi-region control planes (US, EU1, CA1, JP1).
 // ============================================================
 
 import axios, {
   AxiosError,
   AxiosInstance,
-  AxiosRequestConfig,
   InternalAxiosRequestConfig,
 } from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-const BASE_URL = 'https://anypoint.mulesoft.com';
+import { DEFAULT_REGION_ID, getRegionUrl } from '../config/regions';
+import type { ControlPlaneRegionId } from '../types';
 
 const TOKEN_KEY = 'anypoint_access_token';
 const REFRESH_TOKEN_KEY = 'anypoint_refresh_token';
+const REGION_KEY = 'anypoint_region';
+
+// --- Mutable base URL driven by selected region ---
+let currentBaseUrl: string = getRegionUrl(DEFAULT_REGION_ID);
 
 // Create the base Axios instance
 const api: AxiosInstance = axios.create({
-  baseURL: BASE_URL,
+  baseURL: currentBaseUrl,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   },
 });
+
+// ---------- Region helpers ----------
+
+/**
+ * Switch the control plane region.
+ * Updates the base URL used by all subsequent requests and persists the
+ * selection so it survives app restarts.
+ */
+export async function setRegion(regionId: ControlPlaneRegionId): Promise<void> {
+  currentBaseUrl = getRegionUrl(regionId);
+  api.defaults.baseURL = currentBaseUrl;
+  await SecureStore.setItemAsync(REGION_KEY, regionId);
+}
+
+/**
+ * Load the persisted region (if any) and apply it.
+ * Call this once on app startup before any API calls.
+ */
+export async function restoreRegion(): Promise<ControlPlaneRegionId> {
+  const stored = await SecureStore.getItemAsync(REGION_KEY);
+  const regionId = (stored as ControlPlaneRegionId) || DEFAULT_REGION_ID;
+  currentBaseUrl = getRegionUrl(regionId);
+  api.defaults.baseURL = currentBaseUrl;
+  return regionId;
+}
+
+/**
+ * Get the current base URL.
+ */
+export function getBaseUrl(): string {
+  return currentBaseUrl;
+}
 
 // ---------- Token helpers ----------
 
@@ -54,10 +91,15 @@ export async function clearTokens(): Promise<void> {
 }
 
 // ---------- Request Interceptor ----------
-// Attach the access token to every outgoing request.
+// Attach the access token and ensure baseURL is current.
 
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
+    // Always use the latest base URL (region may have changed)
+    if (!config.baseURL) {
+      config.baseURL = currentBaseUrl;
+    }
+
     const token = await getStoredAccessToken();
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -124,10 +166,14 @@ api.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      const { data } = await axios.post(`${BASE_URL}/accounts/api/v2/oauth2/token`, {
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      });
+      // Use currentBaseUrl so the refresh goes to the correct control plane
+      const { data } = await axios.post(
+        `${currentBaseUrl}/accounts/api/v2/oauth2/token`,
+        {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+        },
+      );
 
       const newAccessToken: string = data.access_token;
       const newRefreshToken: string | undefined = data.refresh_token;
@@ -159,5 +205,4 @@ export function setEnvironmentHeader(envId: string): void {
   api.defaults.headers.common['X-ANYPNT-ENV-ID'] = envId;
 }
 
-export { BASE_URL };
 export default api;
