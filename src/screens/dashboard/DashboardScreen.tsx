@@ -30,6 +30,7 @@ import { getRegionById } from '../../config/regions';
 import { anypointColors } from '../../theme';
 import { useApplications, useManagedAPIs } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import LoadingState from '../../components/common/LoadingState';
 
 // ── Glassmorphic Stat Card ──
@@ -196,6 +197,7 @@ const DashboardScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
+  const { isLandscape, isTablet, isPhoneLandscape, isTabletLandscape, columns } = useResponsiveLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef<ScrollView>(null);
   const user = useAuthStore((s) => s.user);
@@ -327,45 +329,87 @@ const DashboardScreen: React.FC = () => {
 
       {/* ── Stat Cards Grid ── */}
       <View style={styles.statsGrid}>
-        <View style={styles.statsRow}>
-          <StatCard
-            title="Applications"
-            value={totalApps}
-            icon="application-cog"
-            color={anypointColors.primary}
-            subtitle={`${runningApps} running`}
-            onPress={() => router.navigate('/(main)/runtime')}
-            loading={appsLoading}
-          />
-          <StatCard
-            title="APIs"
-            value={totalApis}
-            icon="api"
-            color={anypointColors.secondary}
-            subtitle={`${activeApis} active`}
-            onPress={() => router.navigate('/(main)/apis')}
-            loading={apisLoading}
-          />
-        </View>
-        <View style={styles.statsRow}>
-          <StatCard
-            title="Failed"
-            value={failedApps}
-            icon="alert-circle"
-            color={failedApps > 0 ? anypointColors.error : anypointColors.success}
-            subtitle={failedApps > 0 ? 'Needs attention' : 'All healthy'}
-            loading={appsLoading}
-          />
-          <StatCard
-            title="Workers"
-            value={appsList.reduce((sum, a) => sum + (a.workers?.amount ?? 0), 0)}
-            icon="server"
-            color={anypointColors.accent}
-            subtitle="Total allocated"
-            onPress={() => router.navigate('/(main)/workers' as any)}
-            loading={appsLoading}
-          />
-        </View>
+        {isLandscape ? (
+          <View style={styles.statsRow}>
+            <StatCard
+              title="Applications"
+              value={totalApps}
+              icon="application-cog"
+              color={anypointColors.primary}
+              subtitle={`${runningApps} running`}
+              onPress={() => router.navigate('/(main)/runtime')}
+              loading={appsLoading}
+            />
+            <StatCard
+              title="APIs"
+              value={totalApis}
+              icon="api"
+              color={anypointColors.secondary}
+              subtitle={`${activeApis} active`}
+              onPress={() => router.navigate('/(main)/apis')}
+              loading={apisLoading}
+            />
+            <StatCard
+              title="Failed"
+              value={failedApps}
+              icon="alert-circle"
+              color={failedApps > 0 ? anypointColors.error : anypointColors.success}
+              subtitle={failedApps > 0 ? 'Needs attention' : 'All healthy'}
+              loading={appsLoading}
+            />
+            <StatCard
+              title="Workers"
+              value={appsList.reduce((sum, a) => sum + (a.workers?.amount ?? 0), 0)}
+              icon="server"
+              color={anypointColors.accent}
+              subtitle="Total allocated"
+              onPress={() => router.navigate('/(main)/workers' as any)}
+              loading={appsLoading}
+            />
+          </View>
+        ) : (
+          <>
+            <View style={styles.statsRow}>
+              <StatCard
+                title="Applications"
+                value={totalApps}
+                icon="application-cog"
+                color={anypointColors.primary}
+                subtitle={`${runningApps} running`}
+                onPress={() => router.navigate('/(main)/runtime')}
+                loading={appsLoading}
+              />
+              <StatCard
+                title="APIs"
+                value={totalApis}
+                icon="api"
+                color={anypointColors.secondary}
+                subtitle={`${activeApis} active`}
+                onPress={() => router.navigate('/(main)/apis')}
+                loading={apisLoading}
+              />
+            </View>
+            <View style={styles.statsRow}>
+              <StatCard
+                title="Failed"
+                value={failedApps}
+                icon="alert-circle"
+                color={failedApps > 0 ? anypointColors.error : anypointColors.success}
+                subtitle={failedApps > 0 ? 'Needs attention' : 'All healthy'}
+                loading={appsLoading}
+              />
+              <StatCard
+                title="Workers"
+                value={appsList.reduce((sum, a) => sum + (a.workers?.amount ?? 0), 0)}
+                icon="server"
+                color={anypointColors.accent}
+                subtitle="Total allocated"
+                onPress={() => router.navigate('/(main)/workers' as any)}
+                loading={appsLoading}
+              />
+            </View>
+          </>
+        )}
       </View>
 
       {/* ── Running Applications ── */}
@@ -392,38 +436,42 @@ const DashboardScreen: React.FC = () => {
         </>
       )}
 
-      {/* ── Quick Actions ── */}
-      <View style={styles.sectionHeader}>
-        <View style={styles.sectionAccent} />
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-      </View>
+      {/* ── Quick Actions (hidden in phone landscape — accessible via tab bar) ── */}
+      {!isPhoneLandscape && (
+        <>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionAccent} />
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+          </View>
 
-      <View style={styles.actionsRow}>
-        {[
-          { icon: 'rocket-launch', label: 'Apps', color: anypointColors.primary, route: '/(main)/runtime' },
-          { icon: 'api', label: 'APIs', color: anypointColors.secondary, route: '/(main)/apis' },
-          { icon: 'chart-line', label: 'Monitor', color: anypointColors.accent, route: '/(main)/monitoring' },
-          { icon: 'cog', label: 'Settings', color: anypointColors.mulePurple, route: '/(main)/settings' },
-        ].map((action) => (
-          <Pressable
-            key={action.label}
-            onPress={() => router.navigate(action.route as any)}
-            accessibilityLabel={`Go to ${action.label}`}
-            accessibilityRole="button"
-            style={({ pressed }) => [
-              styles.actionButton,
-              { backgroundColor: theme.colors.surface, opacity: pressed ? 0.85 : 1 },
-            ]}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: action.color + '15' }]}>
-              <Icon name={action.icon} size={18} color={action.color} />
-            </View>
-            <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.onSurface, marginTop: 6 }}>
-              {action.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+          <View style={styles.actionsRow}>
+            {[
+              { icon: 'rocket-launch', label: 'Apps', color: anypointColors.primary, route: '/(main)/runtime' },
+              { icon: 'api', label: 'APIs', color: anypointColors.secondary, route: '/(main)/apis' },
+              { icon: 'chart-line', label: 'Monitor', color: anypointColors.accent, route: '/(main)/monitoring' },
+              { icon: 'cog', label: 'Settings', color: anypointColors.mulePurple, route: '/(main)/settings' },
+            ].map((action) => (
+              <Pressable
+                key={action.label}
+                onPress={() => router.navigate(action.route as any)}
+                accessibilityLabel={`Go to ${action.label}`}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.actionButton,
+                  { backgroundColor: theme.colors.surface, opacity: pressed ? 0.85 : 1 },
+                ]}
+              >
+                <View style={[styles.actionIcon, { backgroundColor: action.color + '15' }]}>
+                  <Icon name={action.icon} size={18} color={action.color} />
+                </View>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.onSurface, marginTop: 6 }}>
+                  {action.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      )}
     </ScrollView>
   );
 };

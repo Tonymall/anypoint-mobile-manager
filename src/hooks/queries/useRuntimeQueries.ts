@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as runtimeService from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
+import { useNotificationStore } from '../../stores/notificationStore';
+import { scheduleLocalNotification } from '../../services/notificationService';
 
 export const runtimeKeys = {
   all: ['runtime'] as const,
@@ -111,6 +113,7 @@ export function useRunScheduler() {
 
 export function useStartApp() {
   const queryClient = useQueryClient();
+  const addNotification = useNotificationStore((s) => s.addNotification);
   return useMutation({
     mutationFn: runtimeService.startApp,
     onSuccess: (data, domain) => {
@@ -118,12 +121,32 @@ export function useStartApp() {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
       queryClient.invalidateQueries({ queryKey: runtimeKeys.applications() });
+      addNotification({
+        type: 'lifecycle',
+        action: 'start',
+        title: 'Application Starting',
+        body: `${domain} is being started`,
+        applicationName: domain,
+        domain,
+      });
+      scheduleLocalNotification('Application Starting', `${domain} is being started`);
+    },
+    onError: (error: any, domain: string) => {
+      addNotification({
+        type: 'lifecycle',
+        action: 'start',
+        title: 'Start Failed',
+        body: `Failed to start ${domain}: ${(error as Error)?.message ?? 'Unknown error'}`,
+        applicationName: domain,
+        domain,
+      });
     },
   });
 }
 
 export function useStopApp() {
   const queryClient = useQueryClient();
+  const addNotification = useNotificationStore((s) => s.addNotification);
   return useMutation({
     mutationFn: runtimeService.stopApp,
     onSuccess: (data, domain) => {
@@ -131,12 +154,32 @@ export function useStopApp() {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
       queryClient.invalidateQueries({ queryKey: runtimeKeys.applications() });
+      addNotification({
+        type: 'lifecycle',
+        action: 'stop',
+        title: 'Application Stopping',
+        body: `${domain} is being stopped`,
+        applicationName: domain,
+        domain,
+      });
+      scheduleLocalNotification('Application Stopping', `${domain} is being stopped`);
+    },
+    onError: (error: any, domain: string) => {
+      addNotification({
+        type: 'lifecycle',
+        action: 'stop',
+        title: 'Stop Failed',
+        body: `Failed to stop ${domain}: ${(error as Error)?.message ?? 'Unknown error'}`,
+        applicationName: domain,
+        domain,
+      });
     },
   });
 }
 
 export function useRestartApp() {
   const queryClient = useQueryClient();
+  const addNotification = useNotificationStore((s) => s.addNotification);
   return useMutation({
     mutationFn: runtimeService.restartApp,
     onSuccess: (data, domain) => {
@@ -144,6 +187,25 @@ export function useRestartApp() {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
       queryClient.invalidateQueries({ queryKey: runtimeKeys.applications() });
+      addNotification({
+        type: 'lifecycle',
+        action: 'restart',
+        title: 'Application Restarting',
+        body: `${domain} is being restarted`,
+        applicationName: domain,
+        domain,
+      });
+      scheduleLocalNotification('Application Restarting', `${domain} is being restarted`);
+    },
+    onError: (error: any, domain: string) => {
+      addNotification({
+        type: 'lifecycle',
+        action: 'restart',
+        title: 'Restart Failed',
+        body: `Failed to restart ${domain}: ${(error as Error)?.message ?? 'Unknown error'}`,
+        applicationName: domain,
+        domain,
+      });
     },
   });
 }

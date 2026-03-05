@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { hapticLight } from '../../src/utils/haptics';
 import { useAuthStore } from '../../src/stores/authStore';
+import { useNotificationStore } from '../../src/stores/notificationStore';
+import { anypointColors } from '../../src/theme';
 import {
   setAuthHeader,
   setOrganizationHeader,
@@ -31,6 +33,7 @@ const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: str
   index: { title: 'Dashboard', icon: 'view-dashboard-outline', iconFocused: 'view-dashboard' },
   runtime: { title: 'Runtime', icon: 'application-cog-outline', iconFocused: 'application-cog' },
   apis: { title: 'APIs', icon: 'api' },
+  notifications: { title: 'Alerts', icon: 'bell-outline', iconFocused: 'bell' },
   monitoring: { title: 'Monitor', icon: 'chart-line-variant', iconFocused: 'chart-line' },
   settings: { title: 'Settings', icon: 'cog-outline', iconFocused: 'cog' },
 };
@@ -39,7 +42,9 @@ const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: str
 function AnimatedTabBar({ state, descriptors, navigation }: any) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const isPhoneLandscape = screenWidth > screenHeight && Math.min(screenWidth, screenHeight) < 768;
+  const unreadCount = useNotificationStore((s) => s.unreadCount);
 
   const visibleRoutes = state.routes.filter(
     (route: any) => TAB_ITEMS[route.name] !== undefined,
@@ -68,7 +73,7 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
   }));
 
   const bottomPad = Math.max(insets.bottom, 8);
-  const barHeight = 60 + bottomPad;
+  const barHeight = isPhoneLandscape ? (40 + bottomPad) : (60 + bottomPad);
 
   return (
     <View
@@ -116,29 +121,42 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
             key={route.key}
             onPress={onPress}
             activeOpacity={0.65}
-            style={styles.tabButton}
+            style={[styles.tabButton, isPhoneLandscape && { paddingTop: 4 }]}
             accessibilityLabel={`${tabDef?.title ?? route.name} tab`}
             accessibilityRole="tab"
             accessibilityState={{ selected: isFocused }}
           >
             <Icon
               name={iconName}
-              size={21}
+              size={isPhoneLandscape ? 20 : 21}
               color={isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant}
             />
-            <Text
-              style={[
-                styles.tabLabel,
-                {
-                  color: isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                  fontWeight: isFocused ? '700' : '500',
-                  opacity: isFocused ? 1 : 0.7,
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {tabDef?.title ?? route.name}
-            </Text>
+            {route.name === 'notifications' && unreadCount > 0 && (
+              <View style={{
+                position: 'absolute',
+                top: 6,
+                right: tabWidth / 2 - 18,
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: anypointColors.error,
+              }} />
+            )}
+            {!isPhoneLandscape && (
+              <Text
+                style={[
+                  styles.tabLabel,
+                  {
+                    color: isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                    fontWeight: isFocused ? '700' : '500',
+                    opacity: isFocused ? 1 : 0.7,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {tabDef?.title ?? route.name}
+              </Text>
+            )}
           </TouchableOpacity>
         );
       })}
@@ -191,6 +209,7 @@ export default function MainLayout() {
       <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
       <Tabs.Screen name="runtime" options={{ title: 'Runtime' }} />
       <Tabs.Screen name="apis" options={{ title: 'APIs' }} />
+      <Tabs.Screen name="notifications" options={{ title: 'Alerts' }} />
       <Tabs.Screen name="monitoring" options={{ title: 'Monitoring' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
       {/* Workers: hidden from tab bar — only accessible via router.push */}

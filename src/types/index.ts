@@ -737,3 +737,20 @@ export interface ApiError {
   code?: string;
   details?: unknown;
 }
+
+// --- Notifications (Local) ---
+export type NotificationType = 'lifecycle' | 'alert' | 'system' | 'deployment';
+export type NotificationAction = 'start' | 'stop' | 'restart' | 'deploy' | 'alert' | 'info';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  action: NotificationAction;
+  title: string;
+  body: string;
+  applicationName?: string;
+  timestamp: string; // ISO string
+  read: boolean;
+  domain?: string;
+  environmentId?: string;
+}

@@ -140,6 +140,25 @@ const LoginScreen: React.FC = () => {
         message: error?.message,
       });
 
+      // Detect MFA requirement — redirect to WebView-based login
+      const responseData = error?.response?.data;
+      const responseMessage = typeof responseData === 'string'
+        ? responseData
+        : (responseData?.message ?? '');
+      const isMFA =
+        responseMessage.toLowerCase().includes('mfa') ||
+        responseMessage.toLowerCase().includes('multi-factor') ||
+        responseMessage.toLowerCase().includes('verification') ||
+        responseMessage.toLowerCase().includes('authenticator') ||
+        responseData?.redirectUrl?.includes('verify.salesforce.com') ||
+        responseData?.requires_mfa === true;
+
+      if (isMFA) {
+        // Fall back to WebView-based login that handles MFA
+        router.push('/(auth)/sso');
+        return;
+      }
+
       const message =
         error?.response?.data?.message ??
         error?.message ??
@@ -407,6 +426,20 @@ const LoginScreen: React.FC = () => {
                 >
                   Sign in with SSO
                 </Button>
+
+                {/* Browser Login Button (handles MFA) */}
+                <Button
+                  mode="text"
+                  onPress={() => router.push('/(auth)/sso')}
+                  disabled={isLoading}
+                  icon="web"
+                  style={styles.browserLoginButton}
+                  labelStyle={{ color: theme.colors.primary }}
+                  accessibilityLabel="Sign in with browser"
+                  accessibilityRole="button"
+                >
+                  Sign in with Browser
+                </Button>
               </View>
             </View>
 
@@ -605,6 +638,9 @@ const styles = StyleSheet.create({
   },
   ssoButtonContent: {
     paddingVertical: 6,
+  },
+  browserLoginButton: {
+    marginTop: 8,
   },
 
   // ── Footer ──

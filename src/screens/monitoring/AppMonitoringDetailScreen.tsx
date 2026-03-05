@@ -359,9 +359,15 @@ const AppMonitoringDetailScreen: React.FC = () => {
     return dashStats._appMetrics;
   }, [dashStats]);
 
+  // ── Extract direct JVM endpoint data ──
+  const jvmMetrics = useMemo(() => {
+    if (!dashStats?._jvmMetrics) return null;
+    return dashStats._jvmMetrics;
+  }, [dashStats]);
+
   const messageCount = influxData?.extraMetrics?.messageCount ?? observabilityMetrics?.messageCount ?? null;
-  const influxThreadCount = influxData?.extraMetrics?.threadCount ?? null;
-  const influxHeapUsed = influxData?.extraMetrics?.heapUsed ?? null;
+  const influxThreadCount = influxData?.extraMetrics?.threadCount ?? jvmMetrics?.threadCount ?? null;
+  const influxHeapUsed = influxData?.extraMetrics?.heapUsed ?? jvmMetrics?.heapUsed ?? null;
   // Inbound / Outbound HTTP metrics from InfluxDB or Observability API
   const inboundAvgResponseTime = influxData?.extraMetrics?.inboundAvgResponseTime ?? observabilityMetrics?.inboundAvgResponseTime ?? null;
   const inboundRequestCount = influxData?.extraMetrics?.inboundRequestCount ?? observabilityMetrics?.inboundRequestCount ?? null;

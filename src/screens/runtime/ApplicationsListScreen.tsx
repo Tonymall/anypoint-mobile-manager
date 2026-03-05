@@ -36,6 +36,7 @@ import { anypointColors } from '../../theme';
 import { useApplications } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getLastUpdateTime, getWorkerInfo, getDeploymentTarget } from '../../utils/appHelpers';
 import { getStatusColor, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
+import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 
@@ -170,6 +171,7 @@ const ApplicationsListScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
+  const { columns } = useResponsiveLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const flatListRef = useRef<FlatList>(null);
 
@@ -214,13 +216,15 @@ const ApplicationsListScreen: React.FC = () => {
 
   const renderApplicationCard = useCallback(
     ({ item }: ListRenderItemInfo<Application>) => (
-      <AppCard
-        app={item}
-        onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: getAppId(item) } })}
-        theme={theme}
-      />
+      <View style={columns > 1 ? { flex: 1, paddingHorizontal: 4 } : undefined}>
+        <AppCard
+          app={item}
+          onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: getAppId(item) } })}
+          theme={theme}
+        />
+      </View>
     ),
-    [theme, router],
+    [theme, router, columns],
   );
 
   const renderEmptyState = useCallback(
@@ -309,10 +313,12 @@ const ApplicationsListScreen: React.FC = () => {
 
       {/* ── Applications list ── */}
       <FlatList
+        key={columns}
         ref={flatListRef}
         data={filteredApps}
         keyExtractor={(item: any) => getAppId(item)}
         renderItem={renderApplicationCard}
+        numColumns={columns}
         contentContainerStyle={[
           styles.listContent,
           isWide && { paddingHorizontal: sidePadding + 16 },

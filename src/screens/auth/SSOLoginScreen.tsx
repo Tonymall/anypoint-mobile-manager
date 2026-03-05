@@ -1,274 +1,396 @@
 // ============================================================
-// Anypoint Mobile Platform - SSO Login Screen
-// Provider selection and WebView-based SSO authentication flow
+// Anypoint Mobile Platform - SSO / Browser Login Screen
+// WebView-based authentication flow supporting MFA, SSO,
+// and standard username/password login via the Anypoint web UI.
 // ============================================================
 
-import React, { useState, useCallback } from 'react';
-import { StyleSheet, View, ScrollView } from 'react-native';
+import React, { useState, useCallback, useRef } from 'react';
+import { StyleSheet, View } from 'react-native';
 import {
   Text,
   Button,
-  Card,
-  RadioButton,
   useTheme,
   Appbar,
-  Divider,
   ActivityIndicator,
   Snackbar,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { WebView } from 'react-native-webview';
+import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
 import { useRouter } from 'expo-router';
 
-interface SSOProvider {
-  id: 'okta' | 'azure_ad' | 'saml';
-  label: string;
-  description: string;
-  icon: string;
-}
+import { useAuthStore } from '../../stores';
+import { getBaseUrl, setAuthHeader, storeTokens } from '../../services/api';
+import * as authService from '../../services/authService';
+import type { AuthTokens } from '../../types';
 
-const SSO_PROVIDERS: SSOProvider[] = [
-  {
-    id: 'okta',
-    label: 'Okta',
-    description: 'Sign in with your Okta identity provider',
-    icon: 'shield-check',
-  },
-  {
-    id: 'azure_ad',
-    label: 'Azure AD',
-    description: 'Sign in with Microsoft Azure Active Directory',
-    icon: 'microsoft-azure',
-  },
-  {
-    id: 'saml',
-    label: 'SAML 2.0',
-    description: 'Sign in with your organization SAML provider',
-    icon: 'certificate',
-  },
+// ── JavaScript injected after the user completes web-based login ──
+// Tries multiple strategies to extract the access token / user session.
+const INJECTED_JS = `
+  (function() {
+    try {
+      // Method 1: Fetch user data from the accounts API using session cookies
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/accounts/api/me', false);
+      xhr.withCredentials = true;
+      xhr.send();
+      if (xhr.status === 200) {
+        var data = JSON.parse(xhr.responseText);
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'auth_success',
+          user: data.user || data,
+        }));
+        return;
+      }
+    } catch(e) {}
+
+    try {
+      // Method 2: Look for access_token in cookies
+      var cookies = document.cookie.split(';');
+      var token = null;
+      for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i].trim();
+        if (c.startsWith('access_token=') || c.startsWith('_access_token=')) {
+          token = c.split('=')[1];
+          break;
+        }
+      }
+      if (token) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'token_found',
+          token: token,
+        }));
+        return;
+      }
+    } catch(e) {}
+
+    try {
+      // Method 3: Try the profile API endpoint
+      var xhr2 = new XMLHttpRequest();
+      xhr2.open('GET', '/accounts/api/profile', false);
+      xhr2.withCredentials = true;
+      xhr2.send();
+      if (xhr2.status === 200) {
+        var profileData = JSON.parse(xhr2.responseText);
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'profile_found',
+          profile: profileData,
+        }));
+        return;
+      }
+    } catch(e) {}
+
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'extraction_failed',
+      cookies: document.cookie ? 'present' : 'empty',
+      url: window.location.href,
+    }));
+  })();
+  true;
+`;
+
+// URL path segments that indicate a successful post-login redirect
+const POST_LOGIN_PATHS = [
+  '/home/',
+  '/home',
+  '/accounts/',
+  '/exchange/',
+  '/apimanager/',
+  '/cloudhub/',
+  '/design-center/',
+  '/runtime-manager/',
+  '/visualizer/',
+  '/monitoring/',
+  '/api-manager/',
+  '/access-management/',
 ];
 
 const SSOLoginScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const webViewRef = useRef<WebView>(null);
 
-  // --- State ---
-  const [selectedProvider, setSelectedProvider] = useState<string>('okta');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [showWebView, setShowWebView] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [snackbarVisible, setSnackbarVisible] = useState<boolean>(false);
+  // ── Auth store ──
+  const loginPending = useAuthStore((state) => state.loginPending);
+  const setOrganizations = useAuthStore((state) => state.setOrganizations);
+  const selectedRegion = useAuthStore((state) => state.selectedRegion);
 
-  // --- Handlers ---
+  // ── State ──
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [webViewKey, setWebViewKey] = useState(1);
+
+  const hasInjectedRef = useRef(false);
+  const baseUrl = getBaseUrl();
+  const loginUrl = `${baseUrl}/accounts/login`;
+
+  // ── Determine if a URL is a post-login page ──
+  const isPostLoginUrl = useCallback(
+    (url: string): boolean => {
+      if (!url) return false;
+      try {
+        const parsed = new URL(url);
+        const path = parsed.pathname;
+        // Still on the login page — not post-login
+        if (path === '/accounts/login' || path === '/accounts/login/') {
+          return false;
+        }
+        // Check against known post-login paths
+        if (POST_LOGIN_PATHS.some((p) => path.startsWith(p))) {
+          return true;
+        }
+        // Also detect any path that is NOT the login page on the same domain
+        // (e.g. when user is redirected to /accounts#/ or /)
+        if (
+          parsed.origin === baseUrl &&
+          path !== '/accounts/login' &&
+          !path.startsWith('/accounts/login')
+        ) {
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    },
+    [baseUrl],
+  );
+
+  // ── Complete the native auth flow using an extracted token or user data ──
+  const completeAuthentication = useCallback(
+    async (tokenOrUserData: any) => {
+      setIsExtracting(true);
+      try {
+        let token: string | undefined;
+
+        if (typeof tokenOrUserData === 'string') {
+          token = tokenOrUserData;
+        } else if (typeof tokenOrUserData === 'object') {
+          token =
+            tokenOrUserData.access_token ??
+            tokenOrUserData.token ??
+            tokenOrUserData.properties?.cs_token ??
+            undefined;
+        }
+
+        if (token && typeof token === 'string') {
+          setAuthHeader(token);
+          await storeTokens(token);
+        }
+
+        // Fetch user profile using the session/token
+        const user = await authService.getCurrentUser(
+          token,
+          baseUrl,
+        );
+        const orgs = await authService.getOrganizations();
+
+        // Build AuthTokens object
+        const tokens: AuthTokens = {
+          accessToken: token ?? '',
+          tokenType: 'bearer',
+          expiresIn: 3600,
+          expiresAt: Date.now() + 3600 * 1000,
+        };
+
+        loginPending(user, tokens);
+        setOrganizations(orgs);
+
+        // Navigate to org selection
+        router.replace('/(auth)/select-org');
+      } catch (error: any) {
+        console.error('[SSO] Authentication completion failed:', error?.message);
+        setErrorMessage('Authentication failed. Please try again.');
+        setSnackbarVisible(true);
+        // Reset so the user can try again
+        hasInjectedRef.current = false;
+        setIsExtracting(false);
+      }
+    },
+    [baseUrl, loginPending, setOrganizations, router],
+  );
+
+  // ── Handle navigation changes — detect post-login redirect ──
+  const handleNavigationStateChange = useCallback(
+    (navState: WebViewNavigation) => {
+      const { url } = navState;
+      if (!url || hasInjectedRef.current) return;
+
+      if (isPostLoginUrl(url)) {
+        console.log('[SSO] Post-login URL detected:', url);
+        hasInjectedRef.current = true;
+        // Give the page a moment to settle, then inject extraction script
+        setTimeout(() => {
+          webViewRef.current?.injectJavaScript(INJECTED_JS);
+        }, 1500);
+      }
+    },
+    [isPostLoginUrl],
+  );
+
+  // ── Handle messages from injected JavaScript ──
+  const handleWebViewMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+        console.log('[SSO] Message received:', data.type);
+
+        switch (data.type) {
+          case 'auth_success':
+            // Got user data from /accounts/api/me — session cookies are valid
+            completeAuthentication(data.user);
+            break;
+
+          case 'token_found':
+            // Got a raw token from cookies
+            completeAuthentication(data.token);
+            break;
+
+          case 'profile_found':
+            // Got profile data — may contain token
+            completeAuthentication(data.profile);
+            break;
+
+          case 'extraction_failed':
+            console.warn('[SSO] Token extraction failed:', data);
+            // Try a second time after a longer delay
+            hasInjectedRef.current = false;
+            setTimeout(() => {
+              if (!hasInjectedRef.current) {
+                hasInjectedRef.current = true;
+                webViewRef.current?.injectJavaScript(INJECTED_JS);
+              }
+            }, 3000);
+            break;
+
+          default:
+            console.warn('[SSO] Unknown message type:', data.type);
+        }
+      } catch (e) {
+        console.error('[SSO] Failed to parse WebView message:', e);
+      }
+    },
+    [completeAuthentication],
+  );
+
+  // ── Handlers ──
   const handleBack = useCallback(() => {
-    if (showWebView) {
-      setShowWebView(false);
-      setIsLoading(false);
-    } else {
-      router.back();
-    }
-  }, [router, showWebView]);
+    router.back();
+  }, [router]);
 
-  const handleContinue = useCallback(() => {
-    setIsLoading(true);
-    setShowWebView(true);
-
-    // Placeholder: In production this would open a WebView with the
-    // SSO provider's authorization URL. For now we simulate the flow.
-    setTimeout(() => {
-      setIsLoading(false);
-      setErrorMessage(
-        'SSO authentication is not yet configured for this environment. Please contact your administrator.',
-      );
-      setSnackbarVisible(true);
-      setShowWebView(false);
-    }, 2000);
+  const handleRetry = useCallback(() => {
+    setErrorMessage('');
+    setSnackbarVisible(false);
+    setIsExtracting(false);
+    hasInjectedRef.current = false;
+    // Force WebView to reload by changing the key
+    setWebViewKey((k) => k + 1);
   }, []);
 
   const dismissSnackbar = useCallback(() => {
     setSnackbarVisible(false);
   }, []);
 
-  const selectedProviderData = SSO_PROVIDERS.find(
-    (p) => p.id === selectedProvider,
-  );
-
-  // --- Render ---
+  // ── Render ──
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
       {/* Header */}
       <Appbar.Header elevated>
-        <Appbar.BackAction onPress={handleBack} />
-        <Appbar.Content title="Single Sign-On" />
+        <Appbar.BackAction
+          onPress={handleBack}
+          accessibilityLabel="Go back to login screen"
+        />
+        <Appbar.Content title="Sign in with Browser" />
       </Appbar.Header>
 
-      {showWebView ? (
-        // --- WebView Placeholder ---
-        <View style={styles.webViewPlaceholder}>
-          <ActivityIndicator
-            animating={isLoading}
-            size="large"
-            color={theme.colors.primary}
-          />
-          <Text
-            variant="bodyLarge"
-            style={[styles.webViewText, { color: theme.colors.onSurfaceVariant }]}
+      {/* WebView — fills remaining space */}
+      <View style={styles.webViewContainer}>
+        <WebView
+          key={webViewKey}
+          ref={webViewRef}
+          source={{ uri: loginUrl }}
+          style={styles.webView}
+          onNavigationStateChange={handleNavigationStateChange}
+          onMessage={handleWebViewMessage}
+          sharedCookiesEnabled={true}
+          thirdPartyCookiesEnabled={true}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={true}
+          incognito={false}
+          cacheEnabled={true}
+          renderLoading={() => (
+            <View
+              style={[
+                styles.webViewLoading,
+                { backgroundColor: theme.colors.background },
+              ]}
+            >
+              <ActivityIndicator
+                animating
+                size="large"
+                color={theme.colors.primary}
+              />
+              <Text
+                variant="bodyMedium"
+                style={[styles.loadingText, { color: theme.colors.onSurfaceVariant }]}
+              >
+                Loading sign-in page...
+              </Text>
+            </View>
+          )}
+          onError={() => {
+            setErrorMessage(
+              'Failed to load the sign-in page. Please check your internet connection.',
+            );
+            setSnackbarVisible(true);
+          }}
+          accessibilityLabel="Anypoint Platform sign-in page"
+        />
+
+        {/* Extraction overlay */}
+        {isExtracting && (
+          <View
+            style={[
+              styles.extractionOverlay,
+              {
+                backgroundColor: theme.dark
+                  ? 'rgba(11, 15, 25, 0.92)'
+                  : 'rgba(255, 255, 255, 0.92)',
+              },
+            ]}
           >
-            {isLoading
-              ? `Connecting to ${selectedProviderData?.label ?? 'SSO provider'}...`
-              : 'Waiting for authentication...'}
-          </Text>
-          <Text
-            variant="bodySmall"
-            style={[styles.webViewHint, { color: theme.colors.outline }]}
-          >
-            A browser window will open for authentication.
-            {'\n'}You will be redirected back after signing in.
-          </Text>
-          <Button
-            mode="outlined"
-            onPress={handleBack}
-            style={styles.cancelButton}
-          >
-            Cancel
-          </Button>
-        </View>
-      ) : (
-        // --- Provider Selection ---
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Instructions */}
-          <View style={styles.instructionContainer}>
-            <Icon
-              name="shield-key-outline"
-              size={40}
+            <ActivityIndicator
+              animating
+              size="large"
               color={theme.colors.primary}
             />
             <Text
               variant="titleMedium"
-              style={[styles.instructionTitle, { color: theme.colors.onBackground }]}
+              style={[styles.extractionTitle, { color: theme.colors.onBackground }]}
             >
-              Choose your Identity Provider
+              Completing authentication...
             </Text>
             <Text
               variant="bodyMedium"
-              style={[styles.instructionBody, { color: theme.colors.onSurfaceVariant }]}
+              style={[styles.extractionSubtitle, { color: theme.colors.onSurfaceVariant }]}
             >
-              Select the SSO provider configured by your organization to
-              authenticate with the Anypoint Platform.
+              Setting up your session
             </Text>
           </View>
-
-          <Divider style={styles.divider} />
-
-          {/* Provider List */}
-          <RadioButton.Group
-            value={selectedProvider}
-            onValueChange={setSelectedProvider}
-          >
-            {SSO_PROVIDERS.map((provider) => (
-              <Card
-                key={provider.id}
-                style={[
-                  styles.providerCard,
-                  {
-                    backgroundColor: theme.colors.surface,
-                    borderColor:
-                      selectedProvider === provider.id
-                        ? theme.colors.primary
-                        : theme.colors.outlineVariant,
-                    borderWidth: selectedProvider === provider.id ? 2 : 1,
-                  },
-                ]}
-                onPress={() => setSelectedProvider(provider.id)}
-                mode="outlined"
-              >
-                <Card.Content style={styles.providerContent}>
-                  <View style={styles.providerLeft}>
-                    <View
-                      style={[
-                        styles.providerIconCircle,
-                        {
-                          backgroundColor:
-                            selectedProvider === provider.id
-                              ? theme.colors.primaryContainer
-                              : theme.colors.surfaceVariant,
-                        },
-                      ]}
-                    >
-                      <Icon
-                        name={provider.icon}
-                        size={24}
-                        color={
-                          selectedProvider === provider.id
-                            ? theme.colors.primary
-                            : theme.colors.onSurfaceVariant
-                        }
-                      />
-                    </View>
-                    <View style={styles.providerTextContainer}>
-                      <Text
-                        variant="titleSmall"
-                        style={{ color: theme.colors.onSurface }}
-                      >
-                        {provider.label}
-                      </Text>
-                      <Text
-                        variant="bodySmall"
-                        style={{ color: theme.colors.onSurfaceVariant }}
-                        numberOfLines={2}
-                      >
-                        {provider.description}
-                      </Text>
-                    </View>
-                  </View>
-                  <RadioButton value={provider.id} />
-                </Card.Content>
-              </Card>
-            ))}
-          </RadioButton.Group>
-
-          {/* Continue Button */}
-          <Button
-            mode="contained"
-            onPress={handleContinue}
-            disabled={isLoading}
-            loading={isLoading}
-            style={styles.continueButton}
-            contentStyle={styles.continueButtonContent}
-            icon="arrow-right"
-          >
-            Continue with {selectedProviderData?.label ?? 'SSO'}
-          </Button>
-
-          {/* Help Text */}
-          <View style={styles.helpContainer}>
-            <Icon
-              name="help-circle-outline"
-              size={16}
-              color={theme.colors.outline}
-            />
-            <Text
-              variant="bodySmall"
-              style={[styles.helpText, { color: theme.colors.outline }]}
-            >
-              Contact your organization administrator if you are unsure which
-              provider to select or if SSO has not been configured.
-            </Text>
-          </View>
-        </ScrollView>
-      )}
+        )}
+      </View>
 
       {/* Error Snackbar */}
       <Snackbar
         visible={snackbarVisible}
         onDismiss={dismissSnackbar}
-        duration={5000}
+        duration={6000}
         action={{
-          label: 'OK',
-          onPress: dismissSnackbar,
+          label: 'Retry',
+          onPress: handleRetry,
         }}
+        style={styles.snackbar}
       >
         {errorMessage}
       </Snackbar>
@@ -276,95 +398,42 @@ const SSOLoginScreen: React.FC = () => {
   );
 };
 
-// --- Styles ---
+// ── Styles ──
 const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-  },
-  instructionContainer: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  instructionTitle: {
-    fontWeight: '600',
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  instructionBody: {
-    marginTop: 8,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  divider: {
-    marginBottom: 20,
-  },
-  providerCard: {
-    marginBottom: 12,
-    borderRadius: 12,
-  },
-  providerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-  providerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  webViewContainer: {
     flex: 1,
   },
-  providerIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+  webView: {
+    flex: 1,
+  },
+  webViewLoading: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 16,
   },
-  providerTextContainer: {
-    flex: 1,
-    marginRight: 8,
+  loadingText: {
+    marginTop: 16,
   },
-  continueButton: {
-    marginTop: 24,
-    borderRadius: 8,
-  },
-  continueButtonContent: {
-    paddingVertical: 6,
-    flexDirection: 'row-reverse',
-  },
-  helpContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: 24,
-    paddingHorizontal: 4,
-  },
-  helpText: {
-    flex: 1,
-    marginLeft: 8,
-    lineHeight: 18,
-  },
-  webViewPlaceholder: {
-    flex: 1,
+  extractionOverlay: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
   },
-  webViewText: {
+  extractionTitle: {
     marginTop: 24,
+    fontWeight: '600',
     textAlign: 'center',
   },
-  webViewHint: {
-    marginTop: 12,
+  extractionSubtitle: {
+    marginTop: 8,
     textAlign: 'center',
-    lineHeight: 20,
   },
-  cancelButton: {
-    marginTop: 32,
+  snackbar: {
+    marginBottom: 16,
   },
 });
 

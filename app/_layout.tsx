@@ -25,6 +25,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QueryProvider } from '../src/providers/QueryProvider';
 import SplashScreen from '../src/components/common/SplashScreen';
 import ErrorBoundary from '../src/components/common/ErrorBoundary';
+import { requestPermissions } from '../src/services/notificationService';
+import { useNotificationStore } from '../src/stores/notificationStore';
 
 // Keep the native splash screen visible while we load
 ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
@@ -91,6 +93,16 @@ export default function RootLayout() {
       await ExpoSplashScreen.hideAsync().catch(() => {});
     }
     restore();
+  }, []);
+
+  // Request notification permissions on first launch
+  useEffect(() => {
+    const permissionGranted = useNotificationStore.getState().permissionGranted;
+    if (permissionGranted === null) {
+      requestPermissions().then((granted) => {
+        useNotificationStore.getState().setPermissionGranted(granted);
+      });
+    }
   }, []);
 
   const handleSplashFinish = useCallback(() => {

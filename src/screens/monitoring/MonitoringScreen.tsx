@@ -350,6 +350,41 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
     if (am.errorCount != null && metrics.errorCount == null) metrics.errorCount = Number(am.errorCount);
   }
 
+  // ── Handle direct JVM endpoint response ──
+  if (dashStats?._jvmMetrics) {
+    const jvm = dashStats._jvmMetrics;
+    if (jvm.heapUsed != null && metrics.heapUsed == null) metrics.heapUsed = Number(jvm.heapUsed);
+    if (jvm.heapMax != null && metrics.heapCommitted == null) metrics.heapCommitted = Number(jvm.heapMax);
+    if (jvm.nonHeapUsed != null && metrics.nonHeapUsed == null) metrics.nonHeapUsed = Number(jvm.nonHeapUsed);
+    if (jvm.threadCount != null && metrics.threadCount == null) metrics.threadCount = Number(jvm.threadCount);
+    if (jvm.threadPeak != null && metrics.threadCount == null) metrics.threadCount = Number(jvm.threadPeak);
+    if (jvm.gcCollections != null && metrics.gcCollections == null) metrics.gcCollections = Number(jvm.gcCollections);
+    if (jvm.gcTime != null && metrics.gcTime == null) metrics.gcTime = Number(jvm.gcTime);
+    if (jvm.classesLoaded != null && metrics.classesLoaded == null) metrics.classesLoaded = Number(jvm.classesLoaded);
+    // Compute memory percent from heap usage
+    if (jvm.heapUsed != null && jvm.heapMax != null && jvm.heapMax > 0 && metrics.memoryPercent == null) {
+      metrics.memoryPercent = Math.round((Number(jvm.heapUsed) / Number(jvm.heapMax)) * 100);
+      metrics.memoryUsedMB = Number(jvm.heapUsed);
+      metrics.memoryTotalMB = Number(jvm.heapMax);
+    }
+  }
+
+  // ── Handle monitoring metrics endpoint response ──
+  if (dashStats?._metricSeries && Array.isArray(dashStats._metricSeries)) {
+    for (const series of dashStats._metricSeries) {
+      const name = (series.name ?? '').toLowerCase();
+      const data = series.data ?? [];
+      if (data.length === 0) continue;
+      const latest = data[data.length - 1];
+      const val = latest?.value ?? latest;
+      if (val == null) continue;
+
+      if (name.includes('cpu') && metrics.cpuPercent == null) metrics.cpuPercent = Number(val);
+      if (name.includes('memory.usage') && metrics.memoryPercent == null) metrics.memoryPercent = Number(val);
+      if (name.includes('memory.total') && metrics.memoryTotalMB == null) metrics.memoryTotalMB = Number(val);
+    }
+  }
+
   // Compute memoryPercent from used/total if still null
   if (
     metrics.memoryPercent == null &&

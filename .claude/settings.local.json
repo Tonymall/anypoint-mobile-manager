@@ -78,7 +78,9 @@
       "Bash(npx tsc --noEmit --pretty)",
       "Bash(find \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager/app/\\(main\\)\" -type f)",
       "Bash(find \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager/app/\\(auth\\)\" -type f)",
-      "Bash(xargs grep -l \"useWindowDimensions\\\\|orientation\\\\|landscape\")"
+      "Bash(xargs grep -l \"useWindowDimensions\\\\|orientation\\\\|landscape\")",
+      "Bash(npx expo install --check react-native-webview)",
+      "Bash(npm install)"
     ]
   }
 }

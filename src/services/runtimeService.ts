@@ -4,6 +4,7 @@
 // ============================================================
 
 import api from './api';
+import * as monitoringService from './monitoringService';
 import type {
   Application,
   AppLogEntry,
@@ -738,13 +739,13 @@ export async function getAppLogs(
   const amcPath = amcDeploymentsPath();
   if (amcPath) {
     strategies.push(
-      { name: 'amc-direct', fn: () => api.get(`${amcPath}/${domain}/logs`, { params: getParams }) },
+      { name: 'amc-direct', fn: () => api.get(`${amcPath}/${domain}/logs`, { params: getParams, headers: { Accept: 'application/json' } }) },
       { name: 'amc-lookup', fn: async () => {
         const { data: deps } = await api.get(amcPath!);
         const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
         const match = items.find((d: any) => d.name === domain || d.id === domain);
         if (!match) throw new Error('No CH2 deployment found');
-        return api.get(`${amcPath}/${match.id}/logs`, { params: getParams });
+        return api.get(`${amcPath}/${match.id}/logs`, { params: getParams, headers: { Accept: 'application/json' } });
       }},
     );
 
@@ -785,7 +786,7 @@ export async function getAppLogs(
         // Step 3: Get logs using specId
         return api.get(
           `${amcPath}/${deploymentId}/specs/${specId}/logs`,
-          { params: { descending: true, limit } },
+          { params: { descending: true, limit }, headers: { Accept: 'application/json' } },
         );
       }},
     );
@@ -877,6 +878,13 @@ export async function getAppLogs(
         return entries;
       }
 
+      // Detect and log HTML responses (common CH2/AMC issue)
+      if (typeof data === 'string' && data.trim().length > 0) {
+        const trimmed = data.trim();
+        if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+          console.warn(`[getAppLogs] "${name}" returned HTML instead of JSON — skipping`);
+        }
+      }
       // Diagnostic: endpoint returned 200 but no entries extracted
       if (!_logEndpointsChecked) {
         const preview = typeof data === 'string'
@@ -972,7 +980,7 @@ async function _getLogsByStrategy(
       if (!amcP) throw new Error('No AMC path available');
       return api.get(
         `${amcP}/${_cachedAmcDeploymentId}/specs/${_cachedAmcSpecId}/logs`,
-        { params: { descending: true, limit: getParams.limit ?? 200, startDate: getParams.startDate, endDate: getParams.endDate } },
+        { params: { descending: true, limit: getParams.limit ?? 200, startDate: getParams.startDate, endDate: getParams.endDate }, headers: { Accept: 'application/json' } },
       );
     }
     case 'rtf-logs': {
@@ -1440,12 +1448,16 @@ async function discoverInfluxDatasource(): Promise<boolean> {
   console.log('[Monitoring] discoverInfluxDatasource() called, current state:', _influxAvailable);
   if (_influxAvailable !== null) return _influxAvailable;
 
+  let _influxTriedCount = 0;
+
   // ── Step 1: List all datasources and find InfluxDB ones ──
   try {
     const { data } = await api.get('/monitoring/api/visualizer/api/datasources');
     console.log(`[Monitoring] Datasources API returned: ${Array.isArray(data) ? data.length + ' entries' : typeof data}`);
 
     if (Array.isArray(data) && data.length > 0) {
+      // Log datasource summary: total count and all types
+      console.log(`[Monitoring] Datasource list: ${data.length} total, types: ${[...new Set(data.map((d: any) => d.type))].join(', ')}`);
       // Log all datasources for debug
       for (const ds of data) {
         console.log(`[Monitoring] Datasource: id=${ds.id}, type=${ds.type}, name=${ds.name}, db=${ds.database ?? ds.jsonData?.database ?? 'unknown'}`);
@@ -1461,6 +1473,7 @@ async function discoverInfluxDatasource(): Promise<boolean> {
 
         // Test each datasource to find one that works
         for (const ds of influxDatasources) {
+          _influxTriedCount++;
           const dsId = ds.id;
           const rawDbName = ds.database ?? ds.jsonData?.database ?? '';
 
@@ -1484,7 +1497,8 @@ async function discoverInfluxDatasource(): Promise<boolean> {
               return true;
             }
           } catch (testErr: any) {
-            console.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}`);
+            const errBody = testErr?.response?.data ? (typeof testErr.response.data === 'string' ? testErr.response.data : JSON.stringify(testErr.response.data)).slice(0, 200) : '';
+            console.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}${errBody ? ' body=' + errBody : ''}`);
             // Also try without quotes
             if (rawDbName && !rawDbName.startsWith('"')) {
               try {
@@ -1512,7 +1526,7 @@ async function discoverInfluxDatasource(): Promise<boolean> {
   }
 
   _influxAvailable = false;
-  console.log('[Monitoring] No working InfluxDB datasource found');
+  console.log(`[Monitoring] No working InfluxDB datasource found (tried ${_influxTriedCount} InfluxDB datasource(s))`);
   return false;
 }
 
@@ -1955,11 +1969,12 @@ export async function getDashboardStats(
       }
 
       // Log diagnostics
+      const monitoringEnabled = appDetail.monitoringEnabled ?? appDetail.monitoring?.enabled ?? false;
       const wsType = ws == null ? 'null' : Array.isArray(ws) ? `array(${ws.length})` : `object(${Object.keys(ws).length})`;
       const hasKeys = appDetail ? Object.keys(appDetail).filter(k =>
         k.includes('worker') || k.includes('monitor') || k.includes('stat')
       ).join(',') : '';
-      console.log(`[getDashboardStats] App detail for ${domain}: fullDomain=${_appFullDomain}, workerStatuses=${wsType}, hasStats=${hasStats}, relevant keys=[${hasKeys}]`);
+      console.log(`[getDashboardStats] App detail for ${domain}: monitoringEnabled=${monitoringEnabled}, fullDomain=${_appFullDomain}, workerStatuses=${wsType}, hasStats=${hasStats}, relevant keys=[${hasKeys}]`);
     }
   } catch (_) {
     // App detail fetch failed, try other sources
@@ -2022,7 +2037,7 @@ export async function getDashboardStats(
             }),
             // Observability Metrics API — use correct AMQL metric types
             () => api.post('/observability/api/v1/metrics:search', {
-              query: `SELECT count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES PT1H`,
+              query: `SELECT timestamp, count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES PT1H`,
             }),
             // Alternative: try mulesoft.app.message for message counts
             () => api.post('/observability/api/v1/metrics:search', {
@@ -2117,7 +2132,7 @@ export async function getDashboardStats(
       {
         label: 'observability-inbound',
         fn: () => api.post('/observability/api/v1/metrics:search', {
-          query: `SELECT avg(response_time), count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES ${amqlInterval}`,
+          query: `SELECT timestamp, avg(response_time), count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES ${amqlInterval}`,
         }),
       },
     ];
@@ -2208,6 +2223,46 @@ export async function getDashboardStats(
     if (hasAnyObservabilityData) {
       console.log(`[getDashboardStats] Observability API returned app-level metrics for ${domain}:`, observabilityResult._appMetrics);
       return observabilityResult;
+    }
+  }
+
+  // --- JVM metrics endpoint (direct monitoring API) ---
+  if (orgId && envId) {
+    try {
+      const jvmData = await monitoringService.getJVMMetrics(orgId, envId, domain);
+      if (jvmData && typeof jvmData === 'object' && Object.keys(jvmData).length > 0) {
+        console.log(`[getDashboardStats] JVM endpoint returned data for ${domain}:`, Object.keys(jvmData).join(', '));
+        return {
+          _source: 'jvm-endpoint',
+          _jvmMetrics: jvmData,
+        };
+      }
+    } catch (err: any) {
+      console.log(`[getDashboardStats] JVM endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
+    }
+  }
+
+  // --- Monitoring metrics endpoint (POST metrics API) ---
+  if (orgId && envId) {
+    try {
+      const fromIso = new Date(startMs).toISOString();
+      const toIso = new Date(now).toISOString();
+      const metricsData = await monitoringService.getMetrics(orgId, envId, {
+        resourceId: domain,
+        metricNames: ['cpu.usage', 'memory.usage', 'memory.total'],
+        startDate: fromIso,
+        endDate: toIso,
+        interval: 'PT1M',
+      });
+      if (metricsData && Array.isArray(metricsData) && metricsData.length > 0) {
+        console.log(`[getDashboardStats] Monitoring metrics endpoint returned ${metricsData.length} series for ${domain}`);
+        return {
+          _source: 'monitoring-metrics',
+          _metricSeries: metricsData,
+        };
+      }
+    } catch (err: any) {
+      console.log(`[getDashboardStats] Monitoring metrics endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
     }
   }
 
