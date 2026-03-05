@@ -1,22 +1,19 @@
 // ============================================================
 // Settings Screen - App preferences, region, theme, logout
+// 2026 Modern Dark-First Design
 // ============================================================
 
 import React, { useCallback, useState, useMemo } from 'react';
 import { useRouter } from 'expo-router';
-import { StyleSheet, View, ScrollView } from 'react-native';
+import { StyleSheet, View, ScrollView, Pressable } from 'react-native';
 import {
   Text,
-  List,
   Switch,
-  Divider,
   useTheme,
   Button,
   RadioButton,
   Portal,
   Dialog,
-  Avatar,
-  Surface,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -29,6 +26,77 @@ import { useAppStore } from '../../stores/appStore';
 import * as authService from '../../services/authService';
 import { resetSessionFlags } from '../../services/runtimeService';
 import { getRegionById } from '../../config/regions';
+import { hapticWarning, hapticSelection } from '../../utils/haptics';
+import { anypointColors } from '../../theme';
+
+// ── Reusable Setting Row ──
+const SettingRow: React.FC<{
+  icon: string;
+  iconColor?: string;
+  iconBg?: string;
+  title: string;
+  subtitle?: string;
+  right?: React.ReactNode;
+  onPress?: () => void;
+  showChevron?: boolean;
+}> = ({ icon, iconColor, iconBg, title, subtitle, right, onPress, showChevron }) => {
+  const theme = useTheme();
+  const content = (
+    <View style={rowStyles.container}>
+      <View style={[rowStyles.iconBox, { backgroundColor: iconBg ?? theme.colors.surfaceVariant }]}>
+        <Icon name={icon} size={18} color={iconColor ?? theme.colors.onSurfaceVariant} />
+      </View>
+      <View style={rowStyles.textCol}>
+        <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '500' }}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {right}
+      {showChevron && !right && (
+        <Icon name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.5 }} />
+      )}
+    </View>
+  );
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        android_ripple={{ color: theme.colors.primaryContainer }}
+        accessibilityLabel={`${title}${subtitle ? ': ' + subtitle : ''}`}
+        accessibilityRole="button"
+        accessibilityHint="Double tap to change"
+      >
+        {content}
+      </Pressable>
+    );
+  }
+  return content;
+};
+
+const rowStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 14,
+  },
+  iconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  textCol: {
+    flex: 1,
+  },
+});
 
 const SettingsScreen: React.FC = () => {
   const theme = useTheme();
@@ -59,13 +127,14 @@ const SettingsScreen: React.FC = () => {
   );
 
   const handleLogout = useCallback(async () => {
+    hapticWarning();
     console.log('[Settings] Logout initiated');
     setLoggingOut(true);
     setLogoutDialogVisible(false);
     try {
-      await authService.logout(); // calls resetApiState() — clears tokens, headers, auth, refresh state
+      await authService.logout();
       console.log('[Settings] authService.logout() complete (API state reset)');
-      resetSessionFlags(); // Clear stale log/monitoring endpoint caches
+      resetSessionFlags();
       console.log('[Settings] runtimeService session flags reset');
     } finally {
       queryClient.clear();
@@ -77,22 +146,17 @@ const SettingsScreen: React.FC = () => {
   }, [logout, queryClient]);
 
   const handleSwitchOrg = useCallback(() => {
-    // Navigate to org selection.
-    // Don't clear org/env state yet — user may press back.
-    // State is cleared in OrgSelectScreen only when user actually selects a new org.
     router.push({ pathname: '/(auth)/select-org' as any, params: { fromSettings: '1' } });
   }, [router]);
 
   const handleSwitchEnv = useCallback(() => {
-    // Don't clear currentEnvironment — keep it until user picks a new one.
-    // This prevents "Not selected" if the user presses back.
     queryClient.clear();
     router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: '1' } });
   }, [router, queryClient]);
 
   const themeLabel =
     settings.theme === 'system'
-      ? 'System default'
+      ? 'System'
       : settings.theme === 'dark'
         ? 'Dark'
         : 'Light';
@@ -108,189 +172,236 @@ const SettingsScreen: React.FC = () => {
     ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`
     : '?';
 
+  const envColor = currentEnv?.isProduction ? anypointColors.success : anypointColors.warning;
+
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top }}
+      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }}
       showsVerticalScrollIndicator={false}
     >
-      {/* Profile Header */}
-      <Surface style={styles.profileCard} elevation={2}>
-        <Avatar.Text
-          size={64}
-          label={initials}
-          style={{ backgroundColor: theme.colors.primaryContainer }}
-          labelStyle={{ color: theme.colors.primary, fontWeight: '700' }}
-        />
-        <Text variant="titleLarge" style={[styles.profileName, { color: theme.colors.onSurface }]}>
-          {user ? `${user.firstName} ${user.lastName}` : 'User'}
-        </Text>
-        <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-          {user?.email ?? ''}
-        </Text>
-        <View style={styles.profileChips}>
-          <View style={[styles.profileChip, { backgroundColor: theme.colors.primaryContainer }]}>
-            <Icon name="domain" size={14} color={theme.colors.primary} />
-            <Text variant="labelSmall" style={{ color: theme.colors.primary, marginLeft: 4 }}>
-              {currentOrg?.name ?? user?.organizationName ?? 'N/A'}
+      {/* ── Profile Card ── */}
+      <View style={styles.profileCard}>
+        {/* Accent glow at top */}
+        <View style={styles.profileAccent} />
+
+        <View style={styles.profileContent}>
+          {/* Avatar */}
+          <View style={[styles.avatar, { backgroundColor: theme.colors.primary + '18' }]}>
+            <Text style={[styles.avatarText, { color: theme.colors.primary }]}>
+              {initials}
             </Text>
+            {/* Online indicator */}
+            <View style={styles.onlineDot} />
           </View>
-          <View style={[styles.profileChip, { backgroundColor: theme.colors.secondaryContainer }]}>
-            <Icon name="earth" size={14} color={theme.colors.secondary} />
-            <Text variant="labelSmall" style={{ color: theme.colors.secondary, marginLeft: 4 }}>
-              {currentRegion.label}
-            </Text>
+
+          <Text variant="titleLarge" style={[styles.profileName, { color: theme.colors.onSurface }]}>
+            {user ? `${user.firstName} ${user.lastName}` : 'User'}
+          </Text>
+          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+            {user?.email ?? ''}
+          </Text>
+
+          {/* Chips row */}
+          <View style={styles.chipsRow}>
+            <View style={[styles.chip, { backgroundColor: theme.colors.primary + '14' }]}>
+              <Icon name="domain" size={13} color={theme.colors.primary} />
+              <Text style={[styles.chipText, { color: theme.colors.primary }]}>
+                {currentOrg?.name ?? user?.organizationName ?? 'N/A'}
+              </Text>
+            </View>
+            <View style={[styles.chip, { backgroundColor: theme.colors.secondary + '14' }]}>
+              <Icon name="earth" size={13} color={theme.colors.secondary} />
+              <Text style={[styles.chipText, { color: theme.colors.secondary }]}>
+                {currentRegion.label}
+              </Text>
+            </View>
           </View>
+
+          {currentEnv && (
+            <View style={[styles.chip, { backgroundColor: envColor + '14', marginTop: 6 }]}>
+              <Icon
+                name={currentEnv.isProduction ? 'shield-check' : 'test-tube'}
+                size={13}
+                color={envColor}
+              />
+              <Text style={[styles.chipText, { color: envColor }]}>
+                {currentEnv.name}
+              </Text>
+            </View>
+          )}
         </View>
-        {currentEnv && (
-          <View style={[styles.profileChip, { backgroundColor: currentEnv.isProduction ? '#3FB95018' : '#D2992218', marginTop: 8 }]}>
-            <Icon name={currentEnv.isProduction ? 'shield-check' : 'test-tube'} size={14} color={currentEnv.isProduction ? '#3FB950' : '#D29922'} />
-            <Text variant="labelSmall" style={{ color: currentEnv.isProduction ? '#3FB950' : '#D29922', marginLeft: 4 }}>
-              {currentEnv.name}
-            </Text>
-          </View>
-        )}
-      </Surface>
+      </View>
 
-      {/* Organization Section */}
-      <List.Section>
-        <List.Subheader style={styles.sectionHeader}>Organization</List.Subheader>
-        <List.Item
+      {/* ── Organization Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          ORGANIZATION
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="domain"
+          iconColor={theme.colors.primary}
+          iconBg={theme.colors.primary + '14'}
           title="Switch Organization"
-          description={currentOrg?.name ?? 'Not selected'}
-          left={(props) => <List.Icon {...props} icon="domain" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          subtitle={currentOrg?.name ?? 'Not selected'}
           onPress={handleSwitchOrg}
-          style={styles.listItem}
+          showChevron
         />
-        <List.Item
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="server"
+          iconColor={theme.colors.tertiary}
+          iconBg={theme.colors.tertiary + '14'}
           title="Switch Environment"
-          description={currentEnv?.name ?? 'Not selected'}
-          left={(props) => <List.Icon {...props} icon="server" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          subtitle={currentEnv?.name ?? 'Not selected'}
           onPress={handleSwitchEnv}
-          style={styles.listItem}
+          showChevron
         />
-      </List.Section>
+      </View>
 
-      <Divider style={styles.sectionDivider} />
-
-      {/* Connection Section (read-only) */}
-      <List.Section>
-        <List.Subheader style={styles.sectionHeader}>Connection</List.Subheader>
-        <List.Item
+      {/* ── Connection Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.secondary }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          CONNECTION
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="earth"
+          iconColor={theme.colors.secondary}
+          iconBg={theme.colors.secondary + '14'}
           title="Control Plane"
-          description={`${currentRegion.label} — ${currentRegion.notes}`}
-          left={(props) => <List.Icon {...props} icon="earth" />}
-          style={styles.listItem}
+          subtitle={`${currentRegion.label} — ${currentRegion.notes}`}
         />
-        <List.Item
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="link-variant"
+          iconColor={theme.colors.onSurfaceVariant}
           title="API Endpoint"
-          description={currentRegion.url}
-          left={(props) => <List.Icon {...props} icon="link-variant" />}
-          style={styles.listItem}
+          subtitle={currentRegion.url}
         />
-      </List.Section>
+      </View>
 
-      <Divider style={styles.sectionDivider} />
-
-      {/* Appearance */}
-      <List.Section>
-        <List.Subheader style={styles.sectionHeader}>Appearance</List.Subheader>
-        <List.Item
+      {/* ── Appearance Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          APPEARANCE
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon={themeIcon}
+          iconColor={anypointColors.mulePurple}
+          iconBg={anypointColors.mulePurple + '14'}
           title="Theme"
-          description={themeLabel}
-          left={(props) => <List.Icon {...props} icon={themeIcon} />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
+          subtitle={themeLabel}
           onPress={() => setThemeDialogVisible(true)}
-          style={styles.listItem}
+          showChevron
         />
-      </List.Section>
+      </View>
 
-      <Divider style={styles.sectionDivider} />
-
-      {/* Notifications */}
-      <List.Section>
-        <List.Subheader style={styles.sectionHeader}>Notifications</List.Subheader>
-        <List.Item
+      {/* ── Notifications Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.warning }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          NOTIFICATIONS
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="bell-outline"
+          iconColor={anypointColors.warning}
+          iconBg={anypointColors.warning + '14'}
           title="Push Notifications"
-          left={(props) => <List.Icon {...props} icon="bell" />}
-          right={() => (
+          right={
             <Switch
               value={settings.pushNotificationsEnabled}
-              onValueChange={(val) =>
-                updateSettings({ pushNotificationsEnabled: val })
-              }
+              onValueChange={(val) => { hapticSelection(); updateSettings({ pushNotificationsEnabled: val }); }}
+              accessibilityLabel={`Push notifications ${settings.pushNotificationsEnabled ? 'enabled' : 'disabled'}`}
             />
-          )}
-          style={styles.listItem}
+          }
         />
-        <List.Item
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="alert-circle-outline"
+          iconColor={anypointColors.error}
+          iconBg={anypointColors.error + '14'}
           title="Critical Alerts"
-          left={(props) => <List.Icon {...props} icon="alert-circle" />}
-          right={() => (
+          right={
             <Switch
               value={settings.notificationPreferences.criticalAlerts}
-              onValueChange={(val) =>
+              onValueChange={(val) => {
+                hapticSelection();
                 updateSettings({
                   notificationPreferences: {
                     ...settings.notificationPreferences,
                     criticalAlerts: val,
                   },
-                })
-              }
+                });
+              }}
+              accessibilityLabel={`Critical alerts ${settings.notificationPreferences.criticalAlerts ? 'enabled' : 'disabled'}`}
             />
-          )}
-          style={styles.listItem}
+          }
         />
-        <List.Item
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="rocket-launch-outline"
+          iconColor={anypointColors.info}
+          iconBg={anypointColors.info + '14'}
           title="Deployment Updates"
-          left={(props) => <List.Icon {...props} icon="rocket-launch" />}
-          right={() => (
+          right={
             <Switch
               value={settings.notificationPreferences.deploymentUpdates}
-              onValueChange={(val) =>
+              onValueChange={(val) => {
+                hapticSelection();
                 updateSettings({
                   notificationPreferences: {
                     ...settings.notificationPreferences,
                     deploymentUpdates: val,
                   },
-                })
-              }
+                });
+              }}
+              accessibilityLabel={`Deployment updates ${settings.notificationPreferences.deploymentUpdates ? 'enabled' : 'disabled'}`}
             />
-          )}
-          style={styles.listItem}
+          }
         />
-      </List.Section>
-
-      <Divider style={styles.sectionDivider} />
-
-      {/* About */}
-      <List.Section>
-        <List.Subheader style={styles.sectionHeader}>About</List.Subheader>
-        <List.Item
-          title="Version"
-          description="1.0.0"
-          left={(props) => <List.Icon {...props} icon="information" />}
-          style={styles.listItem}
-        />
-      </List.Section>
-
-      {/* Logout */}
-      <View style={styles.logoutContainer}>
-        <Button
-          mode="outlined"
-          onPress={() => setLogoutDialogVisible(true)}
-          loading={loggingOut}
-          disabled={loggingOut}
-          icon="logout"
-          textColor={theme.colors.error}
-          style={[styles.logoutButton, { borderColor: theme.colors.error }]}
-          contentStyle={styles.logoutButtonContent}
-        >
-          Sign Out
-        </Button>
       </View>
+
+      {/* ── About Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.onSurfaceVariant }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          ABOUT
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="information-outline"
+          iconColor={theme.colors.onSurfaceVariant}
+          title="Version"
+          subtitle="1.0.0"
+        />
+      </View>
+
+      {/* ── Sign Out ── */}
+      <Pressable
+        onPress={() => setLogoutDialogVisible(true)}
+        disabled={loggingOut}
+        style={[styles.logoutBtn, { borderColor: theme.colors.error + '40' }]}
+        android_ripple={{ color: theme.colors.error + '20' }}
+        accessibilityLabel="Sign out"
+        accessibilityRole="button"
+      >
+        <Icon name="logout" size={18} color={theme.colors.error} />
+        <Text style={[styles.logoutText, { color: theme.colors.error }]}>
+          {loggingOut ? 'Signing Out...' : 'Sign Out'}
+        </Text>
+      </Pressable>
 
       {/* Theme Dialog */}
       <Portal>
@@ -345,51 +456,118 @@ const createStyles = (theme: MD3Theme) =>
       flex: 1,
       backgroundColor: theme.colors.background,
     },
+    // ── Profile Card ──
     profileCard: {
-      margin: 16,
-      padding: 24,
+      marginHorizontal: 16,
+      marginBottom: 8,
       borderRadius: 20,
-      alignItems: 'center',
       backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.outlineVariant,
+      overflow: 'hidden',
+    },
+    profileAccent: {
+      height: 3,
+      backgroundColor: theme.colors.primary,
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+    },
+    profileContent: {
+      alignItems: 'center',
+      padding: 24,
+      paddingTop: 20,
+    },
+    avatar: {
+      width: 72,
+      height: 72,
+      borderRadius: 18,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    avatarText: {
+      fontSize: 26,
+      fontWeight: '700',
+    },
+    onlineDot: {
+      position: 'absolute',
+      bottom: 2,
+      right: 2,
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      backgroundColor: anypointColors.success,
+      borderWidth: 2.5,
+      borderColor: theme.colors.surface,
     },
     profileName: {
       fontWeight: '700',
-      marginTop: 12,
-      marginBottom: 4,
+      marginBottom: 2,
+      letterSpacing: -0.3,
     },
-    profileChips: {
+    chipsRow: {
       flexDirection: 'row',
       gap: 8,
       marginTop: 12,
     },
-    profileChip: {
+    chip: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 14,
+      paddingVertical: 5,
+      borderRadius: 10,
+      gap: 5,
     },
+    chipText: {
+      fontSize: 11,
+      fontWeight: '600',
+      letterSpacing: 0.2,
+    },
+    // ── Sections ──
     sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingHorizontal: 20,
+      marginTop: 20,
+      marginBottom: 8,
+    },
+    sectionAccent: {
+      width: 3,
+      height: 14,
+      borderRadius: 2,
+    },
+    card: {
+      marginHorizontal: 16,
+      borderRadius: 16,
+      backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.outlineVariant,
+      overflow: 'hidden',
+    },
+    separator: {
+      height: StyleSheet.hairlineWidth,
+      marginLeft: 66,
+    },
+    // ── Logout ──
+    logoutBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      marginHorizontal: 16,
+      marginTop: 28,
+      paddingVertical: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+    },
+    logoutText: {
+      fontSize: 15,
       fontWeight: '600',
     },
-    sectionDivider: {
-      marginHorizontal: 16,
-    },
-    listItem: {
-      paddingHorizontal: 8,
-    },
-    logoutContainer: {
-      padding: 24,
-      paddingBottom: 48,
-    },
-    logoutButton: {
-      borderRadius: 12,
-    },
-    logoutButtonContent: {
-      paddingVertical: 4,
-    },
+    // ── Dialog ──
     dialog: {
-      borderRadius: 20,
+      borderRadius: 24,
     },
   });
 

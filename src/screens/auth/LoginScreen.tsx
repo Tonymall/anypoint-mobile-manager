@@ -1,8 +1,7 @@
 // ============================================================
 // Anypoint Mobile Platform - Login Screen
-// Username/password authentication with region selector,
-// SSO, and biometric options.
-// Fully responsive: phones, tablets (iPad), landscape/portrait.
+// 2026 Modern Dark-First Design with glassmorphic card,
+// animated background, and refined typography.
 // ============================================================
 
 import React, { useState, useCallback, useRef } from 'react';
@@ -24,7 +23,6 @@ import {
   ActivityIndicator,
   Divider,
   Menu,
-  Surface,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,6 +34,8 @@ import { setRegion, resetApiState } from '../../services/api';
 import { resetSessionFlags } from '../../services/runtimeService';
 import { CONTROL_PLANE_REGIONS, getRegionById, getRegionUrl } from '../../config/regions';
 import type { AuthTokens, User, ControlPlaneRegionId } from '../../types';
+import AnimatedBackground from '../../components/common/AnimatedBackground';
+import { hapticSuccess, hapticError } from '../../utils/haptics';
 
 const LoginScreen: React.FC = () => {
   const theme = useTheme();
@@ -44,17 +44,13 @@ const LoginScreen: React.FC = () => {
   const { width, height } = useWindowDimensions();
 
   // ── Responsive breakpoints ──
-  // Tablet: shortest side ≥ 768px (covers iPad Mini through iPad Pro)
-  // Landscape: width > height
-  // TabletLandscape: both → triggers horizontal (side-by-side) layout
   const isTablet = Math.min(width, height) >= 768;
   const isLandscape = width > height;
   const isTabletLandscape = isTablet && isLandscape;
 
-  // Dynamic sizing based on device class
   const formMaxWidth = isTabletLandscape ? 480 : isTablet ? 560 : 420;
-  const logoSize = isTabletLandscape ? 64 : isTablet ? 56 : 44;
-  const logoCircleSize = isTabletLandscape ? 112 : isTablet ? 100 : 88;
+  const logoSize = isTabletLandscape ? 56 : isTablet ? 48 : 40;
+  const logoCircleSize = isTabletLandscape ? 100 : isTablet ? 88 : 76;
   const horizontalPadding = isTabletLandscape ? 40 : isTablet ? 40 : 24;
 
   // --- Form State ---
@@ -76,7 +72,6 @@ const LoginScreen: React.FC = () => {
   const loginPending = useAuthStore((state) => state.loginPending);
   const setIsLoadingStore = useAuthStore((state) => state.setIsLoading);
 
-  // --- Ref-based guard against concurrent login attempts ---
   const loginInProgressRef = useRef(false);
 
   // --- Handlers ---
@@ -96,7 +91,6 @@ const LoginScreen: React.FC = () => {
       return;
     }
 
-    // ── Synchronous guard: prevent concurrent login attempts ──
     if (loginInProgressRef.current) {
       console.log('[Login] Already in progress — ignoring duplicate tap');
       return;
@@ -109,16 +103,11 @@ const LoginScreen: React.FC = () => {
 
     try {
       console.log('[Login] Starting login flow...');
-
-      // Clear ALL stale state from any previous session to prevent 403
       await resetApiState();
-      resetSessionFlags(); // Clear stale log/monitoring endpoint caches
+      resetSessionFlags();
       console.log('[Login] API state reset complete');
 
-      // Ensure the API client points to the selected region
       await setRegion(selectedRegion);
-
-      // Build the region URL directly from config
       const regionUrl = getRegionUrl(selectedRegion);
       console.log('[Login] Region set to:', selectedRegion, regionUrl);
 
@@ -128,16 +117,14 @@ const LoginScreen: React.FC = () => {
       );
       console.log('[Login] Login succeeded, token obtained');
 
-      // Pass the token and region URL explicitly — completely bypasses
-      // interceptors / SecureStore timing to prevent 403 on re-login.
       const user: User = await authService.getCurrentUser(
         tokens.accessToken,
         regionUrl,
       );
       console.log('[Login] User fetched:', user.firstName, user.lastName);
 
-      // Store user & tokens but keep isAuthenticated false until org/env selected
       loginPending(user, tokens);
+      hapticSuccess();
       console.log('[Login] loginPending called, navigating to select-org');
       router.push('/(auth)/select-org' as any);
     } catch (error: any) {
@@ -158,6 +145,7 @@ const LoginScreen: React.FC = () => {
         error?.message ??
         'Authentication failed. Please check your credentials and try again.';
       setErrorMessage(message);
+      hapticError();
       setSnackbarVisible(true);
     } finally {
       setIsLoading(false);
@@ -183,6 +171,9 @@ const LoginScreen: React.FC = () => {
       style={[styles.root, { backgroundColor: theme.colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      {/* Animated gradient orbs background */}
+      <AnimatedBackground />
+
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
@@ -197,9 +188,6 @@ const LoginScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* ── Inner content wrapper ──
-            Portrait: vertical stack, centered.
-            Tablet landscape: horizontal row, branding left, form right. */}
         <View
           style={[
             styles.innerContent,
@@ -218,10 +206,10 @@ const LoginScreen: React.FC = () => {
               style={[
                 styles.logoCircle,
                 {
-                  backgroundColor: theme.colors.primaryContainer,
+                  backgroundColor: theme.colors.primary + '14',
                   width: logoCircleSize,
                   height: logoCircleSize,
-                  borderRadius: logoCircleSize / 2,
+                  borderRadius: logoCircleSize * 0.26,
                 },
               ]}
             >
@@ -231,13 +219,13 @@ const LoginScreen: React.FC = () => {
               variant={isTablet ? 'headlineLarge' : 'headlineMedium'}
               style={[styles.appTitle, { color: theme.colors.onBackground }]}
             >
-              Anypoint Platform
+              MuleOps
             </Text>
             <Text
               variant={isTablet ? 'bodyLarge' : 'bodyMedium'}
               style={[styles.appSubtitle, { color: theme.colors.onSurfaceVariant }]}
             >
-              Mobile Management Console
+              Mobile Operations Control
             </Text>
           </View>
 
@@ -249,163 +237,178 @@ const LoginScreen: React.FC = () => {
             ]}
           >
             {/* Login Form */}
-            <Surface
+            <View
               style={[
                 styles.formCard,
-                { backgroundColor: theme.colors.surface, maxWidth: formMaxWidth },
+                {
+                  backgroundColor: theme.colors.surface,
+                  maxWidth: formMaxWidth,
+                  borderColor: theme.colors.outlineVariant,
+                },
               ]}
-              elevation={2}
             >
-              {/* Region Selector */}
-              <Text
-                variant="labelMedium"
-                style={[styles.fieldLabel, { color: theme.colors.onSurfaceVariant }]}
-              >
-                Control Plane Region
-              </Text>
-              <Menu
-                visible={regionMenuVisible}
-                onDismiss={() => setRegionMenuVisible(false)}
-                anchor={
-                  <Pressable
-                    onPress={() => setRegionMenuVisible(true)}
-                    disabled={isLoading}
-                  >
-                    <View
-                      style={[
-                        styles.regionSelector,
-                        {
-                          borderColor: theme.colors.outline,
-                          backgroundColor: theme.colors.background,
-                        },
-                      ]}
-                    >
-                      <View style={styles.regionLeft}>
-                        <View
-                          style={[
-                            styles.regionIconWrap,
-                            { backgroundColor: theme.colors.primaryContainer },
-                          ]}
-                        >
-                          <Icon name="earth" size={18} color={theme.colors.primary} />
-                        </View>
-                        <View style={styles.regionTextContainer}>
-                          <Text
-                            variant="bodyMedium"
-                            style={{ color: theme.colors.onSurface, fontWeight: '600' }}
-                          >
-                            {currentRegion.label}
-                          </Text>
-                          <Text
-                            variant="bodySmall"
-                            style={{ color: theme.colors.onSurfaceVariant }}
-                          >
-                            {currentRegion.notes}
-                          </Text>
-                        </View>
-                      </View>
-                      <Icon
-                        name="chevron-down"
-                        size={20}
-                        color={theme.colors.onSurfaceVariant}
-                      />
-                    </View>
-                  </Pressable>
-                }
-                contentStyle={{ backgroundColor: theme.colors.surface }}
-              >
-                {CONTROL_PLANE_REGIONS.map((region) => (
-                  <Menu.Item
-                    key={region.id}
-                    title={`${region.label} — ${region.notes}`}
-                    leadingIcon={
-                      selectedRegion === region.id ? 'check-circle' : 'earth'
-                    }
-                    onPress={() => handleRegionSelect(region.id)}
-                  />
-                ))}
-              </Menu>
+              {/* Accent glow */}
+              <View style={[styles.formAccent, { backgroundColor: theme.colors.primary }]} />
 
-              <Divider style={styles.formDivider} />
-
-              <TextInput
-                label="Username"
-                value={username}
-                onChangeText={setUsername}
-                mode="outlined"
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="username"
-                left={<TextInput.Icon icon="account-outline" />}
-                disabled={isLoading}
-                style={styles.input}
-                returnKeyType="next"
-                outlineStyle={styles.inputOutline}
-              />
-
-              <TextInput
-                label="Password"
-                value={password}
-                onChangeText={setPassword}
-                mode="outlined"
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                textContentType="password"
-                left={<TextInput.Icon icon="lock-outline" />}
-                right={
-                  <TextInput.Icon
-                    icon={showPassword ? 'eye-off' : 'eye'}
-                    onPress={() => setShowPassword(!showPassword)}
-                  />
-                }
-                disabled={isLoading}
-                style={styles.input}
-                returnKeyType="done"
-                onSubmitEditing={handleLogin}
-                outlineStyle={styles.inputOutline}
-              />
-
-              {/* Sign In Button */}
-              <Button
-                mode="contained"
-                onPress={handleLogin}
-                disabled={!isFormValid || isLoading}
-                loading={isLoading}
-                style={styles.signInButton}
-                contentStyle={styles.signInButtonContent}
-                labelStyle={styles.signInButtonLabel}
-              >
-                {isLoading ? 'Signing In...' : 'Sign In'}
-              </Button>
-
-              {/* Divider */}
-              <View style={styles.dividerRow}>
-                <Divider style={styles.dividerLine} />
+              <View style={styles.formInner}>
+                {/* Region Selector */}
                 <Text
                   variant="labelMedium"
-                  style={[
-                    styles.dividerText,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
+                  style={[styles.fieldLabel, { color: theme.colors.onSurfaceVariant }]}
                 >
-                  or
+                  Control Plane Region
                 </Text>
-                <Divider style={styles.dividerLine} />
-              </View>
+                <Menu
+                  visible={regionMenuVisible}
+                  onDismiss={() => setRegionMenuVisible(false)}
+                  anchor={
+                    <Pressable
+                      onPress={() => setRegionMenuVisible(true)}
+                      disabled={isLoading}
+                      accessibilityLabel={`Control plane region: ${currentRegion.label}. Double tap to change.`}
+                      accessibilityRole="button"
+                    >
+                      <View
+                        style={[
+                          styles.regionSelector,
+                          {
+                            borderColor: theme.colors.outline,
+                            backgroundColor: theme.colors.background,
+                          },
+                        ]}
+                      >
+                        <View style={styles.regionLeft}>
+                          <View
+                            style={[
+                              styles.regionIconWrap,
+                              { backgroundColor: theme.colors.primary + '14' },
+                            ]}
+                          >
+                            <Icon name="earth" size={18} color={theme.colors.primary} />
+                          </View>
+                          <View style={styles.regionTextContainer}>
+                            <Text
+                              variant="bodyMedium"
+                              style={{ color: theme.colors.onSurface, fontWeight: '600' }}
+                            >
+                              {currentRegion.label}
+                            </Text>
+                            <Text
+                              variant="bodySmall"
+                              style={{ color: theme.colors.onSurfaceVariant }}
+                            >
+                              {currentRegion.notes}
+                            </Text>
+                          </View>
+                        </View>
+                        <Icon
+                          name="chevron-down"
+                          size={20}
+                          color={theme.colors.onSurfaceVariant}
+                        />
+                      </View>
+                    </Pressable>
+                  }
+                  contentStyle={{ backgroundColor: theme.colors.surface }}
+                >
+                  {CONTROL_PLANE_REGIONS.map((region) => (
+                    <Menu.Item
+                      key={region.id}
+                      title={`${region.label} — ${region.notes}`}
+                      leadingIcon={
+                        selectedRegion === region.id ? 'check-circle' : 'earth'
+                      }
+                      onPress={() => handleRegionSelect(region.id)}
+                    />
+                  ))}
+                </Menu>
 
-              {/* SSO Button */}
-              <Button
-                mode="outlined"
-                onPress={handleSSOLogin}
-                disabled={isLoading}
-                icon="shield-key-outline"
-                style={styles.ssoButton}
-                contentStyle={styles.ssoButtonContent}
-              >
-                Sign in with SSO
-              </Button>
-            </Surface>
+                <Divider style={styles.formDivider} />
+
+                <TextInput
+                  label="Username"
+                  value={username}
+                  onChangeText={setUsername}
+                  mode="outlined"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="username"
+                  left={<TextInput.Icon icon="account-outline" />}
+                  disabled={isLoading}
+                  style={styles.input}
+                  returnKeyType="next"
+                  outlineStyle={styles.inputOutline}
+                />
+
+                <TextInput
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  mode="outlined"
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="password"
+                  left={<TextInput.Icon icon="lock-outline" />}
+                  right={
+                    <TextInput.Icon
+                      icon={showPassword ? 'eye-off' : 'eye'}
+                      onPress={() => setShowPassword(!showPassword)}
+                      accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                    />
+                  }
+                  disabled={isLoading}
+                  style={styles.input}
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogin}
+                  outlineStyle={styles.inputOutline}
+                />
+
+                {/* Sign In Button */}
+                <Button
+                  mode="contained"
+                  onPress={handleLogin}
+                  disabled={!isFormValid || isLoading}
+                  loading={isLoading}
+                  style={styles.signInButton}
+                  contentStyle={styles.signInButtonContent}
+                  labelStyle={styles.signInButtonLabel}
+                  accessibilityLabel={isLoading ? 'Signing in, please wait' : 'Sign in to Anypoint Platform'}
+                  accessibilityRole="button"
+                >
+                  {isLoading ? 'Signing In...' : 'Sign In'}
+                </Button>
+
+                {/* Divider */}
+                <View style={styles.dividerRow}>
+                  <Divider style={styles.dividerLine} />
+                  <Text
+                    variant="labelMedium"
+                    style={[
+                      styles.dividerText,
+                      { color: theme.colors.onSurfaceVariant },
+                    ]}
+                  >
+                    or
+                  </Text>
+                  <Divider style={styles.dividerLine} />
+                </View>
+
+                {/* SSO Button */}
+                <Button
+                  mode="outlined"
+                  onPress={handleSSOLogin}
+                  disabled={isLoading}
+                  icon="shield-key-outline"
+                  style={styles.ssoButton}
+                  contentStyle={styles.ssoButtonContent}
+                  accessibilityLabel="Sign in with Single Sign-On"
+                  accessibilityRole="button"
+                >
+                  Sign in with SSO
+                </Button>
+              </View>
+            </View>
 
             {/* Footer */}
             <View style={styles.footer}>
@@ -413,7 +416,7 @@ const LoginScreen: React.FC = () => {
                 variant="bodySmall"
                 style={{ color: theme.colors.onSurfaceVariant }}
               >
-                MuleSoft Anypoint Platform
+                MuleOps — Mobile Operations Control
               </Text>
               <Text
                 variant="bodySmall"
@@ -468,18 +471,18 @@ const styles = StyleSheet.create({
   },
 
   // ── Inner content layout ──
-  // Default (phone / tablet portrait): vertical stack, centered
   innerContent: {
     width: '100%',
-    maxWidth: 600,
+    maxWidth: 560,
+    alignSelf: 'center',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // Tablet landscape: horizontal row, items vertically centered
   innerContentLandscape: {
     flexDirection: 'row',
     alignItems: 'center',
-    maxWidth: 900,
+    maxWidth: 880,
+    alignSelf: 'center',
   },
 
   // ── Branding ──
@@ -491,7 +494,6 @@ const styles = StyleSheet.create({
   brandingLandscape: {
     marginBottom: 20,
   },
-  // Tablet landscape: branding takes the left panel
   brandingTabletLandscape: {
     flex: 2,
     marginBottom: 0,
@@ -506,6 +508,7 @@ const styles = StyleSheet.create({
   appTitle: {
     fontWeight: '700',
     textAlign: 'center',
+    letterSpacing: -0.5,
   },
   appSubtitle: {
     marginTop: 4,
@@ -517,7 +520,6 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
-  // Tablet landscape: form takes the right panel
   formColumnLandscape: {
     flex: 3,
     justifyContent: 'center',
@@ -527,19 +529,27 @@ const styles = StyleSheet.create({
   // ── Form card ──
   formCard: {
     width: '100%',
-    borderRadius: 20,
+    borderRadius: 22,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  formAccent: {
+    height: 3,
+  },
+  formInner: {
     padding: 24,
   },
   fieldLabel: {
     marginBottom: 8,
     fontWeight: '600',
+    letterSpacing: 0.3,
   },
   regionSelector: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
@@ -566,11 +576,11 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   inputOutline: {
-    borderRadius: 10,
+    borderRadius: 12,
   },
   signInButton: {
     marginBottom: 16,
-    borderRadius: 12,
+    borderRadius: 14,
   },
   signInButtonContent: {
     paddingVertical: 6,
@@ -591,7 +601,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
   },
   ssoButton: {
-    borderRadius: 12,
+    borderRadius: 14,
   },
   ssoButtonContent: {
     paddingVertical: 6,

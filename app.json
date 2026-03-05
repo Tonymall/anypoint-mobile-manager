@@ -1,33 +1,33 @@
 {
   "expo": {
-    "name": "Anypoint Mobile Platform",
-    "slug": "anypoint-mobile-platform",
+    "name": "MuleOps",
+    "slug": "muleops",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "scheme": "anypoint-mobile",
+    "scheme": "muleops",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1A1A2E"
+      "backgroundColor": "#0A1628"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mulesoft.anypoint.mobile",
+      "bundleIdentifier": "com.muleops.mobile",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID to securely login to Anypoint Platform"
+        "NSFaceIDUsageDescription": "Use Face ID to securely login to MuleOps"
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1A1A2E"
+        "backgroundColor": "#0A1628"
       },
-      "package": "com.mulesoft.anypoint.mobile",
+      "package": "com.muleops.mobile",
       "permissions": [
         "USE_BIOMETRIC",
         "USE_FINGERPRINT"

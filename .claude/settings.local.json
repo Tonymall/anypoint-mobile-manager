@@ -54,7 +54,31 @@
       "Bash(\"C:\\\\Program Files\\\\nodejs\\\\node.exe\" \"node_modules\\\\typescript\\\\bin\\\\tsc\" --noEmit)",
       "Bash(cmd /c \"npx tsc --noEmit --pretty 2>&1\")",
       "Bash(node ./node_modules/.bin/tsc --noEmit)",
-      "Bash(\"/c/Program Files/nodejs/npx.cmd\" --prefix \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager\" tsc --noEmit)"
+      "Bash(\"/c/Program Files/nodejs/npx.cmd\" --prefix \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager\" tsc --noEmit)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(command -v npx)",
+      "Bash(command -v expo)",
+      "Bash(ls \"C:/Users/xTony/Documents/Projects/anypoint-mobile-manager/node_modules/.bin/expo\"*)",
+      "Bash(ls \"C:/Users/xTony/Documents/Projects/anypoint-mobile-manager/node_modules/@expo/cli/build/bin/cli\"*)",
+      "Bash(npx expo install react-dom react-native-web)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:expo.dev)",
+      "WebFetch(domain:docs.expo.dev)",
+      "WebFetch(domain:www.animatereactnative.com)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:blog.stackademic.com)",
+      "Bash(npx expo install expo-linear-gradient)",
+      "Bash(node -e \"const pkg = require\\(''./package.json''\\); console.log\\(''expo-router:'', pkg.dependencies[''expo-router'']\\); console.log\\(''@react-navigation/bottom-tabs:'', pkg.dependencies[''@react-navigation/bottom-tabs'']\\); console.log\\(''@react-navigation/native:'', pkg.dependencies[''@react-navigation/native'']\\);\")",
+      "Bash(node -e \"const pkg = require\\(''./node_modules/@react-navigation/bottom-tabs/package.json''\\); console.log\\(''bottom-tabs actual:'', pkg.version\\);\")",
+      "Bash(ls -la /c/Users/xTony/Documents/Projects/anypoint-mobile-manager/*.png)",
+      "Bash(ls -la /c/Users/xTony/Documents/Projects/anypoint-mobile-manager/assets/*.png)",
+      "Bash(node -e \"try { require.resolve\\(''expo-splash-screen''\\); console.log\\(''INSTALLED''\\); } catch\\(e\\) { console.log\\(''NOT INSTALLED''\\); }\")",
+      "Bash(sort -t/ -k6)",
+      "WebFetch(domain:applighter.dev)",
+      "Bash(npx tsc --noEmit --pretty)",
+      "Bash(find \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager/app/\\(main\\)\" -type f)",
+      "Bash(find \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager/app/\\(auth\\)\" -type f)",
+      "Bash(xargs grep -l \"useWindowDimensions\\\\|orientation\\\\|landscape\")"
     ]
   }
 }

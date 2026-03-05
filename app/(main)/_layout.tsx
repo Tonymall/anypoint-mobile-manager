@@ -1,9 +1,23 @@
 import React, { useEffect } from 'react';
-import { Platform } from 'react-native';
+import {
+  View,
+  TouchableOpacity,
+  Platform,
+  StyleSheet,
+  useWindowDimensions,
+} from 'react-native';
 import { Tabs, Redirect } from 'expo-router';
-import { useTheme } from 'react-native-paper';
+import { useTheme, Text } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { hapticLight } from '../../src/utils/haptics';
 import { useAuthStore } from '../../src/stores/authStore';
 import {
   setAuthHeader,
@@ -12,6 +26,126 @@ import {
   getStoredAccessToken,
 } from '../../src/services/api';
 
+// ── Tab definitions (order matters — matches Tabs.Screen order) ──
+const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: string }> = {
+  index: { title: 'Dashboard', icon: 'view-dashboard-outline', iconFocused: 'view-dashboard' },
+  runtime: { title: 'Runtime', icon: 'application-cog-outline', iconFocused: 'application-cog' },
+  apis: { title: 'APIs', icon: 'api' },
+  monitoring: { title: 'Monitor', icon: 'chart-line-variant', iconFocused: 'chart-line' },
+  settings: { title: 'Settings', icon: 'cog-outline', iconFocused: 'cog' },
+};
+
+// ── Custom Animated Tab Bar — 2026 Minimal Design ──
+function AnimatedTabBar({ state, descriptors, navigation }: any) {
+  const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+
+  const visibleRoutes = state.routes.filter(
+    (route: any) => TAB_ITEMS[route.name] !== undefined,
+  );
+  const visibleCount = visibleRoutes.length;
+  const tabWidth = screenWidth / visibleCount;
+
+  const activeRoute = state.routes[state.index];
+  const activeVisibleIndex = visibleRoutes.findIndex(
+    (route: any) => route.key === activeRoute?.key,
+  );
+  const safeIndex = activeVisibleIndex >= 0 ? activeVisibleIndex : 0;
+
+  const indicatorX = useSharedValue(safeIndex * tabWidth);
+
+  useEffect(() => {
+    indicatorX.value = withTiming(safeIndex * tabWidth, {
+      duration: 300,
+      easing: Easing.bezier(0.33, 0, 0, 1), // iOS-like spring curve
+    });
+  }, [safeIndex, tabWidth]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorX.value }],
+    width: tabWidth,
+  }));
+
+  const bottomPad = Math.max(insets.bottom, 8);
+  const barHeight = 60 + bottomPad;
+
+  return (
+    <View
+      style={[
+        styles.tabBar,
+        {
+          height: barHeight,
+          paddingBottom: bottomPad,
+          backgroundColor: theme.colors.surface,
+          borderTopColor: theme.colors.outlineVariant,
+        },
+      ]}
+    >
+      {/* Sliding pill indicator */}
+      <Animated.View style={[styles.indicator, indicatorStyle]}>
+        <View style={[styles.indicatorPill, { backgroundColor: theme.colors.primary + '12' }]} />
+      </Animated.View>
+      {/* Accent line at top of active tab */}
+      <Animated.View style={[styles.topLine, indicatorStyle]}>
+        <View style={[styles.topLineDot, { backgroundColor: theme.colors.primary }]} />
+      </Animated.View>
+
+      {/* Tab buttons */}
+      {visibleRoutes.map((route: any, index: number) => {
+        const isFocused = safeIndex === index;
+        const tabDef = TAB_ITEMS[route.name];
+        const iconName = isFocused
+          ? (tabDef?.iconFocused ?? tabDef?.icon ?? 'circle')
+          : (tabDef?.icon ?? 'circle');
+
+        const onPress = () => {
+          hapticLight();
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!isFocused && !event.defaultPrevented) {
+            navigation.navigate(route.name);
+          }
+        };
+
+        return (
+          <TouchableOpacity
+            key={route.key}
+            onPress={onPress}
+            activeOpacity={0.65}
+            style={styles.tabButton}
+            accessibilityLabel={`${tabDef?.title ?? route.name} tab`}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: isFocused }}
+          >
+            <Icon
+              name={iconName}
+              size={21}
+              color={isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant}
+            />
+            <Text
+              style={[
+                styles.tabLabel,
+                {
+                  color: isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                  fontWeight: isFocused ? '700' : '500',
+                  opacity: isFocused ? 1 : 0.7,
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {tabDef?.title ?? route.name}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 export default function MainLayout() {
   const theme = useTheme();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -19,19 +153,13 @@ export default function MainLayout() {
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
   const tokens = useAuthStore((s) => s.tokens);
 
-  // ── CRITICAL: Ensure API headers match Zustand state ──────────────
-  // This catches edge cases where headers get out of sync during
-  // the login flow (the root cause of the 403-on-re-login bug).
-  // Runs on every mount AND whenever org/env/auth changes.
   useEffect(() => {
     if (!isAuthenticated) return;
 
     async function syncHeaders() {
-      // 1. Ensure Authorization header is set
       if (tokens?.accessToken) {
         setAuthHeader(tokens.accessToken);
       } else {
-        // Fallback: read from SecureStore
         const storedToken = await getStoredAccessToken();
         if (storedToken) {
           setAuthHeader(storedToken);
@@ -39,106 +167,83 @@ export default function MainLayout() {
           console.warn('[MainLayout] No token available to set auth header!');
         }
       }
-
-      // 2. Ensure Org/Env headers are set
-      if (currentOrg?.id) {
-        setOrganizationHeader(currentOrg.id);
-      }
-      if (currentEnv?.id) {
-        setEnvironmentHeader(currentEnv.id);
-      }
-
-      console.log('[MainLayout] Headers synced:', {
-        hasAuth: !!(tokens?.accessToken),
-        orgId: currentOrg?.id ?? 'NONE',
-        envId: currentEnv?.id ?? 'NONE',
-      });
+      if (currentOrg?.id) setOrganizationHeader(currentOrg.id);
+      if (currentEnv?.id) setEnvironmentHeader(currentEnv.id);
     }
 
     syncHeaders();
   }, [isAuthenticated, currentOrg?.id, currentEnv?.id, tokens?.accessToken]);
 
-  // Redirect to login if not authenticated
   if (!isAuthenticated) {
     return <Redirect href="/(auth)/login" />;
   }
 
   return (
     <Tabs
+      tabBar={(props) => <AnimatedTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.onSurfaceVariant,
-        tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopWidth: 0,
-          elevation: 8,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          height: Platform.OS === 'ios' ? 88 : 64,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 8,
-          paddingTop: 8,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-        },
+        lazy: true,
+        freezeOnBlur: true,
+        sceneStyle: { backgroundColor: theme.colors.background },
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Dashboard',
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="view-dashboard" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="runtime"
-        options={{
-          title: 'Runtime',
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="application-cog" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="apis"
-        options={{
-          title: 'APIs',
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="api" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="monitoring"
-        options={{
-          title: 'Monitoring',
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="chart-line" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: 'Settings',
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="cog" size={size} color={color} />
-          ),
-        }}
-      />
-      {/* Hidden route — accessible via router.push but not shown in tab bar */}
-      <Tabs.Screen
-        name="workers"
-        options={{
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
+      <Tabs.Screen name="runtime" options={{ title: 'Runtime' }} />
+      <Tabs.Screen name="apis" options={{ title: 'APIs' }} />
+      <Tabs.Screen name="monitoring" options={{ title: 'Monitoring' }} />
+      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+      {/* Workers: hidden from tab bar — only accessible via router.push */}
+      <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBar: {
+    flexDirection: 'row',
+    position: 'relative',
+    borderTopWidth: 1,
+    elevation: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+  },
+  indicator: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  indicatorPill: {
+    width: '85%',
+    height: '100%',
+    borderRadius: 16,
+  },
+  topLine: {
+    position: 'absolute',
+    top: 0,
+    height: 2.5,
+    alignItems: 'center',
+  },
+  topLineDot: {
+    width: 20,
+    height: 2.5,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 2,
+  },
+  tabButton: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 10,
+    minHeight: 44,
+  },
+  tabLabel: {
+    fontSize: 11,
+    marginTop: 4,
+    letterSpacing: 0.2,
+  },
+});

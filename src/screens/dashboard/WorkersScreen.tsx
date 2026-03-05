@@ -9,8 +9,9 @@ import { Appbar, Text, Card, useTheme, ProgressBar, Icon } from 'react-native-pa
 import type { MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useApplications } from '../../hooks/queries';
-import { anypointColors, statusColors } from '../../theme';
+import { anypointColors } from '../../theme';
 import { getAppName, getAppId, getWorkerInfo } from '../../utils/appHelpers';
+import { getStatusColor } from '../../utils/statusHelpers';
 import LoadingState from '../../components/common/LoadingState';
 
 /** Map worker type name to vCore value */
@@ -31,15 +32,6 @@ const parseVCores = (typeName: string): number => {
     'large': 2,
   };
   return mapping[typeName] ?? 0.1;
-};
-
-const getStatusColor = (status: string): string => {
-  switch (status) {
-    case 'STARTED': return statusColors.started;
-    case 'STOPPED': return statusColors.stopped;
-    case 'FAILED': return statusColors.failed;
-    default: return statusColors.stopped;
-  }
 };
 
 interface WorkerAppItem {

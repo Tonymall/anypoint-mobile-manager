@@ -4,8 +4,8 @@
 // running app so we get full JVM/worker monitoring data.
 // ============================================================
 
-import React, { useMemo, useCallback, useState, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, RefreshControl } from 'react-native';
+import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
+import { View, FlatList, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
 import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,64 +13,13 @@ import { useRouter } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
 import { useApplications, useManagedAPIs, runtimeKeys } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
-import { isMonitoringUnavailable } from '../../services/runtimeService';
+import { isMonitoringUnavailable, resetSessionFlags } from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
-import { anypointColors, statusColors } from '../../theme';
+import { anypointColors } from '../../theme';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
+import { getStatusColor, getStatusLabel, formatRelativeTime, formatMB } from '../../utils/statusHelpers';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
-
-// --- Status helpers ---
-
-const getStatusColor = (status: string): string => {
-  switch (status) {
-    case 'STARTED': return statusColors.started;
-    case 'STOPPED': return statusColors.stopped;
-    case 'FAILED':
-    case 'DEPLOY_FAILED': return statusColors.failed;
-    case 'DEPLOYING':
-    case 'UNDEPLOYING':
-    case 'UPDATING': return statusColors.deploying;
-    default: return statusColors.stopped;
-  }
-};
-
-const getStatusLabel = (status: string): string => {
-  switch (status) {
-    case 'STARTED': return 'Running';
-    case 'STOPPED': return 'Stopped';
-    case 'FAILED': return 'Failed';
-    case 'DEPLOYING': return 'Deploying';
-    case 'UPDATING': return 'Updating';
-    default: return status;
-  }
-};
-
-// --- Relative time formatter ---
-
-const formatRelativeTime = (raw: any): string => {
-  if (!raw) return '';
-  const date = typeof raw === 'number' ? new Date(raw) : new Date(raw);
-  if (isNaN(date.getTime())) return '';
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-};
-
-// --- Format bytes to MB ---
-
-const formatMB = (bytes: number): string => {
-  if (bytes <= 0) return '0';
-  if (bytes > 10_000) return `${Math.round(bytes / (1024 * 1024))}`;
-  return `${Math.round(bytes)}`;
-};
 
 // --- Summary Card ---
 
@@ -156,6 +105,13 @@ interface MonitoringMetrics {
   heapUsed: number | null;
   heapCommitted: number | null;
   nonHeapUsed: number | null;
+  // App-level metrics (from Observability/Metrics API)
+  inboundRequestCount: number | null;
+  inboundAvgResponseTime: number | null;
+  outboundRequestCount: number | null;
+  outboundAvgResponseTime: number | null;
+  messageCount: number | null;
+  errorCount: number | null;
 }
 
 function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
@@ -171,6 +127,12 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
     heapUsed: null,
     heapCommitted: null,
     nonHeapUsed: null,
+    inboundRequestCount: null,
+    inboundAvgResponseTime: null,
+    outboundRequestCount: null,
+    outboundAvgResponseTime: null,
+    messageCount: null,
+    errorCount: null,
   };
 
   // Source 0: `monitoring` field from the Application type definition
@@ -361,6 +323,33 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
     }
   }
 
+  // ── Handle InfluxDB extra metrics (from _extraMetrics field) ──
+  if (dashStats?._extraMetrics) {
+    const ex = dashStats._extraMetrics;
+    if (ex.threadCount != null && metrics.threadCount == null) metrics.threadCount = Number(ex.threadCount);
+    if (ex.heapUsed != null && metrics.heapUsed == null) metrics.heapUsed = Number(ex.heapUsed);
+    if (ex.heapCommitted != null && metrics.heapCommitted == null) metrics.heapCommitted = Number(ex.heapCommitted);
+    if (ex.gcCollections != null && metrics.gcCollections == null) metrics.gcCollections = Number(ex.gcCollections);
+    if (ex.classesLoaded != null && metrics.classesLoaded == null) metrics.classesLoaded = Number(ex.classesLoaded);
+    // HTTP metrics from InfluxDB
+    if (ex.inboundRequestCount != null && metrics.inboundRequestCount == null) metrics.inboundRequestCount = Number(ex.inboundRequestCount);
+    if (ex.inboundAvgResponseTime != null && metrics.inboundAvgResponseTime == null) metrics.inboundAvgResponseTime = Number(ex.inboundAvgResponseTime);
+    if (ex.outboundRequestCount != null && metrics.outboundRequestCount == null) metrics.outboundRequestCount = Number(ex.outboundRequestCount);
+    if (ex.outboundAvgResponseTime != null && metrics.outboundAvgResponseTime == null) metrics.outboundAvgResponseTime = Number(ex.outboundAvgResponseTime);
+    if (ex.messageCount != null && metrics.messageCount == null) metrics.messageCount = Number(ex.messageCount);
+  }
+
+  // ── Handle Observability Metrics API app-level metrics ──
+  if (dashStats?._appMetrics) {
+    const am = dashStats._appMetrics;
+    if (am.inboundRequestCount != null && metrics.inboundRequestCount == null) metrics.inboundRequestCount = Number(am.inboundRequestCount);
+    if (am.inboundAvgResponseTime != null && metrics.inboundAvgResponseTime == null) metrics.inboundAvgResponseTime = Number(am.inboundAvgResponseTime);
+    if (am.outboundRequestCount != null && metrics.outboundRequestCount == null) metrics.outboundRequestCount = Number(am.outboundRequestCount);
+    if (am.outboundAvgResponseTime != null && metrics.outboundAvgResponseTime == null) metrics.outboundAvgResponseTime = Number(am.outboundAvgResponseTime);
+    if (am.messageCount != null && metrics.messageCount == null) metrics.messageCount = Number(am.messageCount);
+    if (am.errorCount != null && metrics.errorCount == null) metrics.errorCount = Number(am.errorCount);
+  }
+
   // Compute memoryPercent from used/total if still null
   if (
     metrics.memoryPercent == null &&
@@ -405,6 +394,7 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
 
   const hasMetrics = metrics.cpuPercent != null || metrics.memoryPercent != null;
   const hasJvm = metrics.threadCount != null || metrics.classesLoaded != null || metrics.gcCollections != null || metrics.heapUsed != null;
+  const hasAppMetrics = metrics.inboundRequestCount != null || metrics.messageCount != null || metrics.inboundAvgResponseTime != null;
 
   return (
     <Card style={styles.appCard} mode="contained" onPress={onPress}>
@@ -554,6 +544,36 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
             ) : null}
           </View>
         ) : null}
+
+        {/* App-level metrics (from Observability/Metrics API) */}
+        {hasAppMetrics ? (
+          <View style={styles.monitoringSection}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <Icon source="chart-timeline-variant" size={14} color={theme.colors.primary} />
+              <Text variant="labelSmall" style={{ color: theme.colors.primary, fontWeight: '600' }}>
+                Application Metrics
+              </Text>
+            </View>
+            {metrics.inboundRequestCount != null ? (
+              <StatRow label="Inbound Requests" value={metrics.inboundRequestCount.toLocaleString()} theme={theme} />
+            ) : null}
+            {metrics.inboundAvgResponseTime != null ? (
+              <StatRow label="Avg Response Time" value={`${Math.round(metrics.inboundAvgResponseTime)} ms`} theme={theme} />
+            ) : null}
+            {metrics.messageCount != null ? (
+              <StatRow label="Messages Processed" value={metrics.messageCount.toLocaleString()} theme={theme} />
+            ) : null}
+            {metrics.errorCount != null && metrics.errorCount > 0 ? (
+              <StatRow label="Errors" value={metrics.errorCount.toLocaleString()} theme={theme} />
+            ) : null}
+            {metrics.outboundRequestCount != null ? (
+              <StatRow label="Outbound Requests" value={metrics.outboundRequestCount.toLocaleString()} theme={theme} />
+            ) : null}
+            {metrics.outboundAvgResponseTime != null ? (
+              <StatRow label="Outbound Avg RT" value={`${Math.round(metrics.outboundAvgResponseTime)} ms`} theme={theme} />
+            ) : null}
+          </View>
+        ) : null}
       </Card.Content>
     </Card>
   );
@@ -561,11 +581,16 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
 
 // --- Main Component ---
 
+// Max content width for iPad / large screens — keeps UI readable
+const CONTENT_MAX_WIDTH = 768;
+
 const MonitoringScreen: React.FC = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const scrollRef = useRef<FlatList>(null);
 
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
   const currentOrg = useAuthStore((s) => s.currentOrganization);
@@ -590,6 +615,9 @@ const MonitoringScreen: React.FC = () => {
   const isRefreshing = appsRefetching || apisRefetching;
 
   const handleRefresh = useCallback(() => {
+    // Reset monitoring discovery flags so it re-tests endpoints on refresh
+    resetSessionFlags();
+    setMonitoringDown(false);
     refetchApps();
     refetchApis();
   }, [refetchApps, refetchApis]);
@@ -603,15 +631,21 @@ const MonitoringScreen: React.FC = () => {
     return appsList;
   }, [appsList, sortOrder]);
 
-  // --- Fetch individual app details ---
+  // --- Limit to first 10 running apps to avoid hammering the API ---
+  const runningApps = useMemo(
+    () => (appsList as any[]).filter((a: any) => a?.status === 'STARTED').slice(0, 10),
+    [appsList],
+  );
+
+  // --- Fetch individual app details (only running, capped at 10) ---
   const appDetailQueries = useQueries({
-    queries: (appsList as any[]).map((app: any) => {
+    queries: runningApps.map((app: any) => {
       const d = app?.domain ?? getAppId(app);
       return {
         queryKey: runtimeKeys.application(d),
         queryFn: () => runtimeService.getApplication(d),
-        staleTime: 30_000,
-        refetchInterval: 60_000,
+        staleTime: 60_000,
+        refetchInterval: 120_000,
         enabled: !!d,
       };
     }),
@@ -624,20 +658,20 @@ const MonitoringScreen: React.FC = () => {
   }), [currentOrg?.id, currentEnv?.id]);
 
   const dashStatsQueries = useQueries({
-    queries: (appsList as any[]).map((app: any) => {
+    queries: runningApps.map((app: any) => {
       const d = app?.domain ?? getAppId(app);
-      const isRunning = app?.status === 'STARTED';
       return {
         queryKey: ['runtime', 'dashStats', d],
         queryFn: () => runtimeService.getDashboardStats(d, 60, monitoringContext),
-        staleTime: 30_000,
-        refetchInterval: 60_000,
-        enabled: !!d && isRunning,
+        staleTime: 60_000,
+        refetchInterval: 120_000,
+        enabled: !!d,
       };
     }),
   });
 
-  // Build lookup maps
+  // Build lookup maps — use stable serialized key to prevent re-render loops
+  const detailDataKey = appDetailQueries.map((q) => q.dataUpdatedAt).join(',');
   const detailMap = useMemo(() => {
     const map = new Map<string, any>();
     appDetailQueries.forEach((q) => {
@@ -647,27 +681,33 @@ const MonitoringScreen: React.FC = () => {
       }
     });
     return map;
-  }, [appDetailQueries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailDataKey]);
 
+  const dashDataKey = dashStatsQueries.map((q) => q.dataUpdatedAt).join(',');
   const dashStatsMap = useMemo(() => {
     const map = new Map<string, any>();
-    (appsList as any[]).forEach((app: any, i: number) => {
+    runningApps.forEach((app: any, i: number) => {
       const d = app?.domain ?? getAppId(app);
       if (dashStatsQueries[i]?.data) {
         map.set(d, dashStatsQueries[i].data);
       }
     });
     return map;
-  }, [appsList, dashStatsQueries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashDataKey, runningApps]);
 
+  const loadingKey = appDetailQueries.map((q) => q.isLoading ? '1' : '0').join('') +
+    dashStatsQueries.map((q) => q.isLoading ? '1' : '0').join('');
   const loadingMap = useMemo(() => {
     const map = new Map<string, boolean>();
-    (appsList as any[]).forEach((app: any, i: number) => {
+    runningApps.forEach((app: any, i: number) => {
       const d = app?.domain ?? getAppId(app);
       map.set(d, (appDetailQueries[i]?.isLoading ?? false) || (dashStatsQueries[i]?.isLoading ?? false));
     });
     return map;
-  }, [appsList, appDetailQueries, dashStatsQueries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingKey, runningApps]);
 
   // Build metrics map
   const metricsMap = useMemo(() => {
@@ -682,7 +722,7 @@ const MonitoringScreen: React.FC = () => {
   }, [appsList, detailMap, dashStatsMap]);
 
   const totalApps = appsList.length;
-  const runningApps = useMemo(() => appsList.filter((a: any) => a?.status === 'STARTED').length, [appsList]);
+  const runningAppsCount = useMemo(() => appsList.filter((a: any) => a?.status === 'STARTED').length, [appsList]);
   const failedApps = useMemo(() => appsList.filter((a: any) => a?.status === 'FAILED').length, [appsList]);
   const totalAPIs = apiList.length;
   const activeAPIs = useMemo(() => apiList.filter((api: any) => api?.status === 'active').length, [apiList]);
@@ -691,24 +731,132 @@ const MonitoringScreen: React.FC = () => {
   // Check monitoring availability after dashboardStats discovery completes.
   const anyDashLoading = dashStatsQueries.some((q) => q.isLoading);
   useEffect(() => {
-    if (!anyDashLoading && runningApps > 0) {
+    if (!anyDashLoading && runningAppsCount > 0) {
       const timer = setTimeout(() => {
         if (isMonitoringUnavailable()) setMonitoringDown(true);
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [anyDashLoading, runningApps]);
+  }, [anyDashLoading, runningAppsCount]);
 
   const handleAppPress = useCallback((app: any) => {
     const domain = app?.domain ?? getAppId(app);
     router.push({ pathname: '/(main)/monitoring/[domain]' as any, params: { domain } });
   }, [router]);
 
+  // Responsive horizontal padding for wide screens (iPad)
+  const isWide = windowWidth > CONTENT_MAX_WIDTH;
+  const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
+
+  const listHeaderComponent = useMemo(() => (
+    <>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
+        <Text variant="headlineSmall" style={styles.headerTitle}>Monitoring</Text>
+        <Text variant="bodyMedium" style={styles.headerSubtitle}>{envName}</Text>
+      </View>
+
+      {/* Summary */}
+      <View style={styles.summaryRow}>
+        <SummaryCard title="Total Apps" value={totalApps} icon="application-outline" color={anypointColors.primary}
+          subtitle={failedApps > 0 ? `${failedApps} failed` : undefined} />
+        <SummaryCard title="Running" value={`${runningAppsCount}/${totalApps}`} icon="check-circle-outline" color={anypointColors.success}
+          subtitle={totalApps > 0 ? `${Math.round((runningAppsCount / totalApps) * 100)}% healthy` : undefined} />
+        <SummaryCard title="APIs" value={totalAPIs} icon="api" color={anypointColors.secondary}
+          subtitle={activeAPIs > 0 ? `${activeAPIs} active` : undefined} />
+      </View>
+
+      {/* Monitoring unavailable banner */}
+      {monitoringDown && runningAppsCount > 0 ? (
+        <View
+          style={{
+            marginHorizontal: 16,
+            marginBottom: 14,
+            backgroundColor: anypointColors.warning + '15',
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: anypointColors.warning + '30',
+            padding: 14,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 10,
+          }}
+        >
+          <Icon source="information-outline" size={18} color={anypointColors.warning} />
+          <View style={{ flex: 1 }}>
+            <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 2 }}>
+              Live metrics unavailable
+            </Text>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
+              CPU, memory, and thread monitoring require an Anypoint Monitoring subscription (Titanium or Platinum). Application status, deployment info, and API-level metrics are still shown below. Pull to refresh to retry.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* Section header + sort */}
+      <View style={styles.sectionHeader}>
+        <Text variant="titleMedium" style={styles.sectionTitle}>Application Health</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Chip
+            icon={sortOrder === 'za' ? 'sort-alphabetical-descending' : 'sort-alphabetical-ascending'}
+            onPress={() => setSortOrder((p) => p === 'default' ? 'az' : p === 'az' ? 'za' : 'default')}
+            selected={sortOrder !== 'default'} showSelectedOverlay compact style={{ borderRadius: 10 }}>
+            {sortOrder === 'az' ? 'A → Z' : sortOrder === 'za' ? 'Z → A' : 'Sort'}
+          </Chip>
+          <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
+            {sortedApps.length} app{sortedApps.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
+      </View>
+    </>
+  ), [styles, insets.top, envName, totalApps, failedApps, runningAppsCount, totalAPIs, activeAPIs, monitoringDown, theme, sortOrder, sortedApps.length]);
+
+  const listEmptyComponent = useMemo(() => {
+    if (appsLoading) {
+      return <LoadingState message="Loading monitoring data..." />;
+    }
+    if (appsError) {
+      return <ErrorState message={(appsError as Error)?.message ?? 'Failed to load data'} onRetry={() => refetchApps()} />;
+    }
+    return (
+      <View style={styles.emptyState}>
+        <Icon source="monitor-dashboard" size={64} color={theme.colors.outlineVariant} />
+        <Text variant="titleMedium" style={styles.emptyTitle}>No applications to monitor</Text>
+        <Text variant="bodyMedium" style={styles.emptySubtitle}>Deploy applications to see monitoring data here.</Text>
+      </View>
+    );
+  }, [appsLoading, appsError, refetchApps, styles, theme]);
+
+  const renderAppCard = useCallback(({ item: app }: any) => {
+    const d = app?.domain ?? getAppId(app);
+    return (
+      <AppHealthCard
+        key={d}
+        app={detailMap.get(d) ?? app}
+        metrics={metricsMap.get(d) ?? extractMetrics(null, null)}
+        detailLoading={loadingMap.get(d) ?? false}
+        theme={theme}
+        styles={styles}
+        onPress={() => handleAppPress(app)}
+      />
+    );
+  }, [detailMap, metricsMap, loadingMap, theme, styles, handleAppPress]);
+
   return (
     <View style={styles.container}>
-      <ScrollView
+      <FlatList
+        ref={scrollRef}
+        data={appsLoading || appsError ? [] : sortedApps}
+        keyExtractor={(item: any) => item?.domain ?? getAppId(item)}
+        renderItem={renderAppCard}
+        ListHeaderComponent={listHeaderComponent}
+        ListEmptyComponent={listEmptyComponent}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          isWide && { paddingHorizontal: sidePadding },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -717,95 +865,9 @@ const MonitoringScreen: React.FC = () => {
             tintColor={theme.colors.primary}
           />
         }
-      >
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 16 }]}>
-          <Text variant="headlineSmall" style={styles.headerTitle}>Monitoring</Text>
-          <Text variant="bodyMedium" style={styles.headerSubtitle}>{envName}</Text>
-        </View>
-
-        {/* Summary */}
-        <View style={styles.summaryRow}>
-          <SummaryCard title="Total Apps" value={totalApps} icon="application-outline" color={anypointColors.primary}
-            subtitle={failedApps > 0 ? `${failedApps} failed` : undefined} />
-          <SummaryCard title="Running" value={`${runningApps}/${totalApps}`} icon="check-circle-outline" color={anypointColors.success}
-            subtitle={totalApps > 0 ? `${Math.round((runningApps / totalApps) * 100)}% healthy` : undefined} />
-          <SummaryCard title="APIs" value={totalAPIs} icon="api" color={anypointColors.secondary}
-            subtitle={activeAPIs > 0 ? `${activeAPIs} active` : undefined} />
-        </View>
-
-        {/* Monitoring unavailable banner */}
-        {monitoringDown && runningApps > 0 ? (
-          <View
-            style={{
-              marginHorizontal: 16,
-              marginBottom: 14,
-              backgroundColor: anypointColors.warning + '15',
-              borderRadius: 12,
-              borderWidth: 1,
-              borderColor: anypointColors.warning + '30',
-              padding: 14,
-              flexDirection: 'row',
-              alignItems: 'flex-start',
-              gap: 10,
-            }}
-          >
-            <Icon source="information-outline" size={18} color={anypointColors.warning} />
-            <View style={{ flex: 1 }}>
-              <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 2 }}>
-                Live metrics unavailable
-              </Text>
-              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
-                CPU, memory, and thread monitoring require an Anypoint Monitoring subscription (Titanium or Platinum). Application status and deployment info are still available below.
-              </Text>
-            </View>
-          </View>
-        ) : null}
-
-        {/* Section header + sort */}
-        <View style={styles.sectionHeader}>
-          <Text variant="titleMedium" style={styles.sectionTitle}>Application Health</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Chip
-              icon={sortOrder === 'za' ? 'sort-alphabetical-descending' : 'sort-alphabetical-ascending'}
-              onPress={() => setSortOrder((p) => p === 'default' ? 'az' : p === 'az' ? 'za' : 'default')}
-              selected={sortOrder !== 'default'} showSelectedOverlay compact style={{ borderRadius: 10 }}>
-              {sortOrder === 'az' ? 'A → Z' : sortOrder === 'za' ? 'Z → A' : 'Sort'}
-            </Chip>
-            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-              {sortedApps.length} app{sortedApps.length !== 1 ? 's' : ''}
-            </Text>
-          </View>
-        </View>
-
-        {/* App cards */}
-        {appsLoading ? (
-          <LoadingState message="Loading monitoring data..." />
-        ) : appsError ? (
-          <ErrorState message={(appsError as Error)?.message ?? 'Failed to load data'} onRetry={() => refetchApps()} />
-        ) : sortedApps.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Icon source="monitor-dashboard" size={64} color={theme.colors.outlineVariant} />
-            <Text variant="titleMedium" style={styles.emptyTitle}>No applications to monitor</Text>
-            <Text variant="bodyMedium" style={styles.emptySubtitle}>Deploy applications to see monitoring data here.</Text>
-          </View>
-        ) : (
-          sortedApps.map((app: any) => {
-            const d = app?.domain ?? getAppId(app);
-            return (
-              <AppHealthCard
-                key={d}
-                app={detailMap.get(d) ?? app}
-                metrics={metricsMap.get(d) ?? extractMetrics(null, null)}
-                detailLoading={loadingMap.get(d) ?? false}
-                theme={theme}
-                styles={styles}
-                onPress={() => handleAppPress(app)}
-              />
-            );
-          })
-        )}
-      </ScrollView>
+        windowSize={7}
+        maxToRenderPerBatch={10}
+      />
     </View>
   );
 };
@@ -822,14 +884,14 @@ const createStyles = (theme: MD3Theme) =>
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 10 },
     sectionTitle: { fontWeight: '600', color: theme.colors.onBackground },
     listContent: { paddingBottom: 32 },
-    appCard: { marginHorizontal: 16, marginBottom: 10, backgroundColor: theme.colors.surface, borderRadius: 14, borderWidth: 1, borderColor: theme.colors.surfaceVariant, elevation: 0, overflow: 'hidden' },
+    appCard: { marginHorizontal: 16, marginBottom: 10, backgroundColor: theme.colors.surface, borderRadius: 14, borderWidth: 1, borderColor: theme.colors.surfaceVariant, elevation: 0 },
     cardContent: { paddingVertical: 14, paddingHorizontal: 14 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     statusIndicator: { width: 4, height: 36, borderRadius: 2 },
     appNameWrap: { flex: 1 },
     appName: { fontWeight: '600', color: theme.colors.onSurface },
     statusChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
-    infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.outlineVariant, overflow: 'hidden' },
+    infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.outlineVariant },
     infoItem: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '48%' },
     infoText: { color: theme.colors.onSurfaceVariant, fontSize: 12, flexShrink: 1 },
     monitoringSection: { marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.outlineVariant, gap: 6 },

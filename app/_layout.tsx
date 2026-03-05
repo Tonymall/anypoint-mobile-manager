@@ -1,14 +1,15 @@
 // ============================================================
 // Root Layout - App Entry Point
-// Provides theme, navigation, and data layer
+// Provides theme, navigation, data layer, and splash screen
 // ============================================================
 
-import React, { useEffect, useState } from 'react';
-import { useColorScheme } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { useColorScheme, View } from 'react-native';
 import { Slot } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as ExpoSplashScreen from 'expo-splash-screen';
 
 import { lightTheme, darkTheme } from '../src/theme';
 import { useAppStore } from '../src/stores/appStore';
@@ -22,11 +23,17 @@ import {
 } from '../src/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QueryProvider } from '../src/providers/QueryProvider';
+import SplashScreen from '../src/components/common/SplashScreen';
+import ErrorBoundary from '../src/components/common/ErrorBoundary';
+
+// Keep the native splash screen visible while we load
+ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
 
 export default function RootLayout() {
   const systemScheme = useColorScheme();
   const themeSetting = useAppStore((s) => s.settings.theme);
   const [ready, setReady] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
 
   // Determine active theme
   const isDark =
@@ -67,17 +74,9 @@ export default function RootLayout() {
           state.logout();
         }
       } else if (!state.isAuthenticated && !state.user) {
-        // Token exists but NO user in state — truly stale session from a
-        // previous app launch. Clear the token so it doesn't get attached
-        // to a new login request.
-        //
-        // IMPORTANT: If state.user IS set but isAuthenticated is false, this
-        // is the "pending" login state (loginPending was called during the
-        // current org/env selection flow). Do NOT clear the fresh token!
         await clearTokens();
       } else if (!state.isAuthenticated && state.user) {
-        // "Pending" login state — user just logged in and is selecting
-        // org/env. Token is fresh and valid. Don't touch it.
+        // "Pending" login state — don't touch token
       } else {
         // Authenticated with valid token — restore headers
         if (state.currentOrganization) {
@@ -88,8 +87,14 @@ export default function RootLayout() {
         }
       }
       setReady(true);
+      // Hide the native splash once app data is ready
+      await ExpoSplashScreen.hideAsync().catch(() => {});
     }
     restore();
+  }, []);
+
+  const handleSplashFinish = useCallback(() => {
+    setSplashDone(true);
   }, []);
 
   if (!ready) return null;
@@ -99,7 +104,13 @@ export default function RootLayout() {
       <QueryProvider>
         <PaperProvider theme={theme}>
           <StatusBar style={isDark ? 'light' : 'dark'} />
-          <Slot />
+          <ErrorBoundary>
+            <View style={{ flex: 1 }}>
+              <Slot />
+              {/* Custom animated splash overlay — fades out after 1.5s */}
+              {!splashDone && <SplashScreen onFinish={handleSplashFinish} />}
+            </View>
+          </ErrorBoundary>
         </PaperProvider>
       </QueryProvider>
     </SafeAreaProvider>

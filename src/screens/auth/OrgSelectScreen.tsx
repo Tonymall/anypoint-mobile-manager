@@ -1,13 +1,17 @@
+// ============================================================
+// Organization Selection Screen - 2026 Modern Design
+// ============================================================
+
 import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, View, FlatList } from 'react-native';
 import {
   Text,
-  Surface,
   useTheme,
   ActivityIndicator,
   TouchableRipple,
   Appbar,
 } from 'react-native-paper';
+import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +21,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useOrganizations } from '../../hooks/queries';
 import { setOrganizationHeader, clearHeaders } from '../../services/api';
 import type { Organization } from '../../types';
+import { hapticLight } from '../../utils/haptics';
 
 const OrgSelectScreen: React.FC = () => {
   const theme = useTheme();
@@ -39,14 +44,13 @@ const OrgSelectScreen: React.FC = () => {
 
   const handleSelect = useCallback(
     (org: Organization) => {
+      hapticLight();
       console.log('[OrgSelect] Selected org:', org.name, org.id);
-      // Clear old org data now that user has made a selection
       queryClient.clear();
       clearHeaders();
       switchOrganization(org);
       setOrganizationHeader(org.id);
       console.log('[OrgSelect] Org header set, navigating to select-env');
-      // Pass fromSettings along so EnvSelectScreen knows the flow origin
       router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: fromSettings ?? '' } });
     },
     [switchOrganization, router, fromSettings, queryClient],
@@ -61,43 +65,44 @@ const OrgSelectScreen: React.FC = () => {
   }, [router, fromSettings]);
 
   const renderOrg = useCallback(
-    ({ item }: { item: Organization }) => (
+    ({ item, index }: { item: Organization; index: number }) => (
       <TouchableRipple
         onPress={() => handleSelect(item)}
         borderless
-        style={[styles.orgCard, { backgroundColor: theme.colors.surface }]}
+        style={[styles.orgCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}
         rippleColor={theme.colors.primaryContainer}
+        accessibilityLabel={`Organization: ${item.name}`}
+        accessibilityRole="button"
+        accessibilityHint="Double tap to select"
       >
         <View style={styles.orgRow}>
           <View
             style={[
               styles.orgIcon,
-              { backgroundColor: theme.colors.primaryContainer },
+              { backgroundColor: theme.colors.primary + '14' },
             ]}
           >
-            <Icon name="domain" size={22} color={theme.colors.primary} />
+            <Icon name="domain" size={20} color={theme.colors.primary} />
           </View>
           <View style={styles.orgInfo}>
             <Text
               variant="titleMedium"
-              style={{ color: theme.colors.onSurface, fontWeight: '600' }}
+              style={{ color: theme.colors.onSurface, fontWeight: '600', letterSpacing: -0.2 }}
               numberOfLines={1}
             >
               {item.name}
             </Text>
             <Text
               variant="bodySmall"
-              style={{ color: theme.colors.onSurfaceVariant }}
+              style={{ color: theme.colors.onSurfaceVariant, fontFamily: 'monospace', fontSize: 11 }}
               numberOfLines={1}
             >
               {item.id}
             </Text>
           </View>
-          <Icon
-            name="chevron-right"
-            size={22}
-            color={theme.colors.onSurfaceVariant}
-          />
+          <View style={[styles.chevronCircle, { backgroundColor: theme.colors.surfaceVariant }]}>
+            <Icon name="chevron-right" size={18} color={theme.colors.onSurfaceVariant} />
+          </View>
         </View>
       </TouchableRipple>
     ),
@@ -118,10 +123,10 @@ const OrgSelectScreen: React.FC = () => {
         <View
           style={[
             styles.headerIcon,
-            { backgroundColor: theme.colors.primaryContainer },
+            { backgroundColor: theme.colors.primary + '14' },
           ]}
         >
-          <Icon name="domain" size={32} color={theme.colors.primary} />
+          <Icon name="domain" size={30} color={theme.colors.primary} />
         </View>
         <Text
           variant="headlineSmall"
@@ -140,29 +145,33 @@ const OrgSelectScreen: React.FC = () => {
 
       {isLoading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text
-            variant="bodyMedium"
-            style={{ color: theme.colors.onSurfaceVariant, marginTop: 16 }}
-          >
-            Loading organizations...
-          </Text>
+          <View style={[styles.loadingBox, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text
+              variant="bodyMedium"
+              style={{ color: theme.colors.onSurfaceVariant, marginTop: 16 }}
+            >
+              Loading organizations...
+            </Text>
+          </View>
         </View>
       ) : error ? (
         <View style={styles.center}>
-          <Icon name="alert-circle-outline" size={48} color={theme.colors.error} />
-          <Text
-            variant="bodyMedium"
-            style={{ color: theme.colors.error, marginTop: 12 }}
-          >
-            Failed to load organizations
-          </Text>
-          <Text
-            variant="bodySmall"
-            style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}
-          >
-            {(error as Error).message}
-          </Text>
+          <View style={[styles.errorBox, { backgroundColor: theme.colors.errorContainer + '30' }]}>
+            <Icon name="alert-circle-outline" size={40} color={theme.colors.error} />
+            <Text
+              variant="bodyMedium"
+              style={{ color: theme.colors.error, marginTop: 12 }}
+            >
+              Failed to load organizations
+            </Text>
+            <Text
+              variant="bodySmall"
+              style={{ color: theme.colors.onSurfaceVariant, marginTop: 4, textAlign: 'center' }}
+            >
+              {(error as Error).message}
+            </Text>
+          </View>
         </View>
       ) : (
         <FlatList
@@ -188,8 +197,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   headerIcon: {
-    width: 64,
-    height: 64,
+    width: 68,
+    height: 68,
     borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
@@ -198,19 +207,40 @@ const styles = StyleSheet.create({
   title: {
     fontWeight: '700',
     marginBottom: 8,
+    letterSpacing: -0.3,
   },
   center: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  loadingBox: {
+    padding: 32,
+    borderRadius: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    width: '100%',
+    maxWidth: 320,
+  },
+  errorBox: {
+    padding: 28,
+    borderRadius: 20,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 360,
   },
   list: {
     paddingHorizontal: 20,
     paddingBottom: 32,
+    maxWidth: 600,
+    width: '100%',
+    alignSelf: 'center',
   },
   orgCard: {
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
+    borderWidth: 1,
   },
   orgRow: {
     flexDirection: 'row',
@@ -220,7 +250,7 @@ const styles = StyleSheet.create({
   orgIcon: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: 13,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -228,6 +258,13 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: 14,
     marginRight: 8,
+  },
+  chevronCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

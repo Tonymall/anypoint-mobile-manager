@@ -215,9 +215,11 @@ export async function getApplications(params?: {
  * Tries CloudHub 1.0 first, then CloudHub 2.0.
  */
 export async function getApplication(domain: string): Promise<Application> {
-  // Try CH1
+  // Try CH1 — use retreiveStatistics=true to get worker statistics
   try {
-    const { data } = await api.get<Application>(`${CLOUDHUB_BASE}/applications/${domain}`);
+    const { data } = await api.get<Application>(`${CLOUDHUB_BASE}/applications/${domain}`, {
+      params: { retreiveStatistics: true },
+    });
     return data;
   } catch (err: any) {
     if (err?.response?.status === 401) throw err;
@@ -459,9 +461,15 @@ export async function restartApp(domain: string): Promise<Application> {
 /**
  * Module-level flag: skip log endpoints known to 404.
  * Prevents spamming API calls that always fail.
+ *
+ * IMPORTANT: These flags are NOW per-domain. When the user navigates
+ * from one app's logs to another, we reset the flags so the new app's
+ * endpoints are discovered fresh. This prevents a failed discovery for
+ * app A from blocking log access for app B.
  */
 let _logEndpointsAvailable = true;
 let _logEndpointsChecked = false;
+let _logCheckedForDomain: string | null = null;
 
 /**
  * Cache the working log strategy so subsequent polls skip straight to it.
@@ -508,6 +516,17 @@ export async function getAppLogs(
     offset?: number;
   },
 ): Promise<AppLogEntry[]> {
+  // ── PER-DOMAIN RESET: if switching to a different app, clear stale flags ──
+  // This prevents a failed log discovery for app A from blocking app B's logs.
+  if (_logCheckedForDomain && _logCheckedForDomain !== domain) {
+    console.log(`[getAppLogs] Domain changed from "${_logCheckedForDomain}" to "${domain}" — resetting log flags`);
+    _logEndpointsAvailable = true;
+    _logEndpointsChecked = false;
+    _workingLogStrategy = null;
+    _instancesEndpointAvailable = true;
+  }
+  _logCheckedForDomain = domain;
+
   const now = new Date();
   const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
@@ -622,11 +641,16 @@ export async function getAppLogs(
       _cachedCh1Domain = domain;
       console.log(`[getAppLogs] CH1 deployment discovered: ${deploymentId}`);
 
-      // Step 2: Get logs using the real deployment ID
-      return api.get(
-        `${CLOUDHUB_BASE}/applications/${domain}/deployments/${deploymentId}/logs`,
-        { params: { tail: true, limitMsgLen: 5000 } },
-      );
+      // Step 2: Get logs using POST (supports date range + all priorities)
+      // Fall back to GET with date params if POST fails
+      try {
+        return await api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
+      } catch (_) {
+        return api.get(
+          `${CLOUDHUB_BASE}/applications/${domain}/deployments/${deploymentId}/logs`,
+          { params: { startDate: startMs, endDate: endMs, limit, limitMsgLen: 5000 } },
+        );
+      }
     }},
     // Fallback: try with domain as deployment ID (older API pattern)
     { name: 'get-deploy-v2', fn: () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/deployments/${domain}/logs`, { params: getParams }) },
@@ -767,6 +791,78 @@ export async function getAppLogs(
     );
   }
 
+  // ---------------------------------------------------------------
+  // 7) CloudHub 2.0 / Runtime Fabric additional log endpoints
+  //    These cover CH2 deployments that use different API paths
+  // ---------------------------------------------------------------
+  if (orgId && envId) {
+    // Runtime Fabric v1 log endpoint
+    strategies.push(
+      { name: 'rtf-logs', fn: async () => {
+        // First resolve the deployment ID
+        const ch2Path = amcPath ?? `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
+        const { data: deps } = await api.get(ch2Path);
+        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        if (!match) throw new Error('No deployment found for RTF logs');
+        const deploymentId = match.id;
+
+        // Cache for fast path
+        _cachedAmcDeploymentId = deploymentId;
+        _cachedAmcDomain = domain;
+
+        return api.get(
+          `/runtimefabric/api/organizations/${orgId}/environments/${envId}/deployments/${deploymentId}/logs`,
+          { params: { limit, descending: true } },
+        );
+      }},
+    );
+
+    // Hybrid v2 log endpoint (Runtime Manager v2)
+    strategies.push(
+      { name: 'hybrid-v2-logs', fn: async () => {
+        const ch2Path = amcPath ?? `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
+        const { data: deps } = await api.get(ch2Path);
+        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        if (!match) throw new Error('No deployment found for Hybrid v2 logs');
+        return api.get(
+          `${HYBRID_BASE}/organizations/${orgId}/environments/${envId}/deployments/${match.id}/logs`,
+          { params: { limit, descending: true } },
+        );
+      }},
+    );
+
+    // Anypoint Logging Service v2 POST query endpoint
+    strategies.push(
+      { name: 'logging-v2', fn: () => api.post(
+        `/logging/api/v2/organizations/${orgId}/environments/${envId}/query`,
+        {
+          applicationName: domain,
+          startTime: startMs,
+          endTime: endMs,
+          limit,
+          descending: true,
+        },
+      )},
+    );
+
+    // MC (Management Center) application log endpoint
+    strategies.push(
+      { name: 'mc-app-logs', fn: async () => {
+        const ch2Path = amcPath ?? `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
+        const { data: deps } = await api.get(ch2Path);
+        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        if (!match) throw new Error('No deployment found for MC logs');
+        return api.get(
+          `/mc/v1/organizations/${orgId}/environments/${envId}/deployments/${match.id}/application/logs`,
+          { params: { limit, descending: true } },
+        );
+      }},
+    );
+  }
+
   const logErrors: string[] = [];
   for (let i = 0; i < strategies.length; i++) {
     const { name, fn } = strategies[i];
@@ -844,10 +940,15 @@ async function _getLogsByStrategy(
       if (!_cachedCh1DeploymentId || _cachedCh1Domain !== domain) {
         throw new Error('CH1 deployment not cached for this domain — need re-discovery');
       }
-      return api.get(
-        `${CLOUDHUB_BASE}/applications/${domain}/deployments/${_cachedCh1DeploymentId}/logs`,
-        { params: { tail: true, limitMsgLen: 5000 } },
-      );
+      // Prefer POST /logs (supports date range + all priorities) — fall back to GET with date params
+      try {
+        return await api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
+      } catch (_) {
+        return api.get(
+          `${CLOUDHUB_BASE}/applications/${domain}/deployments/${_cachedCh1DeploymentId}/logs`,
+          { params: { startDate: getParams.startDate, endDate: getParams.endDate, limit: getParams.limit ?? 200, limitMsgLen: 5000 } },
+        );
+      }
     }
     case 'get-deploy-v2':
       return api.get(`${CLOUDHUB_BASE}/applications/${domain}/deployments/${domain}/logs`, { params: getParams });
@@ -871,7 +972,46 @@ async function _getLogsByStrategy(
       if (!amcP) throw new Error('No AMC path available');
       return api.get(
         `${amcP}/${_cachedAmcDeploymentId}/specs/${_cachedAmcSpecId}/logs`,
-        { params: { descending: true, limit: getParams.limit ?? 200 } },
+        { params: { descending: true, limit: getParams.limit ?? 200, startDate: getParams.startDate, endDate: getParams.endDate } },
+      );
+    }
+    case 'rtf-logs': {
+      if (!_cachedAmcDeploymentId || _cachedAmcDomain !== domain) {
+        throw new Error('RTF deployment not cached — need re-discovery');
+      }
+      return api.get(
+        `/runtimefabric/api/organizations/${orgId}/environments/${envId}/deployments/${_cachedAmcDeploymentId}/logs`,
+        { params: { limit: getParams.limit ?? 200, descending: true, startDate: getParams.startDate, endDate: getParams.endDate } },
+      );
+    }
+    case 'hybrid-v2-logs': {
+      if (!_cachedAmcDeploymentId || _cachedAmcDomain !== domain) {
+        throw new Error('Hybrid v2 deployment not cached — need re-discovery');
+      }
+      return api.get(
+        `${HYBRID_BASE}/organizations/${orgId}/environments/${envId}/deployments/${_cachedAmcDeploymentId}/logs`,
+        { params: { limit: getParams.limit ?? 200, descending: true, startDate: getParams.startDate, endDate: getParams.endDate } },
+      );
+    }
+    case 'logging-v2': {
+      return api.post(
+        `/logging/api/v2/organizations/${orgId}/environments/${envId}/query`,
+        {
+          applicationName: domain,
+          startTime: getParams.startDate,
+          endTime: getParams.endDate,
+          limit: getParams.limit ?? 200,
+          descending: true,
+        },
+      );
+    }
+    case 'mc-app-logs': {
+      if (!_cachedAmcDeploymentId || _cachedAmcDomain !== domain) {
+        throw new Error('MC deployment not cached — need re-discovery');
+      }
+      return api.get(
+        `/mc/v1/organizations/${orgId}/environments/${envId}/deployments/${_cachedAmcDeploymentId}/application/logs`,
+        { params: { limit: getParams.limit ?? 200, descending: true, startDate: getParams.startDate, endDate: getParams.endDate } },
       );
     }
     default:
@@ -885,7 +1025,13 @@ function extractLogEntries(data: any): AppLogEntry[] {
   if (Array.isArray(data)) return normalizeLogArray(data);
 
   // Handle plain text log responses (GET /log-file returns raw text)
+  // Reject HTML responses (CH2 sometimes returns an HTML page instead of logs)
   if (typeof data === 'string' && data.trim().length > 0) {
+    const trimmed = data.trim();
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+      console.warn('[extractLogEntries] Received HTML response instead of logs — skipping');
+      return [];
+    }
     return parseRawLogText(data);
   }
 
@@ -983,7 +1129,21 @@ function normalizeLogArray(arr: any[]): AppLogEntry[] {
     });
   }
 
-  return arr;
+  // Catch-all: normalize any remaining array entries with best-effort field mapping
+  // Some API endpoints (AMC specs-logs, RTF, etc.) may use different field names
+  return arr.map((e) => {
+    const ev = e.event ?? {};
+    return {
+      timestamp: e.timestamp ?? e['@timestamp'] ?? ev.timestamp ?? e.ts ?? e.time ?? e.date ?? e.instant ?? '',
+      priority: (e.priority ?? ev.priority ?? e.level ?? ev.level ?? e.severity ?? e.logLevel ?? e.log_level ?? 'INFO').toUpperCase(),
+      message: e.message ?? ev.message ?? e.msg ?? e.text ?? e.log ?? e.logLine ?? e.content ?? (typeof e.line === 'string' ? e.line : JSON.stringify(e)),
+      threadName: e.threadName ?? ev.threadName ?? e.thread ?? '',
+      loggerName: e.loggerName ?? ev.loggerName ?? e.logger ?? '',
+      recordId: e.recordId ?? e.docId ?? e.id ?? '',
+      deploymentId: e.deploymentId ?? '',
+      instanceId: e.instanceId ?? ev.instanceId ?? '',
+    } as AppLogEntry;
+  });
 }
 
 /** Parse raw text log output (from GET /log-file or /log endpoints) */
@@ -1180,11 +1340,18 @@ let _statsDiscoveryPromise: Promise<void> | null = null;
 
 /**
  * ── InfluxDB Monitoring (Grafana-style datasource proxy) ──
- * The REAL Anypoint Monitoring endpoint uses an InfluxDB proxy:
+ * The Anypoint Monitoring visualizer uses a Grafana-style InfluxDB proxy:
  *   GET /monitoring/api/visualizer/api/datasources/proxy/{datasourceId}/query
- *     ?db=hybrid_metric_{region}&q=SELECT...&epoch=ms
+ *     ?db="dias_mt_1_prod"&q=SELECT...&epoch=ms
  *
- * We discover the datasource ID once, then cache it for the session.
+ * Key details (discovered from the real Anypoint Monitoring web UI):
+ *   - Datasource ID: varies per org (e.g. 4113)
+ *   - Database name: e.g. "dias_mt_1_prod" (WITH quotes in param value!)
+ *   - app_id uses fullDomain: e.g. "crm-profile-s.de-c1.eu1.cloudhub.io"
+ *   - Queries use org_id, env_id, app_id WHERE filters
+ *   - Time ranges: "time >= {ms}ms and time <= {ms}ms"
+ *
+ * We discover the datasource ID and db name once, then cache for the session.
  */
 let _influxDatasourceId: number | null = null;
 let _influxDbName: string | null = null;
@@ -1226,6 +1393,7 @@ export function resetSessionFlags(): void {
   _statsDiscoveryPromise = null;
   _logEndpointsAvailable = true;
   _logEndpointsChecked = false;
+  _logCheckedForDomain = null;
   _workingLogStrategy = null;
   _instancesEndpointAvailable = true;
   _influxDatasourceId = null;
@@ -1256,73 +1424,101 @@ function getRegionSlug(): string {
 /**
  * Discover the InfluxDB datasource for Anypoint Monitoring.
  * The Anypoint Monitoring visualizer uses a Grafana-style datasource proxy.
+ *
+ * Discovery approach:
+ * 1. GET /monitoring/api/visualizer/api/datasources → find InfluxDB type
+ * 2. Extract datasource ID and database name
+ * 3. Verify with a test SHOW MEASUREMENTS query
+ *
+ * Real-world example (EU1):
+ *   - Datasource ID: 4113
+ *   - Database name: "dias_mt_1_prod" (quoted in the db parameter!)
+ *
  * Returns true if an InfluxDB datasource was found.
  */
 async function discoverInfluxDatasource(): Promise<boolean> {
   console.log('[Monitoring] discoverInfluxDatasource() called, current state:', _influxAvailable);
   if (_influxAvailable !== null) return _influxAvailable;
 
+  // ── Step 1: List all datasources and find InfluxDB ones ──
   try {
     const { data } = await api.get('/monitoring/api/visualizer/api/datasources');
-    if (Array.isArray(data)) {
-      // Find an InfluxDB datasource — prefer ones with 'hybrid_metric' in the DB name
-      const influxDs = data.find((ds: any) =>
-        (ds.type === 'influxdb' || ds.typeName === 'InfluxDB') &&
-        (ds.database?.includes('hybrid_metric') || ds.jsonData?.database?.includes('hybrid_metric'))
-      ) ?? data.find((ds: any) =>
+    console.log(`[Monitoring] Datasources API returned: ${Array.isArray(data) ? data.length + ' entries' : typeof data}`);
+
+    if (Array.isArray(data) && data.length > 0) {
+      // Log all datasources for debug
+      for (const ds of data) {
+        console.log(`[Monitoring] Datasource: id=${ds.id}, type=${ds.type}, name=${ds.name}, db=${ds.database ?? ds.jsonData?.database ?? 'unknown'}`);
+      }
+
+      // Find ALL InfluxDB datasources
+      const influxDatasources = data.filter((ds: any) =>
         ds.type === 'influxdb' || ds.typeName === 'InfluxDB'
       );
 
-      if (influxDs) {
-        _influxDatasourceId = influxDs.id;
-        _influxDbName = influxDs.database ?? influxDs.jsonData?.database ?? null;
+      if (influxDatasources.length > 0) {
+        console.log(`[Monitoring] Found ${influxDatasources.length} InfluxDB datasource(s), testing each...`);
 
-        // If database name not found in datasource config, try to construct it
-        if (!_influxDbName) {
-          const region = getRegionSlug();
-          _influxDbName = region === 'us' ? 'hybrid_metric' : `hybrid_metric_${region}`;
+        // Test each datasource to find one that works
+        for (const ds of influxDatasources) {
+          const dsId = ds.id;
+          const rawDbName = ds.database ?? ds.jsonData?.database ?? '';
+
+          // The database name in the API params needs quotes: "dias_mt_1_prod"
+          // Some datasources may already have quotes, some may not
+          const dbName = rawDbName.startsWith('"') ? rawDbName : `"${rawDbName}"`;
+
+          try {
+            const testQ = 'SHOW MEASUREMENTS LIMIT 5';
+            const { data: testResult } = await api.get(
+              `/monitoring/api/visualizer/api/datasources/proxy/${dsId}/query`,
+              { params: { db: dbName, q: testQ, epoch: 'ms' } },
+            );
+
+            if (testResult?.results) {
+              _influxDatasourceId = dsId;
+              _influxDbName = dbName;
+              _influxAvailable = true;
+              const measurements = testResult.results?.[0]?.series?.[0]?.values?.map((v: any) => v[0]) ?? [];
+              console.log(`[Monitoring] InfluxDB datasource VERIFIED: id=${dsId}, db=${dbName}, measurements=[${measurements.slice(0, 5).join(', ')}]`);
+              return true;
+            }
+          } catch (testErr: any) {
+            console.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}`);
+            // Also try without quotes
+            if (rawDbName && !rawDbName.startsWith('"')) {
+              try {
+                const { data: testResult2 } = await api.get(
+                  `/monitoring/api/visualizer/api/datasources/proxy/${dsId}/query`,
+                  { params: { db: rawDbName, q: 'SHOW MEASUREMENTS LIMIT 5', epoch: 'ms' } },
+                );
+                if (testResult2?.results) {
+                  _influxDatasourceId = dsId;
+                  _influxDbName = rawDbName;
+                  _influxAvailable = true;
+                  console.log(`[Monitoring] InfluxDB datasource VERIFIED (unquoted): id=${dsId}, db=${rawDbName}`);
+                  return true;
+                }
+              } catch (_) {
+                // continue
+              }
+            }
+          }
         }
-
-        _influxAvailable = true;
-        console.log(`[Monitoring] InfluxDB datasource found: id=${_influxDatasourceId}, db=${_influxDbName}`);
-        return true;
       }
     }
   } catch (err: any) {
-    console.log(`[Monitoring] Datasource discovery failed: ${err?.response?.status ?? err?.message}`);
-  }
-
-  // Fallback: try with a constructed database name and common datasource ID patterns
-  const region = getRegionSlug();
-  _influxDbName = region === 'us' ? 'hybrid_metric' : `hybrid_metric_${region}`;
-
-  // Try a few common datasource IDs (these are assigned by the platform)
-  for (const tryId of [7513, 1, 2, 3]) {
-    try {
-      console.log(`[Monitoring] Trying fallback datasource ID ${tryId} with db=${_influxDbName}`);
-      const testQ = 'SHOW MEASUREMENTS LIMIT 1';
-      const { data } = await api.get(
-        `/monitoring/api/visualizer/api/datasources/proxy/${tryId}/query`,
-        { params: { db: _influxDbName, q: testQ, epoch: 'ms' } },
-      );
-      if (data?.results) {
-        _influxDatasourceId = tryId;
-        _influxAvailable = true;
-        console.log(`[Monitoring] InfluxDB found via fallback: id=${tryId}, db=${_influxDbName}`);
-        return true;
-      }
-    } catch (_) {
-      continue;
-    }
+    console.log(`[Monitoring] Datasource list API failed: ${err?.response?.status ?? err?.message}`);
   }
 
   _influxAvailable = false;
-  console.log('[Monitoring] No InfluxDB datasource found');
+  console.log('[Monitoring] No working InfluxDB datasource found');
   return false;
 }
 
 /**
  * Run an InfluxDB query via the Grafana proxy endpoint.
+ * Supports multi-statement queries separated by semicolons.
  */
 async function queryInfluxDB(query: string): Promise<any> {
   if (!_influxDatasourceId || !_influxDbName) return null;
@@ -1342,13 +1538,51 @@ async function queryInfluxDB(query: string): Promise<any> {
 }
 
 /**
+ * Build an InfluxDB WHERE clause for a specific app.
+ * Uses org_id, env_id, and app_id (fullDomain) tags.
+ */
+function buildInfluxWhere(
+  orgId: string,
+  envId: string,
+  appFullDomain: string,
+  startMs: number,
+  endMs: number,
+): string {
+  return `("org_id" = '${orgId}' AND "env_id" = '${envId}' AND "app_id" = '${appFullDomain}') AND time >= ${startMs}ms and time <= ${endMs}ms`;
+}
+
+/**
+ * Extra metrics extracted from InfluxDB (thread count, heap, GC, etc.)
+ */
+interface InfluxExtraMetrics {
+  threadCount: number | null;
+  heapUsed: number | null;
+  heapCommitted: number | null;
+  gcCollections: number | null;
+  classesLoaded: number | null;
+  messageCount: number | null;
+  // Inbound HTTP metrics (from Anypoint Monitoring)
+  inboundAvgResponseTime: number | null;
+  inboundRequestCount: number | null;
+  inboundErrorCount: number | null;
+  // Outbound HTTP metrics
+  outboundAvgResponseTime: number | null;
+  outboundRequestCount: number | null;
+  outboundErrorCount: number | null;
+}
+
+/**
  * Parse an InfluxDB query response into a monitoring metrics format.
- * InfluxDB returns: { results: [{ series: [{ columns, values }] }] }
+ * InfluxDB returns: { results: [{ series: [{ name, columns, values }] }] }
+ *
+ * Handles multi-statement responses where each result set corresponds to
+ * a different measurement (CPU, memory, threads, GC, etc.)
  */
 function parseInfluxDBResults(data: any): {
   cpuPercent: number | null;
   memoryPercent: number | null;
   timeSeries: Array<{ timestamp: number; cpu: number | null; memory: number | null }>;
+  extraMetrics: InfluxExtraMetrics;
 } | null {
   const results = data?.results;
   if (!Array.isArray(results)) return null;
@@ -1356,127 +1590,309 @@ function parseInfluxDBResults(data: any): {
   let cpuPercent: number | null = null;
   let memoryPercent: number | null = null;
   const timeSeriesMap = new Map<number, { cpu: number | null; memory: number | null }>();
+  const extra: InfluxExtraMetrics = {
+    threadCount: null,
+    heapUsed: null,
+    heapCommitted: null,
+    gcCollections: null,
+    classesLoaded: null,
+    messageCount: null,
+    inboundAvgResponseTime: null,
+    inboundRequestCount: null,
+    inboundErrorCount: null,
+    outboundAvgResponseTime: null,
+    outboundRequestCount: null,
+    outboundErrorCount: null,
+  };
 
   for (const result of results) {
     const seriesList = result?.series;
-    if (!Array.isArray(seriesList)) continue;
+    if (!Array.isArray(seriesList) || seriesList.length === 0) continue;
 
     for (const s of seriesList) {
       const columns: string[] = s.columns ?? [];
       const values: any[][] = s.values ?? [];
       const name = (s.name ?? '').toLowerCase();
 
-      // Determine what metric this series represents
-      const isCpu = name.includes('cpu') || columns.some((c: string) => c.toLowerCase().includes('cpu'));
-      const isMem = name.includes('memory') || name.includes('mem') || columns.some((c: string) => c.toLowerCase().includes('mem'));
+      // Classify the measurement
+      const isCpu = name === 'worker' && columns.some((c: string) => c.includes('cpu'));
+      const isMemory = name === 'worker' && columns.some((c: string) => c.includes('memory'));
+      const isThread = name.includes('threading');
+      const isHeap = name.includes('jvm.memory') && columns.some((c: string) => c.includes('heap_used'));
+      const isHeapCommitted = name.includes('jvm.memory') && columns.some((c: string) => c.includes('heap_committed'));
+      const isGC = name.includes('garbagecollector');
+      const isClasses = name.includes('classloading');
+      const isAppStats = name === 'app_stats';
+      // HTTP inbound / outbound metrics (Anypoint Monitoring flow-level)
+      const isHttpInbound = (name === 'http_inbound' || name === 'inbound')
+        || (name === 'http' && (s.tags?.flow_type === 'inbound' || s.tags?.type === 'inbound' || columns.some((c: string) => c.includes('inbound'))));
+      const isHttpOutbound = (name === 'http_outbound' || name === 'outbound')
+        || (name === 'http' && (s.tags?.flow_type === 'outbound' || s.tags?.type === 'outbound' || columns.some((c: string) => c.includes('outbound'))));
+      const isHttp = !isHttpInbound && !isHttpOutbound && (name === 'http' || name === 'http_summary');
+
+      // Also detect by column names if measurement name is generic
+      const hasCpuCol = columns.some((c: string) => c === 'mean' || c === 'cpu' || c === 'cpu_usage');
+      const hasMemCol = columns.some((c: string) => c === 'mean' || c === 'memory' || c === 'memory_usage');
 
       const timeIdx = columns.indexOf('time');
+
+      // Get the latest non-null value from the series
+      let latestVal: number | null = null;
+      let latestTs: number = 0;
 
       for (const row of values) {
         if (!Array.isArray(row)) continue;
         const ts = timeIdx >= 0 ? row[timeIdx] : row[0];
-        // Get the first non-time, non-null value
         for (let ci = 0; ci < columns.length; ci++) {
           if (columns[ci] === 'time') continue;
           const val = row[ci];
           if (val == null) continue;
+          latestVal = val;
+          latestTs = ts;
+        }
+      }
 
-          if (isCpu) {
-            cpuPercent = val;
+      // Assign to the appropriate metric
+      if (isCpu || (name === 'worker_metric' && hasCpuCol)) {
+        if (latestVal != null) cpuPercent = latestVal;
+        // Build time series for CPU
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          const ts = timeIdx >= 0 ? row[timeIdx] : row[0];
+          for (let ci = 0; ci < columns.length; ci++) {
+            if (columns[ci] === 'time') continue;
+            const val = row[ci];
             const entry = timeSeriesMap.get(ts) ?? { cpu: null, memory: null };
             entry.cpu = val;
             timeSeriesMap.set(ts, entry);
-          } else if (isMem) {
-            memoryPercent = val;
+            break;
+          }
+        }
+      } else if (isMemory || (name === 'worker_metric' && hasMemCol && !isCpu)) {
+        if (latestVal != null) memoryPercent = latestVal;
+        // Build time series for memory
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          const ts = timeIdx >= 0 ? row[timeIdx] : row[0];
+          for (let ci = 0; ci < columns.length; ci++) {
+            if (columns[ci] === 'time') continue;
+            const val = row[ci];
             const entry = timeSeriesMap.get(ts) ?? { cpu: null, memory: null };
             entry.memory = val;
             timeSeriesMap.set(ts, entry);
+            break;
           }
-          break; // only first data column per row
         }
+      } else if (isThread && latestVal != null) {
+        extra.threadCount = latestVal;
+      } else if (isHeap && latestVal != null) {
+        extra.heapUsed = latestVal;
+      } else if (isHeapCommitted && latestVal != null) {
+        extra.heapCommitted = latestVal;
+      } else if (isGC && latestVal != null) {
+        extra.gcCollections = latestVal;
+      } else if (isClasses && latestVal != null) {
+        extra.classesLoaded = latestVal;
+      } else if (isAppStats && latestVal != null) {
+        // Sum up message counts
+        let totalMessages = 0;
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          for (let ci = 0; ci < columns.length; ci++) {
+            if (columns[ci] === 'time') continue;
+            if (row[ci] != null) totalMessages += row[ci];
+            break;
+          }
+        }
+        extra.messageCount = totalMessages;
+      } else if (isHttpInbound || (isHttp && extra.inboundRequestCount == null)) {
+        // Extract inbound HTTP metrics (response time, request count, errors)
+        const rtCol = columns.findIndex((c: string) => c.includes('response_time') || c === 'mean');
+        const countCol = columns.findIndex((c: string) => c.includes('count') || c.includes('request'));
+        const errCol = columns.findIndex((c: string) => c.includes('error') || c.includes('failure'));
+        let totalCount = 0; let totalRt = 0; let rtSamples = 0; let totalErrors = 0;
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          if (rtCol >= 0 && row[rtCol] != null) { totalRt += row[rtCol]; rtSamples++; }
+          if (countCol >= 0 && row[countCol] != null) totalCount += row[countCol];
+          if (errCol >= 0 && row[errCol] != null) totalErrors += row[errCol];
+        }
+        if (rtSamples > 0) extra.inboundAvgResponseTime = Math.round(totalRt / rtSamples);
+        if (totalCount > 0) extra.inboundRequestCount = totalCount;
+        if (totalErrors > 0) extra.inboundErrorCount = totalErrors;
+      } else if (isHttpOutbound) {
+        // Extract outbound HTTP metrics
+        const rtCol = columns.findIndex((c: string) => c.includes('response_time') || c === 'mean');
+        const countCol = columns.findIndex((c: string) => c.includes('count') || c.includes('request'));
+        const errCol = columns.findIndex((c: string) => c.includes('error') || c.includes('failure'));
+        let totalCount = 0; let totalRt = 0; let rtSamples = 0; let totalErrors = 0;
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          if (rtCol >= 0 && row[rtCol] != null) { totalRt += row[rtCol]; rtSamples++; }
+          if (countCol >= 0 && row[countCol] != null) totalCount += row[countCol];
+          if (errCol >= 0 && row[errCol] != null) totalErrors += row[errCol];
+        }
+        if (rtSamples > 0) extra.outboundAvgResponseTime = Math.round(totalRt / rtSamples);
+        if (totalCount > 0) extra.outboundRequestCount = totalCount;
+        if (totalErrors > 0) extra.outboundErrorCount = totalErrors;
       }
     }
   }
 
-  if (cpuPercent == null && memoryPercent == null && timeSeriesMap.size === 0) return null;
+  if (
+    cpuPercent == null &&
+    memoryPercent == null &&
+    timeSeriesMap.size === 0 &&
+    extra.threadCount == null &&
+    extra.messageCount == null &&
+    extra.heapUsed == null
+  ) {
+    return null;
+  }
 
   const timeSeries = Array.from(timeSeriesMap.entries())
     .map(([timestamp, metrics]) => ({ timestamp, ...metrics }))
     .sort((a, b) => a.timestamp - b.timestamp);
 
-  return { cpuPercent, memoryPercent, timeSeries };
+  return { cpuPercent, memoryPercent, timeSeries, extraMetrics: extra };
 }
 
 /**
  * Fetch monitoring metrics from InfluxDB for a specific application.
- * Tries several InfluxDB query patterns because the measurement and field
- * names vary between CloudHub versions and regions.
+ *
+ * Uses the REAL Anypoint Monitoring query format discovered from the web UI:
+ *   - Measurements: app_stats, jvm.memory, jvm.threading, jvm.classloading,
+ *                   jvm.garbagecollector.*, worker_metric, etc.
+ *   - WHERE: org_id, env_id, app_id (fullDomain)
+ *   - GROUP BY: time(1m), "worker_id"
+ *   - fill(null)
+ *
+ * @param domain - the short domain name (e.g. "crm-profile-s")
+ * @param periodMinutes - how far back to query
+ * @param fullDomain - the full domain (e.g. "crm-profile-s.de-c1.eu1.cloudhub.io")
+ * @param orgId - organization ID
+ * @param envId - environment ID
  */
 async function getInfluxDBMonitoringData(
   domain: string,
   periodMinutes: number,
+  fullDomain?: string,
+  orgId?: string,
+  envId?: string,
 ): Promise<any | null> {
   if (!(await discoverInfluxDatasource())) return null;
 
-  const timeRange = `time > now() - ${periodMinutes}m`;
+  const org = orgId ?? getOrgId();
+  const env = envId ?? getEnvId();
+  if (!org || !env) {
+    console.log('[Monitoring] Cannot query InfluxDB — no org/env IDs');
+    return null;
+  }
+
+  // Build the app_id value — use fullDomain if available, otherwise construct it
+  const appId = fullDomain || domain;
+
+  const now = Date.now();
+  const startMs = now - periodMinutes * 60 * 1000;
+  const where = buildInfluxWhere(org, env, appId, startMs, now);
   const groupBy = periodMinutes <= 60 ? '1m' : '5m';
 
-  // Build multiple query patterns — different CH versions use different schemas
-  const queryPatterns = [
-    // Pattern 1: worker_metric measurement (common on CH1)
-    {
-      cpu: `SELECT mean("cpu") FROM "worker_metric" WHERE ${timeRange} AND "app" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-      mem: `SELECT mean("memory_usage") FROM "worker_metric" WHERE ${timeRange} AND "app" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-    },
-    // Pattern 2: worker_statistic measurement
-    {
-      cpu: `SELECT mean("cpuPercentageUsed") FROM "worker_statistic" WHERE ${timeRange} AND "domain" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-      mem: `SELECT mean("memoryPercentageUsed") FROM "worker_statistic" WHERE ${timeRange} AND "domain" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-    },
-    // Pattern 3: Using app_id tag
-    {
-      cpu: `SELECT mean("cpu") FROM "worker_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-      mem: `SELECT mean("memory_usage") FROM "worker_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-    },
-    // Pattern 4: Combined query with applicationName
-    {
-      cpu: `SELECT mean("cpu") FROM "worker_metric" WHERE ${timeRange} AND "applicationName" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-      mem: `SELECT mean("memory_usage") FROM "worker_metric" WHERE ${timeRange} AND "applicationName" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-    },
-    // Pattern 5: app_inbound_metric for API traffic (at least we can show request count)
-    {
-      cpu: `SELECT mean("app_inbound_metric_request_count") FROM "app_inbound_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-      mem: `SELECT mean("app_inbound_metric_response_time") FROM "app_inbound_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
-    },
+  // ── Multi-statement query: CPU + Memory + Threads + Message Count ──
+  // These match the REAL queries observed from Anypoint Monitoring web UI
+  const queries = [
+    // CPU usage (worker-level)
+    `SELECT mean("cpu_usage") FROM "worker" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Memory usage (worker-level)
+    `SELECT mean("memory_usage") FROM "worker" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Thread count (JVM)
+    `SELECT mean("thread_count") FROM "jvm.threading" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Message count (app stats / throughput)
+    `SELECT sum("messageCount") FROM "app_stats" WHERE ${where} GROUP BY time(${groupBy}), "app_id" fill(0)`,
+    // Heap memory
+    `SELECT mean("heap_used") FROM "jvm.memory" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    `SELECT mean("heap_committed") FROM "jvm.memory" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // GC collections
+    `SELECT mean("gc_marksweep_collection_count") FROM "jvm.garbagecollector.marksweepcompact" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Classes loaded
+    `SELECT mean("loaded_class_count") FROM "jvm.classloading" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Inbound HTTP metrics (response time + request count)
+    `SELECT mean("response_time") AS "response_time", count("response_time") AS "count" FROM "http_inbound" WHERE ${where} GROUP BY time(${groupBy}) fill(null)`,
+    // Outbound HTTP metrics
+    `SELECT mean("response_time") AS "response_time", count("response_time") AS "count" FROM "http_outbound" WHERE ${where} GROUP BY time(${groupBy}) fill(null)`,
   ];
 
-  for (const pattern of queryPatterns) {
-    try {
-      // Combine CPU and memory queries into one request (InfluxDB supports multi-statement)
-      const combinedQ = `${pattern.cpu};${pattern.mem}`;
-      const result = await queryInfluxDB(combinedQ);
+  try {
+    const combinedQ = queries.join(';');
+    console.log(`[Monitoring] InfluxDB query for ${domain} (appId=${appId}): ${queries.length} statements, period=${periodMinutes}m`);
+    const result = await queryInfluxDB(combinedQ);
+
+    if (result?.results) {
+      console.log(`[Monitoring] InfluxDB returned ${result.results.length} result sets for ${domain}`);
+
+      // Parse multi-statement results into a monitoring-friendly format
       const parsed = parseInfluxDBResults(result);
-      if (parsed && (parsed.cpuPercent != null || parsed.memoryPercent != null)) {
-        console.log(`[Monitoring] InfluxDB query succeeded for ${domain}: CPU=${parsed.cpuPercent?.toFixed(1)}%, Mem=${parsed.memoryPercent?.toFixed(1)}%`);
-        // Return in a format that extractMetrics can handle
+      const hasInfluxData = parsed && (
+        parsed.cpuPercent != null
+        || parsed.memoryPercent != null
+        || parsed.timeSeries.length > 0
+        || parsed.extraMetrics.messageCount != null
+        || parsed.extraMetrics.threadCount != null
+        || parsed.extraMetrics.heapUsed != null
+        || parsed.extraMetrics.inboundRequestCount != null
+        || parsed.extraMetrics.outboundRequestCount != null
+      );
+      if (hasInfluxData) {
+        console.log(`[Monitoring] InfluxDB SUCCESS for ${domain}: CPU=${parsed!.cpuPercent?.toFixed(1)}%, Mem=${parsed!.memoryPercent?.toFixed(1)}%, MsgCount=${parsed!.extraMetrics.messageCount}`);
         return {
           _source: 'influxdb',
           workerStatistics: [{
             statistics: {
-              ...(parsed.cpuPercent != null ? { cpu: { [Date.now()]: parsed.cpuPercent } } : {}),
-              ...(parsed.memoryPercent != null ? { memoryPercentageUsed: { [Date.now()]: parsed.memoryPercent } } : {}),
+              ...(parsed!.cpuPercent != null ? { cpu: { [now]: parsed!.cpuPercent } } : {}),
+              ...(parsed!.memoryPercent != null ? { memoryPercentageUsed: { [now]: parsed!.memoryPercent } } : {}),
+            },
+          }],
+          _timeSeries: parsed!.timeSeries,
+          _extraMetrics: parsed!.extraMetrics,
+        };
+      }
+    }
+  } catch (err: any) {
+    console.log(`[Monitoring] InfluxDB multi-query failed for ${domain}: ${err?.response?.status ?? err?.message}`);
+  }
+
+  // ── Fallback: try alternative measurement names (some orgs use different schemas) ──
+  const fallbackPatterns = [
+    // Pattern A: worker_metric instead of worker
+    `SELECT mean("cpu") FROM "worker_metric" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null);SELECT mean("memory_usage") FROM "worker_metric" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Pattern B: worker_statistic
+    `SELECT mean("cpu_usage") FROM "worker_statistic" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null);SELECT mean("memory_usage") FROM "worker_statistic" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
+    // Pattern C: using "app" tag instead of "app_id"
+    `SELECT mean("cpu") FROM "worker_metric" WHERE ("org_id" = '${org}' AND "env_id" = '${env}' AND "app" = '${domain}') AND time >= ${startMs}ms and time <= ${now}ms GROUP BY time(${groupBy}) fill(null);SELECT mean("memory_usage") FROM "worker_metric" WHERE ("org_id" = '${org}' AND "env_id" = '${env}' AND "app" = '${domain}') AND time >= ${startMs}ms and time <= ${now}ms GROUP BY time(${groupBy}) fill(null)`,
+  ];
+
+  for (const q of fallbackPatterns) {
+    try {
+      const result = await queryInfluxDB(q);
+      const parsed = parseInfluxDBResults(result);
+      if (parsed && (parsed.cpuPercent != null || parsed.memoryPercent != null)) {
+        console.log(`[Monitoring] InfluxDB FALLBACK succeeded for ${domain}: CPU=${parsed.cpuPercent?.toFixed(1)}%`);
+        return {
+          _source: 'influxdb',
+          workerStatistics: [{
+            statistics: {
+              ...(parsed.cpuPercent != null ? { cpu: { [now]: parsed.cpuPercent } } : {}),
+              ...(parsed.memoryPercent != null ? { memoryPercentageUsed: { [now]: parsed.memoryPercent } } : {}),
             },
           }],
           _timeSeries: parsed.timeSeries,
         };
       }
-    } catch (err: any) {
-      // Try next pattern
+    } catch (_) {
       continue;
     }
   }
 
-  console.log(`[Monitoring] InfluxDB queries returned no data for ${domain}`);
+  console.log(`[Monitoring] InfluxDB queries returned no data for ${domain} (appId=${appId})`);
   return null;
 }
 
@@ -1516,22 +1932,34 @@ export async function getDashboardStats(
   const envId = context?.environmentId ?? getEnvId();
 
   // --- Primary: Try the app detail endpoint FIRST ---
-  // The GET /applications/{domain} response often includes workerStatuses
-  // with live CPU/memory/thread data. This is the most reliable on EU1.
+  // Use retreiveStatistics=true to request worker statistics alongside the detail.
+  // The response includes workerStatuses with host/status info.
+  let _appFullDomain: string | undefined;
   try {
-    const { data: appDetail } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}`);
+    const { data: appDetail } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}`, {
+      params: { retreiveStatistics: true },
+    });
     if (appDetail) {
+      // Cache the fullDomain for InfluxDB queries
+      _appFullDomain = appDetail.fullDomain;
+
       const ws = appDetail.workerStatuses ?? appDetail.workers?.statuses;
-      if (ws && (Array.isArray(ws) ? ws.length > 0 : Object.keys(ws).length > 0)) {
+      // Check if workerStatuses has actual statistics (not just host/status info)
+      const hasStats = Array.isArray(ws)
+        ? ws.some((w: any) => w.statisticsByWorker || w.statistics || w.cpu != null)
+        : ws && typeof ws === 'object' && Object.values(ws).some((w: any) =>
+            (w as any)?.statisticsByWorker || (w as any)?.statistics || (w as any)?.cpu != null
+          );
+      if (hasStats) {
         return appDetail; // Return the full app detail — extractMetrics handles it
       }
 
-      // Log diagnostics — always log for debug (was: once per session)
+      // Log diagnostics
       const wsType = ws == null ? 'null' : Array.isArray(ws) ? `array(${ws.length})` : `object(${Object.keys(ws).length})`;
       const hasKeys = appDetail ? Object.keys(appDetail).filter(k =>
         k.includes('worker') || k.includes('monitor') || k.includes('stat')
       ).join(',') : '';
-      console.log(`[getDashboardStats] App detail for ${domain}: workerStatuses=${wsType}, relevant keys=[${hasKeys}], checkDone=${_dashStatsCheckDone}`);
+      console.log(`[getDashboardStats] App detail for ${domain}: fullDomain=${_appFullDomain}, workerStatuses=${wsType}, hasStats=${hasStats}, relevant keys=[${hasKeys}]`);
     }
   } catch (_) {
     // App detail fetch failed, try other sources
@@ -1576,6 +2004,15 @@ export async function getDashboardStats(
         // ── Test monitoring/observability endpoints ──
         console.log('[getDashboardStats] Discovery gate: testing monitoring APIs...');
         if (orgId && envId) {
+          // First: discover available metric types (diagnostic)
+          try {
+            const { data: metricTypes } = await api.get('/observability/api/v1/metric_types');
+            const typeNames = Array.isArray(metricTypes) ? metricTypes.map((t: any) => t.name ?? t.id ?? t).slice(0, 15) : [];
+            console.log(`[getDashboardStats] Available metric types: [${typeNames.join(', ')}]`);
+          } catch (err: any) {
+            console.log(`[getDashboardStats] metric_types discovery failed: ${err?.response?.status ?? err?.message}`);
+          }
+
           let monFound = false;
           const monTests: Array<() => Promise<any>> = [
             () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
@@ -1583,8 +2020,13 @@ export async function getDashboardStats(
               range: { from: fromIso, to: toIso },
               app: testDomain,
             }),
+            // Observability Metrics API — use correct AMQL metric types
             () => api.post('/observability/api/v1/metrics:search', {
-              query: `SELECT avg(cpuUsage) FROM "mulesoft.cloudhub.worker" WHERE timestamp BETWEEN '${fromIso}' AND '${toIso}' AND applicationName = '${testDomain}' AND organizationId = '${orgId}' AND environmentId = '${envId}'`,
+              query: `SELECT count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES PT1H`,
+            }),
+            // Alternative: try mulesoft.app.message for message counts
+            () => api.post('/observability/api/v1/metrics:search', {
+              query: `SELECT sum(total_count) FROM "mulesoft.app.message" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now}`,
             }),
           ];
 
@@ -1595,7 +2037,7 @@ export async function getDashboardStats(
             } catch (err: any) {
               const s = err?.response?.status;
               console.log(`[getDashboardStats] Monitoring API test failed: status=${s}`);
-              // Any error during discovery means this source is unavailable
+              // Continue to try next endpoint
             }
           }
           if (!monFound) {
@@ -1654,35 +2096,131 @@ export async function getDashboardStats(
     const fromIso = new Date(startMs).toISOString();
     const toIso = new Date(now).toISOString();
 
-    const monAttempts: Array<() => Promise<any>> = [
-      () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
-        targets: [
-          { target: 'worker-cpu-usage', type: 'timeserie' },
-          { target: 'worker-memory-usage', type: 'timeserie' },
-          { target: 'worker-thread-count', type: 'timeserie' },
-        ],
-        range: { from: fromIso, to: toIso },
-        app: domain,
-      }),
-      () => api.post('/observability/api/v1/metrics:search', {
-        query: `SELECT avg(cpuUsage), avg(memoryUsage), avg(threadCount) FROM "mulesoft.cloudhub.worker" WHERE timestamp BETWEEN '${fromIso}' AND '${toIso}' AND applicationName = '${domain}' AND organizationId = '${orgId}' AND environmentId = '${envId}'`,
-      }),
+    // Determine appropriate time interval based on the period
+    const amqlInterval = periodMinutes <= 60 ? 'PT1M' : periodMinutes <= 720 ? 'PT1H' : 'P1D';
+
+    const monAttempts: Array<{ label: string; fn: () => Promise<any> }> = [
+      // Grafana-style monitoring archive query (requires Titanium/Platinum)
+      {
+        label: 'monitoring-archive',
+        fn: () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
+          targets: [
+            { target: 'worker-cpu-usage', type: 'timeserie' },
+            { target: 'worker-memory-usage', type: 'timeserie' },
+            { target: 'worker-thread-count', type: 'timeserie' },
+          ],
+          range: { from: fromIso, to: toIso },
+          app: domain,
+        }),
+      },
+      // Observability Metrics API — inbound request metrics (correct AMQL)
+      {
+        label: 'observability-inbound',
+        fn: () => api.post('/observability/api/v1/metrics:search', {
+          query: `SELECT avg(response_time), count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES ${amqlInterval}`,
+        }),
+      },
     ];
 
     for (const attempt of monAttempts) {
       try {
-        const { data } = await attempt();
-        if (data) return data;
-      } catch (_) {
-        // continue
+        const { data } = await attempt.fn();
+        if (data) {
+          console.log(`[getDashboardStats] ${attempt.label} returned data for ${domain}`);
+          // Tag the response with source info
+          if (typeof data === 'object' && !Array.isArray(data)) {
+            data._source = attempt.label;
+          }
+          return data;
+        }
+      } catch (err: any) {
+        console.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
       }
+    }
+
+    // Additional AMQL queries for message/error counts
+    const amqlFallbacks: Array<{ label: string; fn: () => Promise<any> }> = [
+      {
+        label: 'observability-messages',
+        fn: () => api.post('/observability/api/v1/metrics:search', {
+          query: `SELECT sum(total_count), sum(error_count) FROM "mulesoft.app.message" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now}`,
+        }),
+      },
+      {
+        label: 'observability-outbound',
+        fn: () => api.post('/observability/api/v1/metrics:search', {
+          query: `SELECT avg(response_time), count(requests) FROM "mulesoft.app.outbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now}`,
+        }),
+      },
+    ];
+
+    // Collect all observability data into one combined result
+    const observabilityResult: any = {
+      _source: 'observability',
+      _appMetrics: {
+        inboundRequestCount: null as number | null,
+        inboundAvgResponseTime: null as number | null,
+        outboundRequestCount: null as number | null,
+        outboundAvgResponseTime: null as number | null,
+        messageCount: null as number | null,
+        errorCount: null as number | null,
+      },
+    };
+    let hasAnyObservabilityData = false;
+
+    for (const attempt of amqlFallbacks) {
+      try {
+        const { data } = await attempt.fn();
+        if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
+          hasAnyObservabilityData = true;
+          for (const row of data.data) {
+            // AMQL response: { "COUNT(requests)": N, "AVG(response_time)": N, ... }
+            const keys = Object.keys(row);
+            for (const key of keys) {
+              const val = row[key];
+              if (val == null) continue;
+              const lk = key.toLowerCase();
+              if (lk.includes('count') && lk.includes('request')) {
+                if (attempt.label.includes('outbound')) {
+                  observabilityResult._appMetrics.outboundRequestCount = (observabilityResult._appMetrics.outboundRequestCount ?? 0) + Number(val);
+                } else {
+                  observabilityResult._appMetrics.inboundRequestCount = (observabilityResult._appMetrics.inboundRequestCount ?? 0) + Number(val);
+                }
+              } else if (lk.includes('response_time') || lk.includes('avg')) {
+                if (attempt.label.includes('outbound')) {
+                  observabilityResult._appMetrics.outboundAvgResponseTime = Number(val);
+                } else {
+                  observabilityResult._appMetrics.inboundAvgResponseTime = Number(val);
+                }
+              } else if (lk.includes('total_count')) {
+                observabilityResult._appMetrics.messageCount = (observabilityResult._appMetrics.messageCount ?? 0) + Number(val);
+              } else if (lk.includes('error_count')) {
+                observabilityResult._appMetrics.errorCount = (observabilityResult._appMetrics.errorCount ?? 0) + Number(val);
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
+      }
+    }
+
+    if (hasAnyObservabilityData) {
+      console.log(`[getDashboardStats] Observability API returned app-level metrics for ${domain}:`, observabilityResult._appMetrics);
+      return observabilityResult;
     }
   }
 
   // --- InfluxDB proxy (the real Anypoint Monitoring endpoint) ---
   if (_influxAvailable) {
     try {
-      const influxData = await getInfluxDBMonitoringData(domain, periodMinutes);
+      const influxData = await getInfluxDBMonitoringData(
+        domain,
+        periodMinutes,
+        _appFullDomain,  // pass the fullDomain for accurate app_id filtering
+        orgId,
+        envId,
+      );
       if (influxData) return influxData;
     } catch (err: any) {
       console.log(`[getDashboardStats] InfluxDB query failed for ${domain}: ${err?.message}`);
@@ -1813,6 +2351,11 @@ export async function getAppMetrics(
   } catch (_) {
     // not available
   }
+
+  // NOTE: getDashboardStats is NOT called here as a fallback.
+  // The monitoring detail screen calls useDashboardStats() independently,
+  // which handles InfluxDB / monitoring API discovery. Calling it here
+  // would cause redundant API calls and potential race conditions.
 
   return null;
 }

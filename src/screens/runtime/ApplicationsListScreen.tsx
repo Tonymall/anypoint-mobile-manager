@@ -1,38 +1,41 @@
 // ============================================================
-// Runtime Manager - Applications List Screen
-// Lists all deployed applications with search & single-row filters
+// Runtime Manager — Applications List (2026 Design)
+//
+// Modern card layout with glassmorphic borders, glowing status
+// indicators, and clean typography hierarchy.
 // ============================================================
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   FlatList,
   StyleSheet,
   RefreshControl,
   ListRenderItemInfo,
+  useWindowDimensions,
+  Pressable,
+  Platform,
 } from 'react-native';
 import {
   Searchbar,
-  Card,
   Text,
   Chip,
-  Badge,
-  Icon,
   useTheme,
-  Divider,
   Portal,
   Modal,
   RadioButton,
   Button,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import type { Application, AppStatus } from '../../types';
-import { statusColors } from '../../theme';
+import { anypointColors } from '../../theme';
 import { useApplications } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getLastUpdateTime, getWorkerInfo, getDeploymentTarget } from '../../utils/appHelpers';
+import { getStatusColor, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 
@@ -48,80 +51,137 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
   { label: 'Undeployed', value: 'UNDEPLOYED' },
 ];
 
-// --- Helpers ---
-const getStatusColor = (status: string): string => {
-  switch (status) {
-    case 'STARTED':
-      return statusColors.started;
-    case 'STOPPED':
-      return statusColors.stopped;
-    case 'FAILED':
-      return statusColors.failed;
-    case 'DEPLOYING':
-    case 'UNDEPLOYING':
-      return statusColors.deploying;
-    case 'PARTIALLY_STARTED':
-      return statusColors.pending;
-    case 'UNDEPLOYED':
-      return '#78716C';
-    default:
-      return statusColors.stopped;
-  }
-};
+// ── Application Card ──
+const AppCard = React.memo<{
+  app: any;
+  onPress: () => void;
+  theme: MD3Theme;
+}>(({ app, onPress, theme }) => {
+  const color = getStatusColor(app.status);
+  const appName = getAppName(app);
+  const muleVer = getMuleVersion(app);
+  const workerInfo = getWorkerInfo(app);
 
-const getStatusLabel = (status: string): string => {
-  switch (status) {
-    case 'STARTED': return 'Running';
-    case 'STOPPED': return 'Stopped';
-    case 'FAILED': return 'Failed';
-    case 'DEPLOYING': return 'Deploying';
-    case 'UNDEPLOYING': return 'Undeploying';
-    case 'PARTIALLY_STARTED': return 'Partial';
-    case 'UNDEPLOYED': return 'Undeployed';
-    default: return status;
-  }
-};
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={`${appName}, ${getStatusLabel(app.status)}`}
+      accessibilityRole="button"
+      accessibilityHint="Double tap to view details"
+      style={({ pressed }) => [
+        {
+          marginBottom: 8,
+          borderRadius: 18,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.outlineVariant,
+          overflow: 'hidden',
+          opacity: pressed ? 0.92 : 1,
+        },
+      ]}
+    >
+      {/* Accent border at left */}
+      <View style={{ position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, borderRadius: 1.5, backgroundColor: color }} />
 
-const formatRelativeTime = (raw: any): string => {
-  if (!raw) return '';
-  const date = typeof raw === 'number' ? new Date(raw) : new Date(raw);
-  if (isNaN(date.getTime())) return '';
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-  const diffDays = Math.floor(diffHours / 24);
+      <View style={{ padding: 16, paddingLeft: 18 }}>
+        {/* Header: name + status */}
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.onSurface, letterSpacing: -0.2 }} numberOfLines={1}>
+              {appName}
+            </Text>
+            <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, marginTop: 2 }} numberOfLines={1}>
+              {app.fullDomain ?? app.domain ?? ''}
+            </Text>
+          </View>
 
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-};
+          {/* Status badge */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 5,
+            paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
+            backgroundColor: color + '12',
+          }}>
+            <View style={{
+              width: 7, height: 7, borderRadius: 4, backgroundColor: color,
+              ...(app.status === 'STARTED' ? {
+                shadowColor: color, shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.6, shadowRadius: 3,
+              } : {}),
+            }} />
+            <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 }}>
+              {getStatusLabel(app.status)}
+            </Text>
+          </View>
+        </View>
+
+        {/* Meta tags */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+          {app.region && (
+            <View style={tagStyle(theme)}>
+              <Icon name="map-marker-outline" size={11} color={theme.colors.onSurfaceVariant} />
+              <Text style={tagTextStyle(theme)}>{app.region}</Text>
+            </View>
+          )}
+          {muleVer ? (
+            <View style={tagStyle(theme)}>
+              <Icon name="puzzle-outline" size={11} color={theme.colors.onSurfaceVariant} />
+              <Text style={tagTextStyle(theme)}>Mule {muleVer}</Text>
+            </View>
+          ) : null}
+          <View style={tagStyle(theme)}>
+            <Icon name="server-network" size={11} color={theme.colors.onSurfaceVariant} />
+            <Text style={tagTextStyle(theme)}>{workerInfo.amount}x {workerInfo.typeName}</Text>
+          </View>
+          {app.lastUpdateTime && (
+            <View style={tagStyle(theme)}>
+              <Icon name="clock-outline" size={11} color={theme.colors.onSurfaceVariant} />
+              <Text style={tagTextStyle(theme)}>{formatRelativeTime(app.lastUpdateTime)}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+AppCard.displayName = 'AppCard';
+
+// Tag helpers
+const tagStyle = (theme: MD3Theme) => ({
+  flexDirection: 'row' as const,
+  alignItems: 'center' as const,
+  gap: 4,
+  paddingHorizontal: 8,
+  paddingVertical: 3,
+  borderRadius: 8,
+  backgroundColor: theme.colors.surfaceVariant + '80',
+});
+
+const tagTextStyle = (theme: MD3Theme) => ({
+  fontSize: 11,
+  color: theme.colors.onSurfaceVariant,
+  fontWeight: '500' as const,
+});
 
 // --- Component ---
+const CONTENT_MAX_WIDTH = 768;
+
 const ApplicationsListScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const flatListRef = useRef<FlatList>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [filterVisible, setFilterVisible] = useState(false);
   const [sortOrder, setSortOrder] = useState<'default' | 'az' | 'za'>('default');
 
-  const {
-    data: applications,
-    isLoading,
-    error,
-    refetch,
-    isRefetching,
-  } = useApplications();
+  const { data: applications, isLoading, error, refetch, isRefetching } = useApplications();
 
   const appsList = applications ?? [];
 
-  // Count apps by status for filter badges
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     appsList.forEach((app: any) => {
@@ -143,17 +203,8 @@ const ApplicationsListScreen: React.FC = () => {
       return matchesSearch && matchesStatus;
     });
 
-    // Apply sort
-    if (sortOrder === 'az') {
-      return [...filtered].sort((a: any, b: any) =>
-        getAppName(a).localeCompare(getAppName(b)),
-      );
-    }
-    if (sortOrder === 'za') {
-      return [...filtered].sort((a: any, b: any) =>
-        getAppName(b).localeCompare(getAppName(a)),
-      );
-    }
+    if (sortOrder === 'az') return [...filtered].sort((a: any, b: any) => getAppName(a).localeCompare(getAppName(b)));
+    if (sortOrder === 'za') return [...filtered].sort((a: any, b: any) => getAppName(b).localeCompare(getAppName(a)));
     return filtered;
   }, [appsList, searchQuery, statusFilter, sortOrder]);
 
@@ -162,83 +213,26 @@ const ApplicationsListScreen: React.FC = () => {
     : `${getStatusLabel(statusFilter)} (${statusCounts[statusFilter] ?? 0})`;
 
   const renderApplicationCard = useCallback(
-    ({ item }: ListRenderItemInfo<Application>) => {
-      const app = item as any;
-      const color = getStatusColor(app.status);
-      const appName = getAppName(app);
-      const muleVer = getMuleVersion(app);
-      const workerInfo = getWorkerInfo(app);
-      const target = getDeploymentTarget(app);
-
-      return (
-        <Card
-          style={styles.appCard}
-          mode="contained"
-          onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: getAppId(app) } })}
-        >
-          <Card.Content style={styles.cardContent}>
-            <View style={styles.cardHeader}>
-              {/* Status indicator + name */}
-              <View style={[styles.statusIndicator, { backgroundColor: color }]} />
-              <View style={styles.appNameWrap}>
-                <Text variant="titleMedium" style={styles.appName} numberOfLines={1}>
-                  {appName}
-                </Text>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }} numberOfLines={1}>
-                  {app.fullDomain ?? app.domain ?? ''}
-                </Text>
-              </View>
-              <View style={[styles.statusChip, { backgroundColor: color + '20', borderColor: color + '40' }]}>
-                <Text style={{ color, fontSize: 11, fontWeight: '700' }}>
-                  {getStatusLabel(app.status)}
-                </Text>
-              </View>
-            </View>
-
-            {/* Info row */}
-            <View style={styles.infoRow}>
-              {app.region && (
-                <View style={styles.infoItem}>
-                  <Icon source="map-marker" size={13} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>{app.region}</Text>
-                </View>
-              )}
-              {muleVer ? (
-                <View style={styles.infoItem}>
-                  <Icon source="puzzle" size={13} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>Mule {muleVer}</Text>
-                </View>
-              ) : null}
-              <View style={styles.infoItem}>
-                <Icon source="server" size={13} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>
-                  {workerInfo.amount}x {workerInfo.typeName}
-                </Text>
-              </View>
-              {app.lastUpdateTime && (
-                <View style={styles.infoItem}>
-                  <Icon source="clock-outline" size={13} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>
-                    {formatRelativeTime(app.lastUpdateTime)}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </Card.Content>
-        </Card>
-      );
-    },
-    [styles, theme, router],
+    ({ item }: ListRenderItemInfo<Application>) => (
+      <AppCard
+        app={item}
+        onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: getAppId(item) } })}
+        theme={theme}
+      />
+    ),
+    [theme, router],
   );
 
   const renderEmptyState = useCallback(
     () => (
       <View style={styles.emptyState}>
-        <Icon source="application-outline" size={64} color={theme.colors.outlineVariant} />
-        <Text variant="titleMedium" style={styles.emptyTitle}>
+        <View style={{ width: 72, height: 72, borderRadius: 24, backgroundColor: theme.colors.surfaceVariant, justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
+          <Icon name="application-outline" size={36} color={theme.colors.onSurfaceVariant} />
+        </View>
+        <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.onSurface, marginBottom: 6 }}>
           No applications found
         </Text>
-        <Text variant="bodyMedium" style={styles.emptySubtitle}>
+        <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant, textAlign: 'center' }}>
           {searchQuery || statusFilter !== 'ALL'
             ? 'Try adjusting your filters or search query.'
             : 'No applications deployed in this environment.'}
@@ -248,107 +242,105 @@ const ApplicationsListScreen: React.FC = () => {
     [searchQuery, statusFilter, styles, theme],
   );
 
-  if (isLoading) {
-    return <LoadingState message="Loading applications..." />;
-  }
+  if (isLoading) return <LoadingState message="Loading applications..." />;
+  if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
 
-  if (error) {
-    return (
-      <ErrorState
-        message={(error as Error).message}
-        onRetry={() => refetch()}
-      />
-    );
-  }
+  const isWide = windowWidth > CONTENT_MAX_WIDTH;
+  const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
 
   return (
     <View style={styles.container}>
-      {/* Search + Filter row */}
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+      {/* ── Header ── */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 12 }, isWide && { paddingHorizontal: sidePadding + 16 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 }}>
+          <View style={styles.sectionAccent} />
+          <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.onSurface, flex: 1, letterSpacing: -0.3 }}>
+            Applications
+          </Text>
+          <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: anypointColors.primary + '12' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: anypointColors.primary }}>{appsList.length}</Text>
+          </View>
+        </View>
         <Searchbar
           placeholder="Search apps..."
           onChangeText={setSearchQuery}
           value={searchQuery}
           style={styles.searchBar}
           inputStyle={styles.searchInput}
+          icon="magnify"
         />
       </View>
 
-      {/* Filter chips row */}
-      <View style={styles.filterRow}>
+      {/* ── Filter chips ── */}
+      <View style={[styles.filterRow, isWide && { paddingHorizontal: sidePadding + 16 }]}>
         <Chip
           icon="filter-variant"
           onPress={() => setFilterVisible(true)}
-          style={styles.filterChip}
+          style={[styles.filterChip, statusFilter !== 'ALL' && { backgroundColor: anypointColors.primary + '15', borderColor: anypointColors.primary + '30' }]}
           selected={statusFilter !== 'ALL'}
-          showSelectedOverlay
+          selectedColor={statusFilter !== 'ALL' ? anypointColors.primary : undefined}
           compact
+          accessibilityRole="button"
+          accessibilityLabel={`Filter: ${activeFilterLabel}`}
         >
           {activeFilterLabel}
         </Chip>
         <Chip
           icon={sortOrder === 'za' ? 'sort-alphabetical-descending' : 'sort-alphabetical-ascending'}
-          onPress={() =>
-            setSortOrder((prev) =>
-              prev === 'default' ? 'az' : prev === 'az' ? 'za' : 'default',
-            )
-          }
-          style={styles.filterChip}
+          onPress={() => setSortOrder((prev) => prev === 'default' ? 'az' : prev === 'az' ? 'za' : 'default')}
+          style={[styles.filterChip, sortOrder !== 'default' && { backgroundColor: anypointColors.secondary + '15' }]}
           selected={sortOrder !== 'default'}
-          showSelectedOverlay
           compact
+          accessibilityRole="button"
+          accessibilityLabel={`Sort: ${sortOrder === 'az' ? 'A to Z' : sortOrder === 'za' ? 'Z to A' : 'default'}`}
         >
           {sortOrder === 'az' ? 'A → Z' : sortOrder === 'za' ? 'Z → A' : 'Sort'}
         </Chip>
         {statusFilter !== 'ALL' && (
-          <Chip
-            icon="close"
-            onPress={() => setStatusFilter('ALL')}
-            style={styles.clearChip}
-            compact
-          >
+          <Chip icon="close" onPress={() => setStatusFilter('ALL')} style={styles.filterChip} compact>
             Clear
           </Chip>
         )}
         <View style={{ flex: 1 }} />
-        <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-          {filteredApps.length} app{filteredApps.length !== 1 ? 's' : ''}
+        <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, fontWeight: '500' }}>
+          {filteredApps.length} result{filteredApps.length !== 1 ? 's' : ''}
         </Text>
       </View>
 
-      {/* Applications list */}
+      {/* ── Applications list ── */}
       <FlatList
+        ref={flatListRef}
         data={filteredApps}
         keyExtractor={(item: any) => getAppId(item)}
         renderItem={renderApplicationCard}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          isWide && { paddingHorizontal: sidePadding + 16 },
+        ]}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
-          <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
-            colors={[theme.colors.primary]}
-          />
+          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} colors={[theme.colors.primary]} tintColor={theme.colors.primary} />
         }
         showsVerticalScrollIndicator={false}
+        initialNumToRender={15}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews={true}
       />
 
-      {/* Filter Modal */}
+      {/* ── Filter Modal ── */}
       <Portal>
         <Modal
           visible={filterVisible}
           onDismiss={() => setFilterVisible(false)}
           contentContainerStyle={[styles.filterModal, { backgroundColor: theme.colors.surface }]}
         >
-          <Text variant="titleMedium" style={{ fontWeight: '700', marginBottom: 16 }}>
+          <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.onSurface, marginBottom: 16 }}>
             Filter by Status
           </Text>
           <RadioButton.Group
             value={statusFilter}
-            onValueChange={(v) => {
-              setStatusFilter(v as StatusFilter);
-              setFilterVisible(false);
-            }}
+            onValueChange={(v) => { setStatusFilter(v as StatusFilter); setFilterVisible(false); }}
           >
             {STATUS_OPTIONS.map((opt) => (
               <RadioButton.Item
@@ -359,11 +351,7 @@ const ApplicationsListScreen: React.FC = () => {
               />
             ))}
           </RadioButton.Group>
-          <Button
-            mode="text"
-            onPress={() => setFilterVisible(false)}
-            style={{ marginTop: 8 }}
-          >
+          <Button mode="text" onPress={() => setFilterVisible(false)} style={{ marginTop: 8 }}>
             Cancel
           </Button>
         </Modal>
@@ -381,90 +369,41 @@ const createStyles = (theme: MD3Theme) =>
     },
     topBar: {
       paddingHorizontal: 16,
-      paddingTop: 12,
       paddingBottom: 4,
+    },
+    sectionAccent: {
+      width: 3,
+      height: 18,
+      borderRadius: 1.5,
+      backgroundColor: theme.colors.primary,
+      marginRight: 10,
     },
     searchBar: {
       elevation: 0,
       backgroundColor: theme.colors.surfaceVariant,
-      borderRadius: 14,
+      borderRadius: 16,
+      height: 44,
     },
     searchInput: {
       fontSize: 14,
+      minHeight: 44,
     },
     filterRow: {
       flexDirection: 'row',
       alignItems: 'center',
       flexWrap: 'wrap',
       paddingHorizontal: 16,
-      paddingVertical: 8,
+      paddingVertical: 10,
       gap: 8,
     },
     filterChip: {
-      borderRadius: 10,
-    },
-    clearChip: {
-      borderRadius: 10,
+      borderRadius: 12,
+      borderColor: theme.colors.outline,
     },
     listContent: {
       paddingHorizontal: 16,
       paddingBottom: 32,
-    },
-    appCard: {
-      marginBottom: 10,
-      backgroundColor: theme.colors.surface,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: theme.colors.surfaceVariant,
-      overflow: 'hidden',
-    },
-    cardContent: {
-      paddingVertical: 14,
-      paddingHorizontal: 14,
-    },
-    cardHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-    statusIndicator: {
-      width: 4,
-      height: 36,
-      borderRadius: 2,
-    },
-    appNameWrap: {
-      flex: 1,
-    },
-    appName: {
-      fontWeight: '600',
-      color: theme.colors.onSurface,
-    },
-    statusChip: {
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-      borderRadius: 8,
-      borderWidth: 1,
-    },
-    infoRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 12,
-      marginTop: 10,
-      paddingTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: theme.colors.outlineVariant,
-      overflow: 'hidden',
-    },
-    infoItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 3,
-      maxWidth: '48%',
-    },
-    infoText: {
-      color: theme.colors.onSurfaceVariant,
-      fontSize: 12,
-      flexShrink: 1,
+      paddingTop: 4,
     },
     emptyState: {
       alignItems: 'center',
@@ -472,19 +411,12 @@ const createStyles = (theme: MD3Theme) =>
       paddingVertical: 80,
       paddingHorizontal: 32,
     },
-    emptyTitle: {
-      marginTop: 16,
-      color: theme.colors.onSurface,
-    },
-    emptySubtitle: {
-      marginTop: 8,
-      textAlign: 'center',
-      color: theme.colors.onSurfaceVariant,
-    },
     filterModal: {
       margin: 24,
       padding: 24,
-      borderRadius: 20,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: theme.colors.outlineVariant,
     },
     radioItem: {
       paddingVertical: 2,

@@ -59,6 +59,19 @@ export function useAppMetrics(domain: string, params: {
   });
 }
 
+/**
+ * Fetch dashboard statistics for a single application (CPU, memory, threads, message count).
+ * Uses the full discovery pipeline: dashboardStats → monitoring API → InfluxDB proxy.
+ */
+export function useDashboardStats(domain: string, periodMinutes: number = 60) {
+  return useQuery({
+    queryKey: [...runtimeKeys.all, 'dashboardStats', domain, periodMinutes],
+    queryFn: () => runtimeService.getDashboardStats(domain, periodMinutes),
+    enabled: !!domain,
+    refetchInterval: 60_000,
+  });
+}
+
 // --- Schedulers ---
 
 export function useSchedulers(domain: string) {

@@ -101,6 +101,8 @@ const ErrorState: React.FC<ErrorStateProps> = ({
           onPress={onRetry}
           style={styles.button}
           icon="refresh"
+          accessibilityLabel="Retry loading"
+          accessibilityRole="button"
         >
           {retryLabel}
         </Button>

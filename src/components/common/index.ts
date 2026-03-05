@@ -13,3 +13,4 @@ export { default as ConfirmDialog } from './ConfirmDialog';
 export { default as SectionHeader } from './SectionHeader';
 export { default as InfoRow } from './InfoRow';
 export { default as EnvironmentSelector } from './EnvironmentSelector';
+export { default as ErrorBoundary } from './ErrorBoundary';

@@ -14,7 +14,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View, FlatList, StyleSheet, RefreshControl, Platform, ScrollView,
-  Modal, Pressable,
+  Modal, Pressable, useWindowDimensions,
 } from 'react-native';
 import {
   Appbar, Text, Chip, Searchbar, useTheme, ActivityIndicator, Switch,
@@ -89,7 +89,7 @@ const AppLogCard = React.memo<{
   theme: MD3Theme;
   onPress: (entry: any) => void;
 }>(({ entry, theme, onPress }) => {
-  const priority = String(entry.priority ?? entry.level ?? entry.logLevel ?? 'INFO').toUpperCase();
+  const priority = String(entry.priority ?? entry.level ?? entry.severity ?? entry.logLevel ?? 'INFO').toUpperCase();
   const priColor = PRIORITY_COLORS[priority] ?? '#9E9E9E';
 
   // Extract message — handle nested event wrapper from CH1
@@ -100,18 +100,21 @@ const AppLogCard = React.memo<{
   const loggerName = entry.loggerName ?? ev?.loggerName ?? entry.logger ?? '';
 
   return (
-    <Pressable onPress={() => onPress(entry)}>
-      <Surface
+    <Pressable
+      onPress={() => onPress(entry)}
+      accessibilityLabel={`${priority} log: ${typeof message === 'string' ? message.slice(0, 80) : 'log entry'}. ${fmtTs(ts)}`}
+      accessibilityRole="button"
+      accessibilityHint="Double tap to view full details"
+    >
+      <View
         style={{
           marginHorizontal: 12,
           marginVertical: 4,
-          borderRadius: 12,
+          borderRadius: 16,
           backgroundColor: theme.colors.surface,
           borderWidth: 1,
-          borderColor: theme.colors.surfaceVariant,
-          overflow: 'hidden',
+          borderColor: theme.colors.outlineVariant,
         }}
-        elevation={0}
       >
         <View style={{ padding: 12 }}>
           {/* Message */}
@@ -182,7 +185,7 @@ const AppLogCard = React.memo<{
             </View>
           </View>
         </View>
-      </Surface>
+      </View>
     </Pressable>
   );
 });
@@ -210,7 +213,7 @@ const LogDetailSheet: React.FC<{
       onRequestClose={onDismiss}
     >
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-        <Pressable style={{ flex: 1 }} onPress={onDismiss} />
+        <Pressable style={{ flex: 1 }} onPress={onDismiss} accessibilityLabel="Close log details" accessibilityRole="button" />
         <View style={{
           backgroundColor: theme.colors.surface,
           borderTopLeftRadius: 20,
@@ -327,12 +330,18 @@ AuditLogItem.displayName = 'AuditLogItem';
 // Main Screen
 // ═══════════════════════════════════════════════════════════════════
 
+const CONTENT_MAX_WIDTH = 768;
+
 const LogsScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const { domain } = useLocalSearchParams<{ domain: string }>();
+  const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const flatListRef = useRef<FlatList>(null);
+
+  const isWide = windowWidth > CONTENT_MAX_WIDTH;
+  const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
 
   // ── Debug: log domain on mount ──
   useEffect(() => {
@@ -343,6 +352,7 @@ const LogsScreen: React.FC = () => {
   const [tab, setTab] = useState<'app' | 'audit'>('app');
   const [dateIdx, setDateIdx] = useState(0); // Default to 1h (latest)
   const [searchQuery, setSearchQuery] = useState('');
+  const [levelFilter, setLevelFilter] = useState<string>('ALL'); // Log level filter
   const [liveMode, setLiveMode] = useState(true); // Auto-polling toggle
   const [autoScroll, setAutoScroll] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
@@ -364,6 +374,12 @@ const LogsScreen: React.FC = () => {
     };
   }, [dateIdx]);
 
+  // Scale limit based on date range — larger windows need more entries
+  const logLimit = DATE_RANGES[dateIdx].ms > 86_400_000 ? 500 : 200;
+
+  // Server-side priority filter — when user selects a specific level, ask the API to filter
+  const serverPriority = levelFilter !== 'ALL' ? levelFilter : undefined;
+
   // ---- App Logs (CloudHub) — with auto-polling for live feed ----
   const {
     data: appLogs,
@@ -374,12 +390,13 @@ const LogsScreen: React.FC = () => {
     isFetched: appLogsFetched,
     dataUpdatedAt,
   } = useQuery({
-    queryKey: ['appLogs', domain, dateRange.startDate, dateRange.endDate],
+    queryKey: ['appLogs', domain, dateRange.startDate, dateRange.endDate, logLimit, serverPriority ?? 'ALL'],
     queryFn: () =>
       runtimeService.getAppLogs(domain!, {
         startDate: dateRange.startDate,
         endDate: new Date().toISOString(), // always use current time for endDate
-        limit: 200,
+        limit: logLimit,
+        priority: serverPriority,
       }),
     enabled: !!domain,
     retry: 1,
@@ -427,22 +444,40 @@ const LogsScreen: React.FC = () => {
   // Filtered data — safely convert everything to string before toLowerCase
   const filteredAppLogs = useMemo(() => {
     const logs = appLogs ?? [];
-    if (!searchQuery.trim()) return logs;
-    const q = searchQuery.toLowerCase();
     return logs.filter((l: any) => {
       const ev = l.event;
       const msg = String(l.message ?? ev?.message ?? l.msg ?? l.line ?? '');
-      const pri = String(l.priority ?? ev?.priority ?? l.level ?? l.logLevel ?? '');
+      const pri = String(l.priority ?? ev?.priority ?? l.level ?? l.severity ?? l.logLevel ?? 'INFO').toUpperCase();
       const logger = String(l.loggerName ?? ev?.loggerName ?? l.logger ?? '');
       const thread = String(l.threadName ?? ev?.threadName ?? '');
-      return (
-        msg.toLowerCase().includes(q) ||
-        pri.toLowerCase().includes(q) ||
-        logger.toLowerCase().includes(q) ||
-        thread.toLowerCase().includes(q)
-      );
+
+      // Level filter
+      if (levelFilter !== 'ALL' && pri !== levelFilter) return false;
+
+      // Search filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          msg.toLowerCase().includes(q) ||
+          pri.toLowerCase().includes(q) ||
+          logger.toLowerCase().includes(q) ||
+          thread.toLowerCase().includes(q)
+        );
+      }
+      return true;
     });
-  }, [appLogs, searchQuery]);
+  }, [appLogs, searchQuery, levelFilter]);
+
+  // Count logs by level for filter badges
+  const levelCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (appLogs ?? []).forEach((l: any) => {
+      const ev = l.event;
+      const pri = String(l.priority ?? ev?.priority ?? l.level ?? l.severity ?? l.logLevel ?? 'INFO').toUpperCase();
+      counts[pri] = (counts[pri] ?? 0) + 1;
+    });
+    return counts;
+  }, [appLogs]);
 
   const filteredAuditLogs = useMemo(() => {
     const logs = auditResponse?.data ?? [];
@@ -500,14 +535,14 @@ const LogsScreen: React.FC = () => {
           {err
             ? `Error: ${(err as Error).message}`
             : tab === 'app'
-              ? 'CloudHub runtime logs may not be available for this application or region. Try the Audit Logs tab.'
+              ? 'Runtime logs may not be available for this application or region. Try the Audit Logs tab.'
               : 'No audit events found for the selected time range.'}
         </Text>
         {tab === 'app' && !err && (
           <View style={[styles.hintBox, { backgroundColor: theme.colors.surfaceVariant }]}>
             <Icon name="information-outline" size={16} color={theme.colors.onSurfaceVariant} />
             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, flex: 1, marginLeft: 8 }}>
-              CloudHub 1.0 (EU1) log APIs have limited availability. Logs are fetched from multiple endpoints automatically. If logs appear empty, the app may not have generated any logs in the selected time range.
+              Log APIs are tried across CloudHub 1.0, CloudHub 2.0, and Runtime Fabric automatically. If logs appear empty, the app may not have generated any logs in the selected time range, or log access may require an Anypoint Monitoring subscription.
             </Text>
           </View>
         )}
@@ -531,7 +566,7 @@ const LogsScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* ── Header Banner (Muleye-style) ── */}
-      <View style={[styles.headerBanner, { backgroundColor: theme.colors.primary }]}>
+      <View style={[styles.headerBanner, { backgroundColor: theme.colors.primary }, isWide && { paddingHorizontal: sidePadding + 4 }]}>
         <View style={styles.headerBannerTop}>
           <IconButton
             icon="arrow-left"
@@ -541,7 +576,7 @@ const LogsScreen: React.FC = () => {
           />
           <View style={{ flex: 1 }}>
             <Text style={styles.headerBannerTitle}>
-              CloudHub Logs
+              Application Logs
             </Text>
             <Text style={styles.headerBannerSubtitle}>
               {domain ?? 'Unknown'}
@@ -559,7 +594,7 @@ const LogsScreen: React.FC = () => {
       </View>
 
       {/* ── Controls row: Auto-scroll + Refresh + Count ── */}
-      <View style={styles.controlsRow}>
+      <View style={[styles.controlsRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
         {tab === 'app' && (
           <View style={styles.toggleItem}>
             <Icon name="arrow-up" size={12} color={autoScroll ? theme.colors.primary : theme.colors.onSurfaceVariant} />
@@ -602,7 +637,7 @@ const LogsScreen: React.FC = () => {
       </View>
 
       {/* ── Tab selector ── */}
-      <View style={styles.tabRow}>
+      <View style={[styles.tabRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
         <Chip
           icon="console-line"
           selected={tab === 'app'}
@@ -611,6 +646,8 @@ const LogsScreen: React.FC = () => {
           style={[styles.tabChip, tab === 'app' && { backgroundColor: theme.colors.primary }]}
           textStyle={tab === 'app' ? { color: '#fff' } : undefined}
           selectedColor={tab === 'app' ? '#fff' : undefined}
+          accessibilityLabel={`App Logs tab${tab === 'app' ? ', selected' : ''}${appLogs && appLogs.length > 0 ? `, ${appLogs.length} entries` : ''}`}
+          accessibilityRole="tab"
         >
           App Logs {appLogs && appLogs.length > 0 ? `(${appLogs.length})` : ''}
         </Chip>
@@ -622,6 +659,8 @@ const LogsScreen: React.FC = () => {
           style={[styles.tabChip, tab === 'audit' && { backgroundColor: theme.colors.primary }]}
           textStyle={tab === 'audit' ? { color: '#fff' } : undefined}
           selectedColor={tab === 'audit' ? '#fff' : undefined}
+          accessibilityLabel={`Audit Logs tab${tab === 'audit' ? ', selected' : ''}${auditResponse?.data && auditResponse.data.length > 0 ? `, ${auditResponse.data.length} entries` : ''}`}
+          accessibilityRole="tab"
         >
           Audit Logs {auditResponse?.data && auditResponse.data.length > 0 ? `(${auditResponse.data.length})` : ''}
         </Chip>
@@ -636,6 +675,8 @@ const LogsScreen: React.FC = () => {
         {tab === 'app' && (
           <Pressable
             onPress={() => setLiveMode(!liveMode)}
+            accessibilityLabel={liveMode ? 'Pause live log updates' : 'Resume live log updates'}
+            accessibilityRole="button"
             style={{ marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 4 }}
           >
             <Text style={{
@@ -650,7 +691,7 @@ const LogsScreen: React.FC = () => {
       </View>
 
       {/* ── Search ── */}
-      <View style={styles.searchWrap}>
+      <View style={[styles.searchWrap, isWide && { paddingHorizontal: sidePadding + 12 }]}>
         <Searchbar
           placeholder="Search logs..."
           value={searchQuery}
@@ -661,8 +702,43 @@ const LogsScreen: React.FC = () => {
         />
       </View>
 
+      {/* ── Level filter (app logs only) ── */}
+      {tab === 'app' && (
+        <View style={[styles.dateRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5, paddingRight: 12 }}>
+            {(['ALL', 'ERROR', 'WARN', 'INFO', 'DEBUG'] as const).map((level) => {
+              const sel = levelFilter === level;
+              // When server-side priority filter is active, only show count for the selected level
+              // (other levels' data isn't fetched, so counts would be misleading)
+              const count = serverPriority
+                ? (level === serverPriority ? (appLogs?.length ?? 0) : 0)
+                : (level === 'ALL' ? (appLogs?.length ?? 0) : (levelCounts[level] ?? 0));
+              const lvlColor = PRIORITY_COLORS[level] ?? theme.colors.primary;
+              return (
+                <Chip
+                  key={level}
+                  mode={sel ? 'flat' : 'outlined'}
+                  selected={sel}
+                  onPress={() => setLevelFilter(level)}
+                  compact
+                  style={[
+                    styles.dateChip,
+                    sel && { backgroundColor: level === 'ALL' ? theme.colors.primaryContainer : lvlColor + '25', borderColor: lvlColor + '50' },
+                  ]}
+                  textStyle={sel
+                    ? { color: level === 'ALL' ? theme.colors.onPrimaryContainer : lvlColor, fontWeight: '700' }
+                    : { color: theme.colors.onSurfaceVariant }}
+                >
+                  {level}{count > 0 ? ` (${count})` : ''}
+                </Chip>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       {/* ── Date range ── */}
-      <View style={styles.dateRow}>
+      <View style={[styles.dateRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
         {tab === 'app' && isRefetching && (
           <ActivityIndicator size={12} color={theme.colors.primary} style={{ marginRight: 6 }} />
         )}
@@ -694,7 +770,10 @@ const LogsScreen: React.FC = () => {
           keyExtractor={keyExtractorApp}
           renderItem={renderAppLog}
           ListEmptyComponent={renderEmpty}
-          contentContainerStyle={filteredAppLogs.length === 0 ? styles.emptyList : styles.listContent}
+          contentContainerStyle={[
+            filteredAppLogs.length === 0 ? styles.emptyList : styles.listContent,
+            isWide && { paddingHorizontal: sidePadding },
+          ]}
           refreshControl={<RefreshControl refreshing={isRefetching && !liveMode} onRefresh={handleRefresh} tintColor={theme.colors.primary} colors={[theme.colors.primary]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
@@ -706,7 +785,10 @@ const LogsScreen: React.FC = () => {
           keyExtractor={keyExtractorAudit}
           renderItem={renderAuditLog}
           ListEmptyComponent={renderEmpty}
-          contentContainerStyle={filteredAuditLogs.length === 0 ? styles.emptyList : styles.listContent}
+          contentContainerStyle={[
+            filteredAuditLogs.length === 0 ? styles.emptyList : styles.listContent,
+            isWide && { paddingHorizontal: sidePadding },
+          ]}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={theme.colors.primary} colors={[theme.colors.primary]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}

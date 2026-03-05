@@ -1,17 +1,23 @@
 // ============================================================
-// Dashboard Screen - Overview of Anypoint Platform health
-// Shows real app counts, API stats, running apps
+// Dashboard Screen — 2026 Modern Dark UI
+//
+// Design: Glassmorphic cards, gradient accent borders,
+// large bold metrics, generous spacing, vibrant accents
 // ============================================================
 
-import React, { useMemo } from 'react';
-import { StyleSheet, View, ScrollView, RefreshControl } from 'react-native';
+import React, { useMemo, useRef } from 'react';
+import {
+  StyleSheet,
+  View,
+  ScrollView,
+  RefreshControl,
+  useWindowDimensions,
+  Pressable,
+  Platform,
+} from 'react-native';
 import {
   Text,
-  Card,
   useTheme,
-  Divider,
-  Button,
-  Avatar,
   ProgressBar,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
@@ -23,8 +29,10 @@ import { useAuthStore } from '../../stores/authStore';
 import { getRegionById } from '../../config/regions';
 import { anypointColors } from '../../theme';
 import { useApplications, useManagedAPIs } from '../../hooks/queries';
-import { getAppName, getAppId, getMuleVersion } from '../../utils/appHelpers';
+import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import LoadingState from '../../components/common/LoadingState';
+
+// ── Glassmorphic Stat Card ──
 
 interface StatCardProps {
   title: string;
@@ -37,89 +45,171 @@ interface StatCardProps {
 }
 
 const StatCard: React.FC<StatCardProps> = ({
-  title,
-  value,
-  icon,
-  color,
-  subtitle,
-  onPress,
-  loading,
+  title, value, icon, color, subtitle, onPress, loading,
 }) => {
   const theme = useTheme();
   return (
-    <Card
-      style={[statCardStyles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.surfaceVariant, borderWidth: 1 }]}
-      mode="contained"
+    <Pressable
       onPress={onPress}
+      accessibilityLabel={`${title}: ${loading ? 'loading' : value}${subtitle ? '. ' + subtitle : ''}`}
+      accessibilityRole="button"
+      style={({ pressed }) => [
+        {
+          flex: 1,
+          borderRadius: 20,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: color + '18',
+          overflow: 'hidden',
+          opacity: pressed ? 0.9 : 1,
+        },
+      ]}
     >
-      <Card.Content style={statCardStyles.content}>
-        <View style={statCardStyles.topRow}>
-          <View style={[statCardStyles.iconCircle, { backgroundColor: color + '20' }]}>
+      {/* Accent glow at top */}
+      <View style={{ height: 3, backgroundColor: color, opacity: 0.6 }} />
+      <View style={{ padding: 16 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <View style={{
+            width: 42, height: 42, borderRadius: 14,
+            backgroundColor: color + '15',
+            justifyContent: 'center', alignItems: 'center',
+          }}>
             <Icon name={icon} size={20} color={color} />
           </View>
-          <Icon name="chevron-right" size={16} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.5 }} />
+          <Icon name="chevron-right" size={14} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.4 }} />
         </View>
-        <Text variant="headlineMedium" style={[statCardStyles.value, { color: theme.colors.onSurface }]}>
+        <Text style={{
+          fontSize: 32, fontWeight: '800', color: theme.colors.onSurface,
+          letterSpacing: -1, marginBottom: 2, lineHeight: 36,
+        }}>
           {loading ? '—' : value}
         </Text>
-        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, fontWeight: '500' }}>
+        <Text style={{ fontSize: 12, fontWeight: '500', color: theme.colors.onSurfaceVariant, letterSpacing: 0.3 }}>
           {title}
         </Text>
         {subtitle && (
-          <View style={[statCardStyles.subtitleRow, { backgroundColor: color + '15' }]}>
-            <View style={[statCardStyles.subtitleDot, { backgroundColor: color }]} />
-            <Text style={{ color, fontSize: 11, fontWeight: '600' }}>
-              {subtitle}
-            </Text>
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', marginTop: 8,
+            paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
+            backgroundColor: color + '12', alignSelf: 'flex-start',
+          }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, marginRight: 6 }} />
+            <Text style={{ color, fontSize: 11, fontWeight: '600' }}>{subtitle}</Text>
           </View>
         )}
-      </Card.Content>
-    </Card>
+      </View>
+    </Pressable>
   );
 };
 
-const statCardStyles = StyleSheet.create({
-  card: { flex: 1, borderRadius: 16, elevation: 0 },
-  content: { paddingVertical: 14, paddingHorizontal: 14 },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  iconCircle: { width: 40, height: 40, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  value: { fontWeight: '800', fontSize: 28, marginBottom: 2 },
-  subtitleRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' },
-  subtitleDot: { width: 6, height: 6, borderRadius: 3, marginRight: 5 },
+// ── App Row Item ──
+
+const AppRowItem: React.FC<{
+  app: any;
+  isLast: boolean;
+  onPress: () => void;
+  theme: MD3Theme;
+}> = React.memo(({ app, isLast, onPress, theme }) => {
+  const name = getAppName(app);
+  const version = getMuleVersion(app);
+  const workerInfo = getWorkerInfo(app);
+  const cpu = app.monitoring?.cpuUsage ?? null;
+  const memUsage = app.monitoring?.memoryUsage ?? 0;
+  const memTotal = app.monitoring?.memoryTotal ?? 0;
+  const memPct = memTotal > 0 ? Math.round((memUsage / memTotal) * 100) : null;
+  const statusColor = app.status === 'STARTED' ? anypointColors.success
+    : app.status === 'FAILED' ? anypointColors.error
+    : anypointColors.warning;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={`${name}, status ${app.status === 'STARTED' ? 'running' : (app.status ?? '').toLowerCase()}`}
+      accessibilityRole="button"
+      accessibilityHint="Double tap to view details"
+      style={({ pressed }) => ({
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderBottomWidth: isLast ? 0 : 1,
+        borderBottomColor: theme.colors.outlineVariant,
+        backgroundColor: pressed ? theme.colors.surfaceVariant + '40' : 'transparent',
+      })}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {/* Glowing status dot */}
+        <View style={{
+          width: 10, height: 10, borderRadius: 5,
+          backgroundColor: statusColor, marginRight: 14,
+          shadowColor: statusColor, shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.6, shadowRadius: 4, elevation: 3,
+        }} />
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.onSurface }} numberOfLines={1}>
+            {name}
+          </Text>
+          <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+            {[version, app.region, `${workerInfo.amount}x ${workerInfo.typeName}`].filter(Boolean).join(' · ')}
+          </Text>
+        </View>
+        <Icon name="chevron-right" size={16} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.3 }} />
+      </View>
+      {/* Mini metrics bar */}
+      {cpu != null && (
+        <View style={{ flexDirection: 'row', gap: 12, marginTop: 10, marginLeft: 24 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: '500', color: theme.colors.onSurfaceVariant, width: 26 }}>CPU</Text>
+            <ProgressBar
+              progress={cpu / 100}
+              color={cpu > 80 ? anypointColors.error : cpu > 60 ? anypointColors.warning : anypointColors.primary}
+              style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: theme.colors.surfaceVariant }}
+            />
+            <Text style={{ fontSize: 10, fontWeight: '600', color: theme.colors.onSurfaceVariant, width: 30, textAlign: 'right' }}>
+              {Math.round(cpu)}%
+            </Text>
+          </View>
+          {memPct != null && (
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.colors.onSurfaceVariant, width: 26 }}>MEM</Text>
+              <ProgressBar
+                progress={memPct / 100}
+                color={memPct > 80 ? anypointColors.error : anypointColors.secondary}
+                style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: theme.colors.surfaceVariant }}
+              />
+              <Text style={{ fontSize: 10, fontWeight: '600', color: theme.colors.onSurfaceVariant, width: 30, textAlign: 'right' }}>
+                {memPct}%
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
+    </Pressable>
+  );
 });
+AppRowItem.displayName = 'AppRowItem';
+
+// ── Main Screen ──
+
+const CONTENT_MAX_WIDTH = 768;
 
 const DashboardScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const scrollRef = useRef<ScrollView>(null);
   const user = useAuthStore((s) => s.user);
+
   const selectedRegion = useAuthStore((s) => s.selectedRegion);
   const currentOrg = useAuthStore((s) => s.currentOrganization);
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
   const region = getRegionById(selectedRegion);
 
   // Real data queries
-  const {
-    data: applications,
-    isLoading: appsLoading,
-    error: appsError,
-    refetch: refetchApps,
-  } = useApplications();
+  const { data: applications, isLoading: appsLoading, error: appsError, refetch: refetchApps } = useApplications();
+  const { data: apisResponse, isLoading: apisLoading, error: apisError, refetch: refetchApis } = useManagedAPIs();
 
-  const {
-    data: apisResponse,
-    isLoading: apisLoading,
-    error: apisError,
-    refetch: refetchApis,
-  } = useManagedAPIs();
-
-  const isRefreshing = appsLoading || apisLoading;
-
-  const handleRefresh = () => {
-    refetchApps();
-    refetchApis();
-  };
+  const handleRefresh = () => { refetchApps(); refetchApis(); };
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -132,121 +222,110 @@ const DashboardScreen: React.FC = () => {
     ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`
     : '?';
 
-  // Compute stats from real data
+  // Compute stats
   const appsList = applications ?? [];
   const totalApps = appsList.length;
   const runningApps = appsList.filter((a) => a.status === 'STARTED').length;
   const failedApps = appsList.filter((a) => a.status === 'FAILED').length;
-
   const apiList = apisResponse ?? [];
   const totalApis = apiList.length;
   const activeApis = apiList.filter((a) => a.status === 'active').length;
 
-  // Top running apps for display
-  const topRunningApps = appsList
-    .filter((a) => a.status === 'STARTED')
-    .slice(0, 5);
+  const topRunningApps = appsList.filter((a) => a.status === 'STARTED').slice(0, 6);
+
+  const isWide = windowWidth > CONTENT_MAX_WIDTH;
+  const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={styles.container}
-      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top }]}
+      contentContainerStyle={[
+        styles.scrollContent,
+        { paddingTop: insets.top + 8 },
+        isWide && { paddingHorizontal: sidePadding },
+      ]}
       showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={false} onRefresh={handleRefresh} />
-      }
+      refreshControl={<RefreshControl refreshing={false} onRefresh={handleRefresh} />}
     >
-      {/* Header / Greeting */}
-      <Card style={[styles.headerCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.surfaceVariant, borderWidth: 1 }]} mode="contained">
-        <Card.Content style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Avatar.Text
-              size={52}
-              label={initials}
-              style={{ backgroundColor: theme.colors.primaryContainer }}
-              labelStyle={{ color: theme.colors.primary, fontWeight: '700' }}
-            />
-            <View style={styles.headerText}>
-              <Text variant="titleLarge" style={{ color: theme.colors.onBackground, fontWeight: '700' }}>
-                {greeting}
+      {/* ── Profile Header ── */}
+      <View style={styles.headerSection}>
+        <View style={styles.avatarContainer}>
+          <View style={[styles.avatar, { backgroundColor: anypointColors.primary + '20' }]}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: anypointColors.primary }}>
+              {initials}
+            </Text>
+          </View>
+          {/* Online indicator */}
+          <View style={styles.onlineDot} />
+        </View>
+        <View style={styles.headerText}>
+          <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant, fontWeight: '500' }}>
+            {greeting},
+          </Text>
+          <Text style={{ fontSize: 22, fontWeight: '700', color: theme.colors.onSurface, letterSpacing: -0.5 }}>
+            {user?.firstName ?? 'User'} {user?.lastName ?? ''}
+          </Text>
+          <View style={styles.metaRow}>
+            <View style={styles.metaChip}>
+              <Icon name="domain" size={11} color={theme.colors.onSurfaceVariant} />
+              <Text style={styles.metaText} numberOfLines={1}>
+                {currentOrg?.name ?? user?.organizationName ?? 'Organization'}
               </Text>
-              <Text variant="titleMedium" style={{ color: theme.colors.primary, fontWeight: '600' }}>
-                {user?.firstName ?? 'User'} {user?.lastName ?? ''}
-              </Text>
-              <View style={styles.orgRow}>
-                <Icon name="domain" size={14} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginLeft: 4 }} numberOfLines={1}>
-                  {currentOrg?.name ?? user?.organizationName ?? 'Organization'}
-                </Text>
-                <View style={styles.regionChip}>
-                  <Icon name="earth" size={12} color={theme.colors.primary} />
-                  <Text variant="labelSmall" style={{ color: theme.colors.primary, marginLeft: 3 }}>
-                    {region.label}
-                  </Text>
-                </View>
-              </View>
-              {currentEnv && (
-                <View style={styles.orgRow}>
-                  <Icon name="server" size={14} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginLeft: 4 }}>
-                    {currentEnv.name}
-                  </Text>
-                  <View style={[styles.envTypeBadge, { backgroundColor: currentEnv.isProduction ? '#3FB95020' : '#D2992220' }]}>
-                    <Text variant="labelSmall" style={{ color: currentEnv.isProduction ? '#3FB950' : '#D29922', fontSize: 10 }}>
-                      {currentEnv.isProduction ? 'PROD' : 'SANDBOX'}
-                    </Text>
-                  </View>
-                </View>
-              )}
+            </View>
+            <View style={[styles.metaChip, { backgroundColor: anypointColors.primary + '12' }]}>
+              <Icon name="earth" size={11} color={anypointColors.primary} />
+              <Text style={[styles.metaText, { color: anypointColors.primary }]}>{region.label}</Text>
             </View>
           </View>
-        </Card.Content>
-      </Card>
-
-      {/* Error Banner (shows 403 debug info when data fails to load) */}
-      {(appsError || apisError) && (
-        <Card style={[styles.errorBanner, { backgroundColor: theme.colors.errorContainer }]} mode="contained">
-          <Card.Content style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
-            <Icon name="alert-circle" size={20} color={theme.colors.error} style={{ marginTop: 2 }} />
-            <View style={{ flex: 1 }}>
-              <Text variant="labelLarge" style={{ color: theme.colors.onErrorContainer, fontWeight: '700', marginBottom: 4 }}>
-                Data loading failed
-              </Text>
-              {appsError && (
-                <Text variant="bodySmall" style={{ color: theme.colors.onErrorContainer }} selectable>
-                  Apps: {appsError instanceof Error ? appsError.message : String(appsError)}
+          {currentEnv && (
+            <View style={styles.metaRow}>
+              <View style={[
+                styles.envBadge,
+                { backgroundColor: currentEnv.isProduction ? anypointColors.success + '15' : anypointColors.warning + '15' },
+              ]}>
+                <View style={{
+                  width: 6, height: 6, borderRadius: 3,
+                  backgroundColor: currentEnv.isProduction ? anypointColors.success : anypointColors.warning,
+                }} />
+                <Text style={{
+                  fontSize: 11, fontWeight: '600',
+                  color: currentEnv.isProduction ? anypointColors.success : anypointColors.warning,
+                }}>
+                  {currentEnv.name} · {currentEnv.isProduction ? 'PRODUCTION' : 'SANDBOX'}
                 </Text>
-              )}
-              {apisError && (
-                <Text variant="bodySmall" style={{ color: theme.colors.onErrorContainer, marginTop: 4 }} selectable>
-                  APIs: {apisError instanceof Error ? apisError.message : String(apisError)}
-                </Text>
-              )}
-              <Button
-                mode="text"
-                onPress={handleRefresh}
-                icon="refresh"
-                compact
-                textColor={theme.colors.error}
-                style={{ alignSelf: 'flex-start', marginTop: 4 }}
-              >
-                Retry
-              </Button>
+              </View>
             </View>
-          </Card.Content>
-        </Card>
-      )}
-
-      {/* Quick Stats */}
-      <View style={styles.sectionHeader}>
-        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>
-          Platform Overview
-        </Text>
-        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-          {currentEnv?.name ?? 'Environment'}
-        </Text>
+          )}
+        </View>
       </View>
 
+      {/* ── Error Banner ── */}
+      {(appsError || apisError) && (
+        <View style={[styles.errorBanner, { backgroundColor: anypointColors.error + '10', borderColor: anypointColors.error + '25' }]}>
+          <Icon name="alert-circle" size={18} color={anypointColors.error} />
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.onSurface }}>
+              Failed to load data
+            </Text>
+            <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+              {appsError instanceof Error ? appsError.message : apisError instanceof Error ? (apisError as Error).message : 'Network error'}
+            </Text>
+          </View>
+          <Pressable onPress={handleRefresh} style={styles.retryButton}>
+            <Icon name="refresh" size={16} color={anypointColors.primary} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* ── Section: Platform Overview ── */}
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionAccent} />
+        <Text style={styles.sectionTitle}>Platform Overview</Text>
+        <Text style={styles.sectionSubtitle}>{currentEnv?.name ?? 'Environment'}</Text>
+      </View>
+
+      {/* ── Stat Cards Grid ── */}
       <View style={styles.statsGrid}>
         <View style={styles.statsRow}>
           <StatCard
@@ -289,103 +368,61 @@ const DashboardScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* Running Applications */}
+      {/* ── Running Applications ── */}
       {topRunningApps.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
-            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>
-              Running Applications
-            </Text>
-            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-              Top {topRunningApps.length}
-            </Text>
+            <View style={styles.sectionAccent} />
+            <Text style={styles.sectionTitle}>Running Applications</Text>
+            <View style={styles.countBadge}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: anypointColors.success }}>{runningApps}</Text>
+            </View>
           </View>
-          <Card style={styles.activityCard} mode="elevated">
-            <Card.Content>
-              {topRunningApps.map((app, i) => (
-                <View key={getAppId(app)}>
-                  <View style={styles.appRow}>
-                    <View style={[styles.statusDot, { backgroundColor: anypointColors.success }]} />
-                    <View style={styles.appInfo}>
-                      <Text variant="bodyMedium" style={{ color: theme.colors.onSurface, fontWeight: '600' }} numberOfLines={1}>
-                        {getAppName(app)}
-                      </Text>
-                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                        {[getMuleVersion(app), app.region].filter(Boolean).join(' · ') || 'CloudHub'}
-                      </Text>
-                      {app.monitoring?.cpuUsage != null && (
-                        <View style={styles.metricsRow}>
-                          <View style={styles.metricItem}>
-                            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>CPU</Text>
-                            <ProgressBar
-                              progress={(app.monitoring.cpuUsage ?? 0) / 100}
-                              color={(app.monitoring.cpuUsage ?? 0) > 80 ? anypointColors.error : anypointColors.primary}
-                              style={styles.metricBar}
-                            />
-                            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                              {Math.round(app.monitoring.cpuUsage ?? 0)}%
-                            </Text>
-                          </View>
-                          {(app.monitoring.memoryTotal ?? 0) > 0 && (
-                            <View style={styles.metricItem}>
-                              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>MEM</Text>
-                              <ProgressBar
-                                progress={(app.monitoring.memoryUsage ?? 0) / (app.monitoring.memoryTotal ?? 1)}
-                                color={anypointColors.secondary}
-                                style={styles.metricBar}
-                              />
-                              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                {Math.round(((app.monitoring.memoryUsage ?? 0) / (app.monitoring.memoryTotal ?? 1)) * 100)}%
-                              </Text>
-                            </View>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                  {i < topRunningApps.length - 1 && <Divider style={styles.activityDivider} />}
-                </View>
-              ))}
-            </Card.Content>
-          </Card>
+          <View style={styles.appsCard}>
+            {topRunningApps.map((app, i) => (
+              <AppRowItem
+                key={getAppId(app)}
+                app={app}
+                isLast={i === topRunningApps.length - 1}
+                onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: app.domain } })}
+                theme={theme}
+              />
+            ))}
+          </View>
         </>
       )}
 
-      {/* Quick Actions */}
+      {/* ── Quick Actions ── */}
       <View style={styles.sectionHeader}>
-        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>
-          Quick Actions
-        </Text>
+        <View style={styles.sectionAccent} />
+        <Text style={styles.sectionTitle}>Quick Actions</Text>
       </View>
 
       <View style={styles.actionsRow}>
-        <Button
-          mode="contained-tonal"
-          icon="rocket-launch"
-          style={styles.actionButton}
-          contentStyle={styles.actionButtonContent}
-          onPress={() => router.navigate('/(main)/runtime')}
-        >
-          Apps
-        </Button>
-        <Button
-          mode="contained-tonal"
-          icon="api"
-          style={styles.actionButton}
-          contentStyle={styles.actionButtonContent}
-          onPress={() => router.navigate('/(main)/apis')}
-        >
-          APIs
-        </Button>
-        <Button
-          mode="contained-tonal"
-          icon="cog"
-          style={styles.actionButton}
-          contentStyle={styles.actionButtonContent}
-          onPress={() => router.navigate('/(main)/settings')}
-        >
-          Settings
-        </Button>
+        {[
+          { icon: 'rocket-launch', label: 'Apps', color: anypointColors.primary, route: '/(main)/runtime' },
+          { icon: 'api', label: 'APIs', color: anypointColors.secondary, route: '/(main)/apis' },
+          { icon: 'chart-line', label: 'Monitor', color: anypointColors.accent, route: '/(main)/monitoring' },
+          { icon: 'cog', label: 'Settings', color: anypointColors.mulePurple, route: '/(main)/settings' },
+        ].map((action) => (
+          <Pressable
+            key={action.label}
+            onPress={() => router.navigate(action.route as any)}
+            accessibilityLabel={`Go to ${action.label}`}
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.actionButton,
+              { backgroundColor: theme.colors.surface, opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: action.color + '15' }]}>
+              <Icon name={action.icon} size={18} color={action.color} />
+            </View>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.onSurface, marginTop: 6 }}>
+              {action.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
     </ScrollView>
   );
@@ -398,68 +435,123 @@ const createStyles = (theme: MD3Theme) =>
       backgroundColor: theme.colors.background,
     },
     scrollContent: {
-      paddingBottom: 32,
+      paddingBottom: 40,
     },
-    errorBanner: {
-      marginHorizontal: 16,
-      marginTop: 12,
-      borderRadius: 14,
-      elevation: 0,
-    },
-    headerCard: {
-      marginHorizontal: 16,
-      marginTop: 8,
-      marginBottom: 4,
-      borderRadius: 16,
-      elevation: 0,
-    },
-    header: {
+
+    // ── Header ──
+    headerSection: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
+      paddingHorizontal: 20,
       paddingVertical: 16,
-      paddingHorizontal: 4,
     },
-    headerLeft: {
-      flexDirection: 'row',
+    avatarContainer: {
+      position: 'relative',
+    },
+    avatar: {
+      width: 52,
+      height: 52,
+      borderRadius: 18,
+      justifyContent: 'center',
       alignItems: 'center',
-      flex: 1,
+    },
+    onlineDot: {
+      position: 'absolute',
+      bottom: 0,
+      right: -2,
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      backgroundColor: anypointColors.success,
+      borderWidth: 2.5,
+      borderColor: theme.colors.background,
     },
     headerText: {
       marginLeft: 16,
       flex: 1,
     },
-    orgRow: {
+    metaRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginTop: 4,
+      marginTop: 6,
+      gap: 6,
     },
-    regionChip: {
+    metaChip: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginLeft: 10,
+      gap: 4,
       paddingHorizontal: 8,
-      paddingVertical: 2,
+      paddingVertical: 3,
+      borderRadius: 8,
+      backgroundColor: theme.colors.surfaceVariant,
+    },
+    metaText: {
+      fontSize: 11,
+      fontWeight: '500',
+      color: theme.colors.onSurfaceVariant,
+    },
+    envBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 8,
+    },
+
+    // ── Error ──
+    errorBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginHorizontal: 16,
+      marginBottom: 8,
+      padding: 14,
+      borderRadius: 16,
+      borderWidth: 1,
+    },
+    retryButton: {
+      width: 36,
+      height: 36,
       borderRadius: 12,
-      backgroundColor: theme.colors.primaryContainer,
+      backgroundColor: theme.colors.surfaceVariant,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
-    envTypeBadge: {
-      marginLeft: 8,
-      paddingHorizontal: 6,
-      paddingVertical: 1,
-      borderRadius: 6,
-    },
+
+    // ── Sections ──
     sectionHeader: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
       paddingHorizontal: 20,
-      marginTop: 24,
-      marginBottom: 12,
+      marginTop: 28,
+      marginBottom: 14,
+    },
+    sectionAccent: {
+      width: 3,
+      height: 16,
+      borderRadius: 1.5,
+      backgroundColor: theme.colors.primary,
+      marginRight: 10,
     },
     sectionTitle: {
+      flex: 1,
+      fontSize: 15,
       fontWeight: '700',
+      color: theme.colors.onSurface,
+      letterSpacing: 0.1,
     },
+    sectionSubtitle: {
+      fontSize: 12,
+      color: theme.colors.onSurfaceVariant,
+    },
+    countBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 8,
+      backgroundColor: anypointColors.success + '15',
+    },
+
+    // ── Stats ──
     statsGrid: {
       paddingHorizontal: 16,
       gap: 10,
@@ -468,45 +560,18 @@ const createStyles = (theme: MD3Theme) =>
       flexDirection: 'row',
       gap: 10,
     },
-    activityCard: {
+
+    // ── Running apps ──
+    appsCard: {
       marginHorizontal: 16,
-      borderRadius: 16,
+      borderRadius: 20,
       backgroundColor: theme.colors.surface,
+      borderWidth: 1,
+      borderColor: theme.colors.outlineVariant,
+      overflow: 'hidden',
     },
-    appRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      paddingVertical: 12,
-    },
-    statusDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      marginTop: 6,
-      marginRight: 12,
-    },
-    appInfo: {
-      flex: 1,
-    },
-    metricsRow: {
-      flexDirection: 'row',
-      gap: 16,
-      marginTop: 8,
-    },
-    metricItem: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    metricBar: {
-      flex: 1,
-      height: 4,
-      borderRadius: 2,
-    },
-    activityDivider: {
-      marginLeft: 22,
-    },
+
+    // ── Actions ──
     actionsRow: {
       flexDirection: 'row',
       paddingHorizontal: 16,
@@ -514,10 +579,18 @@ const createStyles = (theme: MD3Theme) =>
     },
     actionButton: {
       flex: 1,
-      borderRadius: 12,
+      alignItems: 'center',
+      paddingVertical: 16,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.colors.outlineVariant,
     },
-    actionButtonContent: {
-      paddingVertical: 4,
+    actionIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 14,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
   });
 

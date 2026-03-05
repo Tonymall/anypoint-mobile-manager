@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
 import { Button, Dialog, Portal, Text, useTheme } from 'react-native-paper';
+import { hapticWarning, hapticMedium } from '../../utils/haptics';
 
 interface ConfirmDialogProps {
   visible: boolean;
@@ -27,7 +28,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   return (
     <Portal>
-      <Dialog visible={visible} onDismiss={onCancel} style={styles.dialog}>
+      <Dialog visible={visible} onDismiss={onCancel} style={styles.dialog} testID={`confirm-dialog-${title}`}>
         <Dialog.Title>{title}</Dialog.Title>
         <Dialog.Content>
           <Text variant="bodyMedium">{message}</Text>
@@ -37,7 +38,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             {cancelLabel}
           </Button>
           <Button
-            onPress={onConfirm}
+            onPress={() => { destructive ? hapticWarning() : hapticMedium(); onConfirm(); }}
             mode="contained"
             buttonColor={
               destructive ? theme.colors.error : theme.colors.primary
