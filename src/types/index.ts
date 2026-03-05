@@ -113,10 +113,13 @@ export interface AppMonitoring {
 
 export interface AppLogEntry {
   timestamp: string;
-  priority: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
+  priority: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL' | string;
   message: string;
   threadName?: string;
   loggerName?: string;
+  recordId?: string;
+  deploymentId?: string;
+  instanceId?: string;
 }
 
 export interface DeploymentRequest {

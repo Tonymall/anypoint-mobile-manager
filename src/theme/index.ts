@@ -35,40 +35,41 @@ const anypointColors = {
   mulePurple: '#7C4DFF',
 };
 
+// Anypoint Platform light theme — matches the web console look and feel
 export const lightTheme: MD3Theme = {
   ...MD3LightTheme,
   fonts: configureFonts({ config: fontConfig }),
   colors: {
     ...MD3LightTheme.colors,
-    primary: anypointColors.primary,
-    primaryContainer: '#D1EFFF',
-    secondary: anypointColors.secondary,
-    secondaryContainer: '#E8EAF6',
-    tertiary: anypointColors.accent,
-    tertiaryContainer: '#B2DFDB',
-    error: anypointColors.error,
-    errorContainer: '#FFCDD2',
-    background: '#F5F7FA',
-    surface: '#FFFFFF',
-    surfaceVariant: '#F0F2F5',
+    primary: '#00A1E0',              // MuleSoft blue
+    primaryContainer: '#D6F0FF',     // Lighter blue tint for containers
+    secondary: '#5468B2',            // Indigo from Anypoint nav
+    secondaryContainer: '#E0E4F5',
+    tertiary: '#00BFA5',             // Teal accent
+    tertiaryContainer: '#C8F5ED',
+    error: '#D32F2F',
+    errorContainer: '#FFDAD6',
+    background: '#F3F3F3',           // Anypoint Platform background (light gray)
+    surface: '#FFFFFF',              // White cards
+    surfaceVariant: '#EEF0F4',       // Subtle gray for input backgrounds
     onPrimary: '#FFFFFF',
-    onPrimaryContainer: '#004A6E',
+    onPrimaryContainer: '#00344D',
     onSecondary: '#FFFFFF',
     onSecondaryContainer: '#1A237E',
     onTertiary: '#FFFFFF',
-    onTertiaryContainer: '#004D40',
-    onBackground: '#1A1C1E',
-    onSurface: '#1A1C1E',
-    onSurfaceVariant: '#44474E',
-    outline: '#74777F',
-    outlineVariant: '#C4C6D0',
+    onTertiaryContainer: '#003E35',
+    onBackground: '#171717',         // Dark text on Anypoint
+    onSurface: '#171717',
+    onSurfaceVariant: '#5C5C5C',     // Gray secondary text
+    outline: '#BDBDBD',              // Light borders
+    outlineVariant: '#E0E0E0',       // Dividers
     elevation: {
       level0: 'transparent',
-      level1: '#F5F7FA',
-      level2: '#EFF1F5',
-      level3: '#E8EBF0',
-      level4: '#E6E9EE',
-      level5: '#E1E4EA',
+      level1: '#F7F8FA',
+      level2: '#F0F2F5',
+      level3: '#EBECF0',
+      level4: '#E6E8ED',
+      level5: '#E1E3E8',
     },
   },
 };

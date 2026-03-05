@@ -52,7 +52,7 @@ const LoginScreen: React.FC = () => {
   const isTabletLandscape = isTablet && isLandscape;
 
   // Dynamic sizing based on device class
-  const formMaxWidth = isTabletLandscape ? 440 : isTablet ? 500 : 420;
+  const formMaxWidth = isTabletLandscape ? 480 : isTablet ? 560 : 420;
   const logoSize = isTabletLandscape ? 64 : isTablet ? 56 : 44;
   const logoCircleSize = isTabletLandscape ? 112 : isTablet ? 100 : 88;
   const horizontalPadding = isTabletLandscape ? 40 : isTablet ? 40 : 24;
@@ -366,32 +366,6 @@ const LoginScreen: React.FC = () => {
                 outlineStyle={styles.inputOutline}
               />
 
-              {/* Biometric Toggle — not yet implemented */}
-              <View style={[styles.biometricRow, { opacity: 0.5 }]}>
-                <View style={styles.biometricLabel}>
-                  <Icon
-                    name="fingerprint"
-                    size={20}
-                    color={theme.colors.onSurfaceVariant}
-                  />
-                  <Text
-                    variant="bodyMedium"
-                    style={[
-                      styles.biometricText,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    Biometric Login
-                  </Text>
-                </View>
-                <Text
-                  variant="labelSmall"
-                  style={{ color: theme.colors.onSurfaceVariant }}
-                >
-                  Coming soon
-                </Text>
-              </View>
-
               {/* Sign In Button */}
               <Button
                 mode="contained"
@@ -489,24 +463,30 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   // ── Inner content layout ──
   // Default (phone / tablet portrait): vertical stack, centered
   innerContent: {
-    flex: 1,
+    width: '100%',
+    maxWidth: 600,
     justifyContent: 'center',
+    alignItems: 'center',
   },
   // Tablet landscape: horizontal row, items vertically centered
   innerContentLandscape: {
     flexDirection: 'row',
     alignItems: 'center',
+    maxWidth: 900,
   },
 
   // ── Branding ──
   brandingContainer: {
     alignItems: 'center',
     marginBottom: 32,
+    width: '100%',
   },
   brandingLandscape: {
     marginBottom: 20,
@@ -534,18 +514,19 @@ const styles = StyleSheet.create({
 
   // ── Form + Footer column ──
   formColumn: {
-    // On phone/tablet portrait: just a regular container
+    width: '100%',
+    alignItems: 'center',
   },
   // Tablet landscape: form takes the right panel
   formColumnLandscape: {
     flex: 3,
     justifyContent: 'center',
+    alignItems: 'center',
   },
 
   // ── Form card ──
   formCard: {
     width: '100%',
-    alignSelf: 'center',
     borderRadius: 20,
     padding: 24,
   },
@@ -587,20 +568,6 @@ const styles = StyleSheet.create({
   inputOutline: {
     borderRadius: 10,
   },
-  biometricRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 4,
-  },
-  biometricLabel: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  biometricText: {
-    marginLeft: 8,
-  },
   signInButton: {
     marginBottom: 16,
     borderRadius: 12,
@@ -634,6 +601,7 @@ const styles = StyleSheet.create({
   footer: {
     alignItems: 'center',
     marginTop: 32,
+    width: '100%',
   },
 
   // ── Overlays ──

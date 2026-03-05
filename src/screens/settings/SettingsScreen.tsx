@@ -27,10 +27,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '../../stores/authStore';
 import { useAppStore } from '../../stores/appStore';
 import * as authService from '../../services/authService';
-import { setRegion } from '../../services/api';
 import { resetSessionFlags } from '../../services/runtimeService';
-import { CONTROL_PLANE_REGIONS, getRegionById } from '../../config/regions';
-import type { ControlPlaneRegionId } from '../../types';
+import { getRegionById } from '../../config/regions';
 
 const SettingsScreen: React.FC = () => {
   const theme = useTheme();
@@ -39,7 +37,6 @@ const SettingsScreen: React.FC = () => {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const user = useAuthStore((s) => s.user);
   const selectedRegion = useAuthStore((s) => s.selectedRegion);
-  const setSelectedRegion = useAuthStore((s) => s.setSelectedRegion);
   const logout = useAuthStore((s) => s.logout);
   const currentOrg = useAuthStore((s) => s.currentOrganization);
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
@@ -47,21 +44,11 @@ const SettingsScreen: React.FC = () => {
   const updateSettings = useAppStore((s) => s.updateSettings);
   const queryClient = useQueryClient();
 
-  const [regionDialogVisible, setRegionDialogVisible] = useState(false);
   const [themeDialogVisible, setThemeDialogVisible] = useState(false);
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   const currentRegion = getRegionById(selectedRegion);
-
-  const handleRegionChange = useCallback(
-    async (id: ControlPlaneRegionId) => {
-      setSelectedRegion(id);
-      await setRegion(id);
-      setRegionDialogVisible(false);
-    },
-    [setSelectedRegion],
-  );
 
   const handleThemeChange = useCallback(
     (value: 'light' | 'dark' | 'system') => {
@@ -188,15 +175,13 @@ const SettingsScreen: React.FC = () => {
 
       <Divider style={styles.sectionDivider} />
 
-      {/* Connection Section */}
+      {/* Connection Section (read-only) */}
       <List.Section>
         <List.Subheader style={styles.sectionHeader}>Connection</List.Subheader>
         <List.Item
           title="Control Plane"
           description={`${currentRegion.label} — ${currentRegion.notes}`}
           left={(props) => <List.Icon {...props} icon="earth" />}
-          right={(props) => <List.Icon {...props} icon="chevron-right" />}
-          onPress={() => setRegionDialogVisible(true)}
           style={styles.listItem}
         />
         <List.Item
@@ -280,19 +265,6 @@ const SettingsScreen: React.FC = () => {
 
       <Divider style={styles.sectionDivider} />
 
-      {/* Security */}
-      <List.Section>
-        <List.Subheader style={styles.sectionHeader}>Security</List.Subheader>
-        <List.Item
-          title="Biometric Authentication"
-          description="Coming soon"
-          left={(props) => <List.Icon {...props} icon="fingerprint" />}
-          style={[styles.listItem, { opacity: 0.5 }]}
-        />
-      </List.Section>
-
-      <Divider style={styles.sectionDivider} />
-
       {/* About */}
       <List.Section>
         <List.Subheader style={styles.sectionHeader}>About</List.Subheader>
@@ -319,34 +291,6 @@ const SettingsScreen: React.FC = () => {
           Sign Out
         </Button>
       </View>
-
-      {/* Region Dialog */}
-      <Portal>
-        <Dialog
-          visible={regionDialogVisible}
-          onDismiss={() => setRegionDialogVisible(false)}
-          style={styles.dialog}
-        >
-          <Dialog.Title>Select Control Plane</Dialog.Title>
-          <Dialog.Content>
-            <RadioButton.Group
-              value={selectedRegion}
-              onValueChange={(v) => handleRegionChange(v as ControlPlaneRegionId)}
-            >
-              {CONTROL_PLANE_REGIONS.map((r) => (
-                <RadioButton.Item
-                  key={r.id}
-                  label={`${r.label} — ${r.notes}`}
-                  value={r.id}
-                />
-              ))}
-            </RadioButton.Group>
-          </Dialog.Content>
-          <Dialog.Actions>
-            <Button onPress={() => setRegionDialogVisible(false)}>Cancel</Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
 
       {/* Theme Dialog */}
       <Portal>

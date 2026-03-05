@@ -491,7 +491,7 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
           </View>
         ) : status === 'STARTED' && !detailLoading ? (
           <View style={styles.monitoringSection}>
-            {/* Show configured resources for CH2 apps when no live metrics */}
+            {/* Show configured resources when no live metrics */}
             {app?.deploymentTarget === 'cloudhub2' && app?.workers?.type?.cpu ? (
               <>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -503,6 +503,19 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
                 <StatRow label="CPU" value={app.workers.type.cpu} theme={theme} />
                 <StatRow label="Memory" value={app.workers.type.memory} theme={theme} />
                 <StatRow label="Replicas" value={String(app.workers.amount ?? 1)} theme={theme} />
+              </>
+            ) : workerInfo.typeName ? (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <Icon source="information-outline" size={14} color={theme.colors.onSurfaceVariant} />
+                  <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                    Configured resources (live metrics require Monitoring subscription)
+                  </Text>
+                </View>
+                <StatRow label="Worker Type" value={workerInfo.typeName} theme={theme} />
+                <StatRow label="Workers" value={String(workerInfo.amount)} theme={theme} />
+                {muleVer ? <StatRow label="Mule Runtime" value={muleVer} theme={theme} /> : null}
+                {region ? <StatRow label="Region" value={region} theme={theme} /> : null}
               </>
             ) : (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

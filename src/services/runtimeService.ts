@@ -928,16 +928,61 @@ function extractLogEntries(data: any): AppLogEntry[] {
 /** Normalize an array of log objects (could be raw API shape or pre-formatted) */
 function normalizeLogArray(arr: any[]): AppLogEntry[] {
   if (arr.length === 0) return [];
-  // Check if already in our format
-  if (arr[0]?.message !== undefined || arr[0]?.msg !== undefined) {
+
+  const first = arr[0];
+
+  // ── CH1 POST /logs response: entries have a nested `event` wrapper ──
+  // Shape: { recordId, deploymentId, instanceId, line (number),
+  //          event: { message, priority, timestamp, loggerName, threadName, instanceId } }
+  if (first?.event?.message !== undefined || first?.event?.msg !== undefined) {
+    return arr.map((e) => {
+      const ev = e.event ?? {};
+      return {
+        timestamp: ev.timestamp ?? e.timestamp ?? e['@timestamp'] ?? '',
+        priority: (ev.priority ?? ev.level ?? e.priority ?? 'INFO').toUpperCase(),
+        message: ev.message ?? ev.msg ?? ev.log ?? JSON.stringify(ev),
+        threadName: ev.threadName ?? ev.thread ?? '',
+        loggerName: ev.loggerName ?? ev.logger ?? '',
+        // Preserve extra fields for the detail sheet
+        recordId: e.recordId ?? e.docId ?? '',
+        deploymentId: e.deploymentId ?? '',
+        instanceId: ev.instanceId ?? e.instanceId ?? '',
+      } as AppLogEntry;
+    });
+  }
+
+  // Check if already in our format (top-level message/msg)
+  if (first?.message !== undefined || first?.msg !== undefined) {
     return arr.map((e) => ({
       timestamp: e.timestamp ?? e['@timestamp'] ?? e.instant ?? e.date ?? '',
       priority: (e.priority ?? e.level ?? e.logLevel ?? 'INFO').toUpperCase(),
-      message: e.message ?? e.msg ?? e.log ?? e.line ?? JSON.stringify(e),
+      message: e.message ?? e.msg ?? e.log ?? JSON.stringify(e),
       threadName: e.threadName ?? e.thread ?? '',
       loggerName: e.loggerName ?? e.logger ?? '',
+      recordId: e.recordId ?? e.docId ?? '',
+      deploymentId: e.deploymentId ?? '',
+      instanceId: e.instanceId ?? '',
     } as AppLogEntry));
   }
+
+  // Fallback: if entries have `line` (number) with no message, still normalize
+  // This covers edge cases where CH1 returns entries without event wrapper
+  if (first?.line !== undefined && first?.recordId !== undefined) {
+    return arr.map((e) => {
+      const ev = e.event ?? {};
+      return {
+        timestamp: ev.timestamp ?? e.timestamp ?? '',
+        priority: (ev.priority ?? e.priority ?? 'INFO').toUpperCase(),
+        message: ev.message ?? ev.msg ?? (typeof e.line === 'string' ? e.line : JSON.stringify(e)),
+        threadName: ev.threadName ?? '',
+        loggerName: ev.loggerName ?? '',
+        recordId: e.recordId ?? '',
+        deploymentId: e.deploymentId ?? '',
+        instanceId: e.instanceId ?? '',
+      } as AppLogEntry;
+    });
+  }
+
   return arr;
 }
 
@@ -1214,6 +1259,7 @@ function getRegionSlug(): string {
  * Returns true if an InfluxDB datasource was found.
  */
 async function discoverInfluxDatasource(): Promise<boolean> {
+  console.log('[Monitoring] discoverInfluxDatasource() called, current state:', _influxAvailable);
   if (_influxAvailable !== null) return _influxAvailable;
 
   try {
@@ -1253,6 +1299,7 @@ async function discoverInfluxDatasource(): Promise<boolean> {
   // Try a few common datasource IDs (these are assigned by the platform)
   for (const tryId of [7513, 1, 2, 3]) {
     try {
+      console.log(`[Monitoring] Trying fallback datasource ID ${tryId} with db=${_influxDbName}`);
       const testQ = 'SHOW MEASUREMENTS LIMIT 1';
       const { data } = await api.get(
         `/monitoring/api/visualizer/api/datasources/proxy/${tryId}/query`,
@@ -1456,8 +1503,11 @@ export async function getDashboardStats(
   // ── FAST PATH: discovery already done, nothing works → skip immediately ──
   // This prevents ALL redundant API calls on subsequent React Query refetches.
   if (_dashStatsCheckDone && !dashboardStatsAvailable && !monitoringApiAvailable && _influxAvailable === false) {
+    console.log(`[getDashboardStats] Fast-path exit for "${domain}" — all sources disabled`);
     return null;
   }
+
+  console.log(`[getDashboardStats] Called for "${domain}" | dashStats=${dashboardStatsAvailable} monApi=${monitoringApiAvailable} influx=${_influxAvailable} checkDone=${_dashStatsCheckDone}`);
 
   const now = Date.now();
   const startMs = now - periodMinutes * 60 * 1000;
@@ -1476,14 +1526,12 @@ export async function getDashboardStats(
         return appDetail; // Return the full app detail — extractMetrics handles it
       }
 
-      // Log diagnostics once per session
-      if (!_dashStatsCheckDone) {
-        const wsType = ws == null ? 'null' : Array.isArray(ws) ? `array(${ws.length})` : `object(${Object.keys(ws).length})`;
-        const hasKeys = appDetail ? Object.keys(appDetail).filter(k =>
-          k.includes('worker') || k.includes('monitor') || k.includes('stat')
-        ).join(',') : '';
-        console.log(`[getDashboardStats] App detail for ${domain}: workerStatuses=${wsType}, relevant keys=[${hasKeys}]`);
-      }
+      // Log diagnostics — always log for debug (was: once per session)
+      const wsType = ws == null ? 'null' : Array.isArray(ws) ? `array(${ws.length})` : `object(${Object.keys(ws).length})`;
+      const hasKeys = appDetail ? Object.keys(appDetail).filter(k =>
+        k.includes('worker') || k.includes('monitor') || k.includes('stat')
+      ).join(',') : '';
+      console.log(`[getDashboardStats] App detail for ${domain}: workerStatuses=${wsType}, relevant keys=[${hasKeys}], checkDone=${_dashStatsCheckDone}`);
     }
   } catch (_) {
     // App detail fetch failed, try other sources
@@ -1501,6 +1549,7 @@ export async function getDashboardStats(
         const toIso = new Date(now).toISOString();
 
         // ── Test dashboardStats endpoints ──
+        console.log('[getDashboardStats] Discovery gate: testing dashboardStats...');
         let statsFailed = true;
         const statsTests = [
           () => api.get(`${CLOUDHUB_BASE}/applications/${testDomain}/dashboardStats`, {
@@ -1525,8 +1574,9 @@ export async function getDashboardStats(
         }
 
         // ── Test monitoring/observability endpoints ──
+        console.log('[getDashboardStats] Discovery gate: testing monitoring APIs...');
         if (orgId && envId) {
-          let monFailed = true;
+          let monFound = false;
           const monTests: Array<() => Promise<any>> = [
             () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
               targets: [{ target: 'worker-cpu-usage', type: 'timeserie' }],
@@ -1541,13 +1591,14 @@ export async function getDashboardStats(
           for (const attempt of monTests) {
             try {
               const { data } = await attempt();
-              if (data) { monFailed = false; break; }
+              if (data) { monFound = true; break; }
             } catch (err: any) {
               const s = err?.response?.status;
-              if (s !== 404 && s !== 400) monFailed = false;
+              console.log(`[getDashboardStats] Monitoring API test failed: status=${s}`);
+              // Any error during discovery means this source is unavailable
             }
           }
-          if (monFailed) {
+          if (!monFound) {
             monitoringApiAvailable = false;
             console.log('[getDashboardStats] Monitoring APIs unavailable — disabling for session');
           }
@@ -1558,10 +1609,12 @@ export async function getDashboardStats(
 
         // ── Test InfluxDB proxy (the REAL monitoring endpoint) ──
         // This is the Grafana-style datasource proxy that the Anypoint web UI uses.
+        console.log('[getDashboardStats] Discovery gate: testing InfluxDB proxy...');
         if (_influxAvailable === null) {
           await discoverInfluxDatasource();
         }
 
+        console.log('[getDashboardStats] Discovery complete:', { dashboardStatsAvailable, monitoringApiAvailable, _influxAvailable });
         _dashStatsCheckDone = true;
       })();
     }
