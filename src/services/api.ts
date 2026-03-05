@@ -1,9 +1,13 @@
 // ============================================================
 // Anypoint Mobile Platform - Base Axios API Client
 // ============================================================
-// Configured with interceptors for auth token injection,
-// automatic token refresh, and error handling.
+// Configured with a request interceptor for auth token injection.
 // Supports multi-region control planes (US, EU1, CA1, JP1).
+//
+// IMPORTANT: The Anypoint Platform login response does NOT include
+// a refresh token. Therefore there is NO response interceptor for
+// automatic 401 refresh — the previous implementation caused a
+// cascade of token-clearing that led to 403 errors on re-login.
 // ============================================================
 
 import axios, {
@@ -22,6 +26,11 @@ const REGION_KEY = 'anypoint_region';
 
 // --- Mutable base URL driven by selected region ---
 let currentBaseUrl: string = getRegionUrl(DEFAULT_REGION_ID);
+
+// --- In-memory token cache (fastest, no async) ---
+// Set by setAuthHeader() during login, cleared by resetApiState().
+// The request interceptor uses this FIRST, then falls back to SecureStore.
+let inMemoryToken: string | null = null;
 
 // Create the base Axios instance
 const api: AxiosInstance = axios.create({
@@ -96,113 +105,70 @@ export async function clearTokens(): Promise<void> {
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     // Always use the latest base URL (region may have changed)
-    if (!config.baseURL) {
-      config.baseURL = currentBaseUrl;
-    }
+    config.baseURL = currentBaseUrl;
 
-    // Skip auth header for login endpoint — also actively REMOVE any
-    // stale Authorization header that might be lingering on Axios defaults.
+    // Skip auth header for login endpoint
     const isLoginRequest = config.url?.includes('/accounts/login');
     if (isLoginRequest) {
       delete config.headers.Authorization;
+      return config;
+    }
+
+    // Token injection priority:
+    // 1. In-memory cache (synchronous, set by setAuthHeader during login)
+    // 2. SecureStore (async, persisted across app restarts)
+    if (inMemoryToken) {
+      config.headers.Authorization = `Bearer ${inMemoryToken}`;
     } else {
-      const token = await getStoredAccessToken();
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`;
+      try {
+        const token = await getStoredAccessToken();
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`;
+          // Cache for next request
+          inMemoryToken = token;
+        } else {
+          console.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
+        }
+      } catch (_) {
+        // SecureStore read failed — proceed without token
       }
     }
+
+    // Log CloudHub requests with full header state for 403 debugging
+    const url = config.url ?? '';
+    if (url.includes('/cloudhub/') || url.includes('/amc/')) {
+      const hasAuth = !!config.headers.Authorization;
+      const orgH = config.headers['X-ANYPNT-ORG-ID'] ?? api.defaults.headers.common['X-ANYPNT-ORG-ID'] ?? 'MISSING';
+      const envH = config.headers['X-ANYPNT-ENV-ID'] ?? api.defaults.headers.common['X-ANYPNT-ENV-ID'] ?? 'MISSING';
+      console.log(`[API REQ] ${(config.method ?? 'GET').toUpperCase()} ${url} | Auth:${hasAuth ? 'YES' : 'NO'} Org:${orgH} Env:${envH}`);
+    }
+
     return config;
   },
   (error: AxiosError) => Promise.reject(error),
 );
 
 // ---------- Response Interceptor ----------
-// Automatically attempt a token refresh on 401 responses.
-
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (token: string | null) => void;
-  reject: (error: unknown) => void;
-}> = [];
-
-function processQueue(error: unknown, token: string | null = null): void {
-  failedQueue.forEach(({ resolve, reject }) => {
-    if (error) {
-      reject(error);
-    } else {
-      resolve(token);
-    }
-  });
-  failedQueue = [];
-}
+// Simple error logging — NO automatic refresh or token clearing.
+// The Anypoint login API does NOT provide refresh tokens, so any
+// 401-refresh logic only causes harmful cascades.
 
 api.interceptors.response.use(
   (response) => response,
-  async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & {
-      _retry?: boolean;
-    };
-
-    // Only attempt refresh for 401 errors that haven't been retried yet
-    if (error.response?.status !== 401 || originalRequest._retry) {
-      return Promise.reject(error);
-    }
-
-    if (isRefreshing) {
-      // Queue the request while a refresh is in progress
-      return new Promise((resolve, reject) => {
-        failedQueue.push({
-          resolve: (token) => {
-            if (token && originalRequest.headers) {
-              originalRequest.headers.Authorization = `Bearer ${token}`;
-            }
-            resolve(api(originalRequest));
-          },
-          reject,
-        });
-      });
-    }
-
-    originalRequest._retry = true;
-    isRefreshing = true;
-
-    try {
-      const refreshToken = await getStoredRefreshToken();
-      if (!refreshToken) {
-        await clearTokens();
-        return Promise.reject(error);
-      }
-
-      // Use currentBaseUrl so the refresh goes to the correct control plane
-      // Use plain string encoding (URLSearchParams may not serialize in React Native)
-      const body = `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`;
-
-      const { data } = await axios.post(
-        `${currentBaseUrl}/accounts/api/v2/oauth2/token`,
-        body,
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+  (error: AxiosError) => {
+    // Log failed requests for debugging (visible in Expo DevTools / Metro)
+    if (error.response) {
+      const { status } = error.response;
+      const url = error.config?.url ?? 'unknown';
+      const method = (error.config?.method ?? 'GET').toUpperCase();
+      console.warn(
+        `[API ${status}] ${method} ${url}`,
+        typeof error.response.data === 'object'
+          ? JSON.stringify(error.response.data).slice(0, 200)
+          : '',
       );
-
-      const newAccessToken: string = data.access_token;
-      const newRefreshToken: string | undefined = data.refresh_token;
-
-      await storeTokens(newAccessToken, newRefreshToken);
-      processQueue(null, newAccessToken);
-
-      if (originalRequest.headers) {
-        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-      }
-      return api(originalRequest);
-    } catch (refreshError) {
-      processQueue(refreshError, null);
-      await clearTokens();
-      // Trigger store logout so the app returns to the login screen
-      const { useAuthStore } = require('../stores/authStore');
-      useAuthStore.getState().logout();
-      return Promise.reject(refreshError);
-    } finally {
-      isRefreshing = false;
     }
+    return Promise.reject(error);
   },
 );
 
@@ -214,6 +180,7 @@ api.interceptors.response.use(
  * without relying on SecureStore read timing.
  */
 export function setAuthHeader(token: string): void {
+  inMemoryToken = token;
   api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 }
 
@@ -236,26 +203,21 @@ export function clearHeaders(): void {
 
 /**
  * Full reset of API client state.
- * Clears tokens from SecureStore, removes ALL custom headers
- * (including Authorization), and resets the refresh-token state machine.
+ * Clears tokens from SecureStore AND in-memory cache, removes ALL
+ * custom headers (including Authorization).
  * Call this during logout AND before login to guarantee a clean slate.
  */
 export async function resetApiState(): Promise<void> {
   // 1. Clear tokens from SecureStore
   await clearTokens();
 
-  // 2. Clear ALL custom headers — including Authorization
+  // 2. Clear in-memory token cache
+  inMemoryToken = null;
+
+  // 3. Clear ALL custom headers — including Authorization
   delete api.defaults.headers.common['Authorization'];
   delete api.defaults.headers.common['X-ANYPNT-ORG-ID'];
   delete api.defaults.headers.common['X-ANYPNT-ENV-ID'];
-
-  // 3. Reset the token-refresh state machine
-  //    If a refresh was in-flight during logout, reject all queued requests
-  //    and reset the flag so the next session starts clean.
-  if (failedQueue.length > 0) {
-    processQueue(new Error('Session reset'), null);
-  }
-  isRefreshing = false;
 }
 
 export default api;

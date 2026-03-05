@@ -31,12 +31,14 @@ const EnvSelectScreen: React.FC = () => {
 
   const handleSelect = useCallback(
     (env: Environment) => {
+      console.log('[EnvSelect] Selected env:', env.name, env.id);
       switchEnvironment(env);
       setEnvironmentHeader(env.id);
       // Also re-set org header in case it was cleared
       if (currentOrganization?.id) {
         setOrganizationHeader(currentOrganization.id);
       }
+      console.log('[EnvSelect] Headers set — Org:', currentOrganization?.id, 'Env:', env.id);
 
       if (fromSettings === '1' && isAuthenticated) {
         // Coming from Settings — navigate explicitly to settings tab
@@ -45,6 +47,7 @@ const EnvSelectScreen: React.FC = () => {
       } else {
         // Initial login flow — complete login and navigate to main
         completeLogin();
+        console.log('[EnvSelect] completeLogin called, navigating to main');
         router.replace('/(main)' as any);
       }
     },

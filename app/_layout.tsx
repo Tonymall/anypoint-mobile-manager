@@ -66,10 +66,18 @@ export default function RootLayout() {
         if (state.isAuthenticated) {
           state.logout();
         }
-      } else if (!state.isAuthenticated) {
-        // Token exists but user is not authenticated (previous session expired)
-        // Clear stale tokens so they don't get attached to login requests
+      } else if (!state.isAuthenticated && !state.user) {
+        // Token exists but NO user in state — truly stale session from a
+        // previous app launch. Clear the token so it doesn't get attached
+        // to a new login request.
+        //
+        // IMPORTANT: If state.user IS set but isAuthenticated is false, this
+        // is the "pending" login state (loginPending was called during the
+        // current org/env selection flow). Do NOT clear the fresh token!
         await clearTokens();
+      } else if (!state.isAuthenticated && state.user) {
+        // "Pending" login state — user just logged in and is selecting
+        // org/env. Token is fresh and valid. Don't touch it.
       } else {
         // Authenticated with valid token — restore headers
         if (state.currentOrganization) {

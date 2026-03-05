@@ -26,6 +26,7 @@ import {
   Button,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import type { Application, AppStatus } from '../../types';
@@ -102,6 +103,7 @@ const formatRelativeTime = (raw: any): string => {
 const ApplicationsListScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -198,25 +200,25 @@ const ApplicationsListScreen: React.FC = () => {
               {app.region && (
                 <View style={styles.infoItem}>
                   <Icon source="map-marker" size={13} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={styles.infoText}>{app.region}</Text>
+                  <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>{app.region}</Text>
                 </View>
               )}
               {muleVer ? (
                 <View style={styles.infoItem}>
                   <Icon source="puzzle" size={13} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={styles.infoText}>Mule {muleVer}</Text>
+                  <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>Mule {muleVer}</Text>
                 </View>
               ) : null}
               <View style={styles.infoItem}>
                 <Icon source="server" size={13} color={theme.colors.onSurfaceVariant} />
-                <Text variant="bodySmall" style={styles.infoText}>
+                <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>
                   {workerInfo.amount}x {workerInfo.typeName}
                 </Text>
               </View>
               {app.lastUpdateTime && (
                 <View style={styles.infoItem}>
                   <Icon source="clock-outline" size={13} color={theme.colors.onSurfaceVariant} />
-                  <Text variant="bodySmall" style={styles.infoText}>
+                  <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>
                     {formatRelativeTime(app.lastUpdateTime)}
                   </Text>
                 </View>
@@ -262,7 +264,7 @@ const ApplicationsListScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* Search + Filter row */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
         <Searchbar
           placeholder="Search apps..."
           onChangeText={setSearchQuery}
@@ -457,10 +459,12 @@ const createStyles = (theme: MD3Theme) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 3,
+      maxWidth: '48%',
     },
     infoText: {
       color: theme.colors.onSurfaceVariant,
       fontSize: 12,
+      flexShrink: 1,
     },
     emptyState: {
       alignItems: 'center',

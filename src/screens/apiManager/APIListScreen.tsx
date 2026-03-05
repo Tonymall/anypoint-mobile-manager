@@ -18,6 +18,7 @@ import {
   Icon,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { APIStatus, ManagedAPI } from '../../types';
 import { statusColors } from '../../theme';
 import { useManagedAPIs } from '../../hooks/queries';
@@ -55,6 +56,7 @@ const technologyLabel = (tech: string): string => {
 
 const APIListScreen: React.FC = () => {
   const theme = useTheme<MD3Theme>();
+  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -193,7 +195,7 @@ const APIListScreen: React.FC = () => {
         placeholder="Search APIs..."
         value={searchQuery}
         onChangeText={setSearchQuery}
-        style={styles.searchbar}
+        style={[styles.searchbar, { marginTop: insets.top + 12 }]}
         elevation={0}
       />
 
@@ -262,6 +264,7 @@ const styles = StyleSheet.create({
   card: {
     marginBottom: 12,
     borderRadius: 16,
+    overflow: 'hidden',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -271,6 +274,7 @@ const styles = StyleSheet.create({
   cardTitleWrap: {
     flex: 1,
     marginRight: 12,
+    overflow: 'hidden',
   },
   cardTitle: {
     marginBottom: 2,
@@ -295,6 +299,7 @@ const styles = StyleSheet.create({
   },
   techRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     marginBottom: 4,
   },

@@ -28,6 +28,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useAppStore } from '../../stores/appStore';
 import * as authService from '../../services/authService';
 import { setRegion } from '../../services/api';
+import { resetSessionFlags } from '../../services/runtimeService';
 import { CONTROL_PLANE_REGIONS, getRegionById } from '../../config/regions';
 import type { ControlPlaneRegionId } from '../../types';
 
@@ -71,13 +72,19 @@ const SettingsScreen: React.FC = () => {
   );
 
   const handleLogout = useCallback(async () => {
+    console.log('[Settings] Logout initiated');
     setLoggingOut(true);
     setLogoutDialogVisible(false);
     try {
       await authService.logout(); // calls resetApiState() — clears tokens, headers, auth, refresh state
+      console.log('[Settings] authService.logout() complete (API state reset)');
+      resetSessionFlags(); // Clear stale log/monitoring endpoint caches
+      console.log('[Settings] runtimeService session flags reset');
     } finally {
       queryClient.clear();
+      console.log('[Settings] queryClient cleared');
       logout();
+      console.log('[Settings] authStore.logout() complete');
       setLoggingOut(false);
     }
   }, [logout, queryClient]);

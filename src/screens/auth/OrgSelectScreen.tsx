@@ -39,11 +39,13 @@ const OrgSelectScreen: React.FC = () => {
 
   const handleSelect = useCallback(
     (org: Organization) => {
+      console.log('[OrgSelect] Selected org:', org.name, org.id);
       // Clear old org data now that user has made a selection
       queryClient.clear();
       clearHeaders();
       switchOrganization(org);
       setOrganizationHeader(org.id);
+      console.log('[OrgSelect] Org header set, navigating to select-env');
       // Pass fromSettings along so EnvSelectScreen knows the flow origin
       router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: fromSettings ?? '' } });
     },

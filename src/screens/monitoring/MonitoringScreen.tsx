@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
 import { useApplications, useManagedAPIs, runtimeKeys } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
+import { isMonitoringUnavailable } from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
 import { anypointColors, statusColors } from '../../theme';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
@@ -185,6 +186,7 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
   }
 
   // Source 1: workerStatuses from detailed app (can be array or keyed object)
+  // statisticsByWorker values can be time-series maps { "ts": value } or plain numbers
   if (detailedApp) {
     const raw = detailedApp.workerStatuses ?? detailedApp.workers?.statuses;
     const workerArr: any[] = Array.isArray(raw)
@@ -192,22 +194,44 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
       : (raw && typeof raw === 'object') ? Object.values(raw) : [];
 
     if (workerArr.length > 0) {
-      const w = workerArr[0]?.statisticsByWorker ?? workerArr[0]?.statistics ?? workerArr[0] ?? {};
-      if (w.cpuPercentageUsed != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(w.cpuPercentageUsed);
-      else if (w.cpu != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(w.cpu);
+      let w = workerArr[0]?.statisticsByWorker ?? workerArr[0]?.statistics ?? workerArr[0] ?? {};
+      // statisticsByWorker may be nested by worker ID: { "id-xxx": { cpu: ..., ... } }
+      const metricKeys = ['cpu', 'cpuPercentageUsed', 'memoryTotalUsed', 'memoryPercentageUsed', 'threadCount'];
+      const hasDirectMetric = metricKeys.some((k) => k in w);
+      if (!hasDirectMetric) {
+        const vals = Object.values(w);
+        if (vals.length > 0 && vals[0] && typeof vals[0] === 'object') {
+          w = vals[0] as any;
+        }
+      }
 
-      if (w.memoryPercentageUsed != null && metrics.memoryPercent == null) metrics.memoryPercent = Number(w.memoryPercentageUsed);
-      if (w.memoryTotalUsed != null && metrics.memoryUsedMB == null) metrics.memoryUsedMB = Number(w.memoryTotalUsed);
-      if (w.memoryTotalMax != null && metrics.memoryTotalMB == null) metrics.memoryTotalMB = Number(w.memoryTotalMax);
-      if (w.threadCount != null && metrics.threadCount == null) metrics.threadCount = Number(w.threadCount);
+      // Helper: extract latest numeric value from a possible time-series map
+      const numVal = (field: any): number | null => {
+        if (field == null) return null;
+        if (typeof field === 'number') return field;
+        if (typeof field === 'object' && !Array.isArray(field)) {
+          const ks = Object.keys(field);
+          if (ks.length === 0) return null;
+          const sorted = ks.sort((a, b) => Number(b) - Number(a));
+          const v = field[sorted[0]];
+          return typeof v === 'number' ? v : null;
+        }
+        return null;
+      };
+
+      if (metrics.cpuPercent == null) metrics.cpuPercent = numVal(w.cpuPercentageUsed) ?? numVal(w.cpu);
+      if (metrics.memoryPercent == null) metrics.memoryPercent = numVal(w.memoryPercentageUsed);
+      if (metrics.memoryUsedMB == null) metrics.memoryUsedMB = numVal(w.memoryTotalUsed);
+      if (metrics.memoryTotalMB == null) metrics.memoryTotalMB = numVal(w.memoryTotalMax);
+      if (metrics.threadCount == null) metrics.threadCount = numVal(w.threadCount);
 
       // JVM from worker statuses
-      if (w.heapUsed != null && metrics.heapUsed == null) metrics.heapUsed = Number(w.heapUsed);
-      if (w.heapCommitted != null && metrics.heapCommitted == null) metrics.heapCommitted = Number(w.heapCommitted);
-      if (w.nonHeapUsed != null && metrics.nonHeapUsed == null) metrics.nonHeapUsed = Number(w.nonHeapUsed);
-      if (w.classesLoaded != null && metrics.classesLoaded == null) metrics.classesLoaded = Number(w.classesLoaded);
-      if (w.totalGarbageCollections != null && metrics.gcCollections == null) metrics.gcCollections = Number(w.totalGarbageCollections);
-      if (w.garbageCollectionTime != null && metrics.gcTime == null) metrics.gcTime = Number(w.garbageCollectionTime);
+      if (metrics.heapUsed == null) metrics.heapUsed = numVal(w.heapUsed);
+      if (metrics.heapCommitted == null) metrics.heapCommitted = numVal(w.heapCommitted);
+      if (metrics.nonHeapUsed == null) metrics.nonHeapUsed = numVal(w.nonHeapUsed);
+      if (metrics.classesLoaded == null) metrics.classesLoaded = numVal(w.classesLoaded);
+      if (metrics.gcCollections == null) metrics.gcCollections = numVal(w.totalGarbageCollections);
+      if (metrics.gcTime == null) metrics.gcTime = numVal(w.garbageCollectionTime);
     }
   }
 
@@ -312,6 +336,29 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
         if (m?.threadCount != null && metrics.threadCount == null) metrics.threadCount = Number(m.threadCount);
       }
     }
+
+    // Handle CH2 deployment detail response (from AMC API)
+    // These may contain replica-level info but not live CPU/memory
+    if (dashStats?.target || dashStats?.application) {
+      const target = dashStats.target ?? {};
+      const resources = target?.deploymentSettings?.resources ?? {};
+      const cpuLimit = resources?.cpu?.limit ?? '';
+      const memLimit = resources?.memory?.limit ?? '';
+      // If we found resource configs, set them as "configured" values
+      // (these aren't live metrics, but better than nothing)
+      if (cpuLimit && metrics.cpuPercent == null) {
+        // Don't set CPU percent from config — it's not a live metric
+      }
+      // Check replica statuses for any runtime metrics
+      const replicas = dashStats.replicas ?? [];
+      if (Array.isArray(replicas)) {
+        for (const replica of replicas) {
+          const stats = replica?.statistics ?? replica?.metrics ?? {};
+          if (stats.cpu != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(stats.cpu);
+          if (stats.memory != null && metrics.memoryPercent == null) metrics.memoryPercent = Number(stats.memory);
+        }
+      }
+    }
   }
 
   // Compute memoryPercent from used/total if still null
@@ -378,18 +425,18 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
         <View style={styles.infoRow}>
           <View style={styles.infoItem}>
             <Icon source="server" size={13} color={theme.colors.onSurfaceVariant} />
-            <Text variant="bodySmall" style={styles.infoText}>{workerInfo.amount}x {workerInfo.typeName}</Text>
+            <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>{workerInfo.amount}x {workerInfo.typeName}</Text>
           </View>
           {muleVer ? (
             <View style={styles.infoItem}>
               <Icon source="puzzle" size={13} color={theme.colors.onSurfaceVariant} />
-              <Text variant="bodySmall" style={styles.infoText}>Mule {muleVer}</Text>
+              <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>Mule {muleVer}</Text>
             </View>
           ) : null}
           {lastUpdated ? (
             <View style={styles.infoItem}>
               <Icon source="clock-outline" size={13} color={theme.colors.onSurfaceVariant} />
-              <Text variant="bodySmall" style={styles.infoText}>{formatRelativeTime(lastUpdated)}</Text>
+              <Text variant="bodySmall" style={styles.infoText} numberOfLines={1}>{formatRelativeTime(lastUpdated)}</Text>
             </View>
           ) : null}
           {fileName ? (
@@ -510,6 +557,7 @@ const MonitoringScreen: React.FC = () => {
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
   const currentOrg = useAuthStore((s) => s.currentOrganization);
   const [sortOrder, setSortOrder] = useState<'default' | 'az' | 'za'>('default');
+  const [monitoringDown, setMonitoringDown] = useState(false);
 
   const {
     data: applications,
@@ -627,6 +675,17 @@ const MonitoringScreen: React.FC = () => {
   const activeAPIs = useMemo(() => apiList.filter((api: any) => api?.status === 'active').length, [apiList]);
   const envName = currentEnv?.name ?? 'No environment';
 
+  // Check monitoring availability after dashboardStats discovery completes.
+  const anyDashLoading = dashStatsQueries.some((q) => q.isLoading);
+  useEffect(() => {
+    if (!anyDashLoading && runningApps > 0) {
+      const timer = setTimeout(() => {
+        if (isMonitoringUnavailable()) setMonitoringDown(true);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [anyDashLoading, runningApps]);
+
   const handleAppPress = useCallback((app: any) => {
     const domain = app?.domain ?? getAppId(app);
     router.push({ pathname: '/(main)/monitoring/[domain]' as any, params: { domain } });
@@ -661,6 +720,34 @@ const MonitoringScreen: React.FC = () => {
           <SummaryCard title="APIs" value={totalAPIs} icon="api" color={anypointColors.secondary}
             subtitle={activeAPIs > 0 ? `${activeAPIs} active` : undefined} />
         </View>
+
+        {/* Monitoring unavailable banner */}
+        {monitoringDown && runningApps > 0 ? (
+          <View
+            style={{
+              marginHorizontal: 16,
+              marginBottom: 14,
+              backgroundColor: anypointColors.warning + '15',
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: anypointColors.warning + '30',
+              padding: 14,
+              flexDirection: 'row',
+              alignItems: 'flex-start',
+              gap: 10,
+            }}
+          >
+            <Icon source="information-outline" size={18} color={anypointColors.warning} />
+            <View style={{ flex: 1 }}>
+              <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 2 }}>
+                Live metrics unavailable
+              </Text>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
+                CPU, memory, and thread monitoring require an Anypoint Monitoring subscription (Titanium or Platinum). Application status and deployment info are still available below.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         {/* Section header + sort */}
         <View style={styles.sectionHeader}>
@@ -730,8 +817,8 @@ const createStyles = (theme: MD3Theme) =>
     appName: { fontWeight: '600', color: theme.colors.onSurface },
     statusChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1 },
     infoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.outlineVariant, overflow: 'hidden' },
-    infoItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-    infoText: { color: theme.colors.onSurfaceVariant, fontSize: 12 },
+    infoItem: { flexDirection: 'row', alignItems: 'center', gap: 3, maxWidth: '48%' },
+    infoText: { color: theme.colors.onSurfaceVariant, fontSize: 12, flexShrink: 1 },
     monitoringSection: { marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.outlineVariant, gap: 6 },
     metricRow: { gap: 4 },
     metricLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

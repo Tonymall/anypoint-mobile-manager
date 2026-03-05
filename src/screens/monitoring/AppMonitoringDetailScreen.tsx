@@ -179,6 +179,55 @@ const MetricCard: React.FC<MetricCardProps> = ({ title, value, subtitle, icon, c
 );
 
 // ---------------------------------------------------------------------------
+// Helpers: extract values from CloudHub time-series maps
+// ---------------------------------------------------------------------------
+
+/**
+ * CloudHub workerStatistics fields like `cpuPercentageUsed`, `memoryPercentageUsed`,
+ * `cpu` can be:
+ *   - A single number (e.g. threadCount: 42)
+ *   - A time-series map: { "1709564000000": 2.5, "1709564060000": 3.1 }
+ *   - undefined / null
+ *
+ * This helper returns the latest numeric value, or the fallback.
+ */
+function extractNumericValue(val: any, fallback: number = 0): number {
+  if (val == null) return fallback;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    // Time-series map — get the value at the latest timestamp
+    const keys = Object.keys(val);
+    if (keys.length === 0) return fallback;
+    // Keys are typically numeric timestamps as strings
+    const sorted = keys.sort((a, b) => Number(b) - Number(a));
+    const latest = val[sorted[0]];
+    return typeof latest === 'number' ? latest : fallback;
+  }
+  const num = Number(val);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+/**
+ * Extract flat statistics from workerStatuses[0].statisticsByWorker.
+ * `statisticsByWorker` may contain metrics directly, OR be nested one level
+ * deeper keyed by worker ID:
+ *   { "workerId123": { cpu: 2.5, memoryPercentageUsed: 50 } }
+ */
+function flattenWorkerStats(raw: any): Record<string, any> {
+  if (!raw || typeof raw !== 'object') return {};
+  // If the object has known metric keys at the top level, it's direct
+  const metricKeys = ['cpu', 'cpuPercentageUsed', 'memoryTotalUsed', 'memoryPercentageUsed', 'memoryTotalMax', 'threadCount'];
+  const hasDirectMetric = metricKeys.some((k) => k in raw);
+  if (hasDirectMetric) return raw;
+  // Otherwise, try to unwrap the first worker ID key
+  const values = Object.values(raw);
+  if (values.length > 0 && values[0] && typeof values[0] === 'object') {
+    return values[0] as Record<string, any>;
+  }
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
 // Main Screen
 // ---------------------------------------------------------------------------
 
@@ -241,24 +290,37 @@ const AppMonitoringDetailScreen: React.FC = () => {
     refetchMem();
   }, [refetchApp, refetchCpu, refetchMem]);
 
-  // Process metrics data into simple arrays
+  // Process metrics data into simple number arrays for charts
   const cpuData = useMemo(() => {
-    if (!cpuMetrics || !Array.isArray(cpuMetrics)) return [];
-    // Try to extract data points
-    if (cpuMetrics.length > 0 && cpuMetrics[0]?.data) {
-      return cpuMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
+    if (!cpuMetrics) return [];
+    if (Array.isArray(cpuMetrics)) {
+      if (cpuMetrics.length === 0) return [];
+      // Array of { timestamp, value } from extractTimeSeries
+      if (cpuMetrics[0]?.value !== undefined) {
+        return cpuMetrics.map((p: any) => p.value ?? 0);
+      }
+      // Array of { data: [...] } from Monitoring API
+      if (cpuMetrics[0]?.data) {
+        return cpuMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
+      }
+      // Direct array of numbers
+      if (typeof cpuMetrics[0] === 'number') return cpuMetrics;
     }
-    // Direct array of numbers
-    if (typeof cpuMetrics[0] === 'number') return cpuMetrics;
     return [];
   }, [cpuMetrics]);
 
   const memData = useMemo(() => {
-    if (!memoryMetrics || !Array.isArray(memoryMetrics)) return [];
-    if (memoryMetrics.length > 0 && memoryMetrics[0]?.data) {
-      return memoryMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
+    if (!memoryMetrics) return [];
+    if (Array.isArray(memoryMetrics)) {
+      if (memoryMetrics.length === 0) return [];
+      if (memoryMetrics[0]?.value !== undefined) {
+        return memoryMetrics.map((p: any) => p.value ?? 0);
+      }
+      if (memoryMetrics[0]?.data) {
+        return memoryMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
+      }
+      if (typeof memoryMetrics[0] === 'number') return memoryMetrics;
     }
-    if (typeof memoryMetrics[0] === 'number') return memoryMetrics;
     return [];
   }, [memoryMetrics]);
 
@@ -273,26 +335,28 @@ const AppMonitoringDetailScreen: React.FC = () => {
     const statuses = appObj?.workerStatuses ?? appObj?.workers?.statuses ?? [];
     if (statuses.length > 0) {
       const w = statuses[0];
-      return w?.statisticsByWorker ?? w?.statistics ?? w ?? {};
+      const raw = w?.statisticsByWorker ?? w?.statistics ?? w ?? {};
+      return flattenWorkerStats(raw);
     }
     return appObj?.monitoring ?? {};
   }, [app]);
 
-  const cpuPercent = workerStats?.cpuPercentageUsed
-    ?? workerStats?.cpu
-    ?? workerStats?.cpuUsage
-    ?? (cpuData.length > 0 ? cpuData[cpuData.length - 1] : 0);
+  // Use extractNumericValue to handle time-series maps, plain numbers, or undefined
+  const cpuPercent = extractNumericValue(workerStats?.cpuPercentageUsed)
+    || extractNumericValue(workerStats?.cpu)
+    || extractNumericValue(workerStats?.cpuUsage)
+    || (cpuData.length > 0 ? cpuData[cpuData.length - 1] : 0);
 
-  const memTotalRaw = workerStats?.memoryTotalMax ?? workerStats?.memoryTotal ?? 0;
-  const memUsedRaw = workerStats?.memoryTotalUsed ?? workerStats?.memoryUsage ?? 0;
+  const memTotalRaw = extractNumericValue(workerStats?.memoryTotalMax);
+  const memUsedRaw = extractNumericValue(workerStats?.memoryTotalUsed) || extractNumericValue(workerStats?.memoryUsage);
   // Normalise to MB when values look like bytes (> 10 000)
   const memTotal = memTotalRaw > 10_000 ? Math.round(memTotalRaw / (1024 * 1024)) : memTotalRaw;
   const memUsage = memUsedRaw > 10_000 ? Math.round(memUsedRaw / (1024 * 1024)) : memUsedRaw;
-  const memPercent = workerStats?.memoryPercentageUsed
-    ?? (memTotal > 0 ? Math.round((memUsage / memTotal) * 100) : 0)
-    ?? (memData.length > 0 ? memData[memData.length - 1] : 0);
+  const memPercent = extractNumericValue(workerStats?.memoryPercentageUsed)
+    || (memTotal > 0 ? Math.round((memUsage / memTotal) * 100) : 0)
+    || (memData.length > 0 ? memData[memData.length - 1] : 0);
 
-  const threadCount = workerStats?.threadCount ?? 0;
+  const threadCount = extractNumericValue(workerStats?.threadCount);
   const workerStatuses = (app as any)?.workerStatuses ?? [];
   const numWorkers = workerStatuses.length;
 
@@ -558,14 +622,15 @@ const AppMonitoringDetailScreen: React.FC = () => {
               </Text>
               <Divider style={{ marginVertical: 8 }} />
               {workerStatuses.map((worker: any, idx: number) => {
-                const wStats = worker?.statisticsByWorker ?? worker?.statistics ?? {};
-                const wCpu = wStats?.cpuPercentageUsed ?? wStats?.cpu ?? 0;
-                const wMem = wStats?.memoryPercentageUsed ?? 0;
-                const wMemUsed = wStats?.memoryTotalUsed ?? 0;
-                const wMemMax = wStats?.memoryTotalMax ?? 0;
+                const rawStats = worker?.statisticsByWorker ?? worker?.statistics ?? {};
+                const wStats = flattenWorkerStats(rawStats);
+                const wCpu = extractNumericValue(wStats?.cpuPercentageUsed) || extractNumericValue(wStats?.cpu);
+                const wMem = extractNumericValue(wStats?.memoryPercentageUsed);
+                const wMemUsed = extractNumericValue(wStats?.memoryTotalUsed);
+                const wMemMax = extractNumericValue(wStats?.memoryTotalMax);
                 const wMemUsedMB = wMemUsed > 10_000 ? Math.round(wMemUsed / (1024 * 1024)) : wMemUsed;
                 const wMemMaxMB = wMemMax > 10_000 ? Math.round(wMemMax / (1024 * 1024)) : wMemMax;
-                const wThreads = wStats?.threadCount ?? 0;
+                const wThreads = extractNumericValue(wStats?.threadCount);
                 const wStatus = worker?.status ?? 'UNKNOWN';
                 const wRegion = worker?.deployedRegion ?? worker?.region ?? '';
                 const wHost = worker?.host ?? '';

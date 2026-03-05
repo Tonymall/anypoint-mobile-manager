@@ -1,15 +1,15 @@
 // ============================================================
 // Logs Screen — Two tabs:
-//   1) App Logs   → CloudHub runtime logs (various endpoints)
+//   1) App Logs   → CloudHub runtime logs (auto-polling live feed)
 //   2) Audit Logs → Anypoint Platform audit trail
 // ============================================================
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View, FlatList, StyleSheet, RefreshControl, Platform, ScrollView,
 } from 'react-native';
 import {
-  Appbar, Text, Chip, Searchbar, useTheme, ActivityIndicator,
+  Appbar, Text, Chip, Searchbar, useTheme, ActivityIndicator, Switch,
 } from 'react-native-paper';
 import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -17,6 +17,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useAuditLogs } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
+import { areLogEndpointsAvailable } from '../../services/runtimeService';
 import type { AuditLogEntry } from '../../types';
 import type { AuditLogQueryParams } from '../../services/auditLogService';
 import LoadingState from '../../components/common/LoadingState';
@@ -170,11 +171,13 @@ const LogsScreen: React.FC = () => {
   const router = useRouter();
   const { domain } = useLocalSearchParams<{ domain: string }>();
   const styles = useMemo(() => makeStyles(theme), [theme]);
+  const flatListRef = useRef<FlatList>(null);
 
   // State
   const [tab, setTab] = useState<'app' | 'audit'>('app');
   const [dateIdx, setDateIdx] = useState(3); // 24h default
   const [searchQuery, setSearchQuery] = useState('');
+  const [liveMode, setLiveMode] = useState(true); // Auto-polling toggle
 
   const dateRange = useMemo(() => {
     const now = new Date();
@@ -184,7 +187,7 @@ const LogsScreen: React.FC = () => {
     };
   }, [dateIdx]);
 
-  // ---- App Logs (CloudHub) — always fetch so we can auto-switch ----
+  // ---- App Logs (CloudHub) — with auto-polling for live feed ----
   const {
     data: appLogs,
     isLoading: appLogsLoading,
@@ -197,11 +200,14 @@ const LogsScreen: React.FC = () => {
     queryFn: () =>
       runtimeService.getAppLogs(domain!, {
         startDate: dateRange.startDate,
-        endDate: dateRange.endDate,
+        endDate: new Date().toISOString(), // always use current time for endDate
         limit: 200,
       }),
     enabled: !!domain,
     retry: 1,
+    // Auto-poll every 5 seconds when live mode is on and the app logs tab is active
+    // BUT only if log endpoints haven't been permanently disabled (all returned 400/404/405)
+    refetchInterval: liveMode && tab === 'app' && areLogEndpointsAvailable() ? 5_000 : false,
   });
 
   // ---- Audit Logs — always fetch ----
@@ -289,6 +295,14 @@ const LogsScreen: React.FC = () => {
               ? 'CloudHub runtime logs may not be available for this application or region. Try the Audit Logs tab.'
               : 'No audit events found for the selected time range.'}
         </Text>
+        {tab === 'app' && !err && (
+          <View style={[styles.hintBox, { backgroundColor: theme.colors.surfaceVariant }]}>
+            <Icon name="information-outline" size={16} color={theme.colors.onSurfaceVariant} />
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, flex: 1, marginLeft: 8 }}>
+              CloudHub 1.0 (EU1) log APIs have limited availability. Logs are fetched from multiple endpoints automatically. If logs appear empty, the app may not have generated any logs in the selected time range.
+            </Text>
+          </View>
+        )}
       </View>
     );
   }, [isLoading, tab, appLogsError, auditError, styles, theme]);
@@ -338,8 +352,31 @@ const LogsScreen: React.FC = () => {
         </Chip>
       </View>
 
-      {/* Date range chips */}
+      {/* Live feed toggle + Date range */}
       <View style={styles.dateRow}>
+        {tab === 'app' && (
+          <View style={styles.liveFeedToggle}>
+            <View style={[
+              styles.liveDot,
+              { backgroundColor: liveMode ? '#4CAF50' : theme.colors.outlineVariant },
+            ]} />
+            <Text variant="labelSmall" style={{
+              color: liveMode ? '#4CAF50' : theme.colors.onSurfaceVariant,
+              fontWeight: '700',
+              marginRight: 4,
+            }}>
+              LIVE
+            </Text>
+            <Switch
+              value={liveMode}
+              onValueChange={setLiveMode}
+              style={{ transform: [{ scale: 0.7 }], marginRight: -4 }}
+            />
+          </View>
+        )}
+        {tab === 'app' && isRefetching && (
+          <ActivityIndicator size={12} color={theme.colors.primary} style={{ marginRight: 4 }} />
+        )}
         <Icon name="clock-outline" size={15} color={theme.colors.onSurfaceVariant} style={{ marginRight: 4 }} />
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5 }}>
           {DATE_RANGES.map((dr, i) => {
@@ -375,12 +412,13 @@ const LogsScreen: React.FC = () => {
       {/* List */}
       {tab === 'app' ? (
         <FlatList
+          ref={flatListRef}
           data={filteredAppLogs}
           keyExtractor={keyExtractorApp}
           renderItem={renderAppLog}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={filteredAppLogs.length === 0 ? styles.emptyList : styles.listContent}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={theme.colors.primary} colors={[theme.colors.primary]} />}
+          refreshControl={<RefreshControl refreshing={isRefetching && !liveMode} onRefresh={handleRefresh} tintColor={theme.colors.primary} colors={[theme.colors.primary]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
           maxToRenderPerBatch={20}
@@ -417,7 +455,10 @@ const makeStyles = (theme: MD3Theme) =>
     emptyList: { flexGrow: 1 },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, paddingTop: 80 },
     emptyTitle: { color: theme.colors.onSurface, marginTop: 12, marginBottom: 8 },
-    emptySubtitle: { color: theme.colors.onSurfaceVariant, textAlign: 'center' },
+    emptySubtitle: { color: theme.colors.onSurfaceVariant, textAlign: 'center', marginBottom: 16 },
+    hintBox: { flexDirection: 'row', alignItems: 'flex-start', padding: 12, borderRadius: 10, maxWidth: 340 },
+    liveFeedToggle: { flexDirection: 'row', alignItems: 'center', marginRight: 8 },
+    liveDot: { width: 8, height: 8, borderRadius: 4, marginRight: 4 },
   });
 
 export default LogsScreen;

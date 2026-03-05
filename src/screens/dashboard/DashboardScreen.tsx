@@ -103,12 +103,14 @@ const DashboardScreen: React.FC = () => {
   const {
     data: applications,
     isLoading: appsLoading,
+    error: appsError,
     refetch: refetchApps,
   } = useApplications();
 
   const {
     data: apisResponse,
     isLoading: apisLoading,
+    error: apisError,
     refetch: refetchApis,
   } = useManagedAPIs();
 
@@ -200,6 +202,40 @@ const DashboardScreen: React.FC = () => {
           </View>
         </Card.Content>
       </Card>
+
+      {/* Error Banner (shows 403 debug info when data fails to load) */}
+      {(appsError || apisError) && (
+        <Card style={[styles.errorBanner, { backgroundColor: theme.colors.errorContainer }]} mode="contained">
+          <Card.Content style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+            <Icon name="alert-circle" size={20} color={theme.colors.error} style={{ marginTop: 2 }} />
+            <View style={{ flex: 1 }}>
+              <Text variant="labelLarge" style={{ color: theme.colors.onErrorContainer, fontWeight: '700', marginBottom: 4 }}>
+                Data loading failed
+              </Text>
+              {appsError && (
+                <Text variant="bodySmall" style={{ color: theme.colors.onErrorContainer }} selectable>
+                  Apps: {appsError instanceof Error ? appsError.message : String(appsError)}
+                </Text>
+              )}
+              {apisError && (
+                <Text variant="bodySmall" style={{ color: theme.colors.onErrorContainer, marginTop: 4 }} selectable>
+                  APIs: {apisError instanceof Error ? apisError.message : String(apisError)}
+                </Text>
+              )}
+              <Button
+                mode="text"
+                onPress={handleRefresh}
+                icon="refresh"
+                compact
+                textColor={theme.colors.error}
+                style={{ alignSelf: 'flex-start', marginTop: 4 }}
+              >
+                Retry
+              </Button>
+            </View>
+          </Card.Content>
+        </Card>
+      )}
 
       {/* Quick Stats */}
       <View style={styles.sectionHeader}>
@@ -363,6 +399,12 @@ const createStyles = (theme: MD3Theme) =>
     },
     scrollContent: {
       paddingBottom: 32,
+    },
+    errorBanner: {
+      marginHorizontal: 16,
+      marginTop: 12,
+      borderRadius: 14,
+      elevation: 0,
     },
     headerCard: {
       marginHorizontal: 16,

@@ -12,7 +12,7 @@ export function useCurrentUser() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   return useQuery({
     queryKey: authKeys.user(),
-    queryFn: authService.getCurrentUser,
+    queryFn: () => authService.getCurrentUser(),
     enabled: isAuthenticated,
   });
 }

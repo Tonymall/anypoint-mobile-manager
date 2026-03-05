@@ -140,6 +140,8 @@ export async function getApplications(params?: {
   offset?: number;
   limit?: number;
 }): Promise<Application[]> {
+  const errors: string[] = [];
+
   // --- Try CloudHub 1.0 first ---
   let ch1Apps: Application[] = [];
   try {
@@ -149,7 +151,9 @@ export async function getApplications(params?: {
       const d = data as any;
       ch1Apps = d.data ?? d.applications ?? d.items ?? [];
     }
-  } catch (_) { /* CH1 not available */ }
+  } catch (err: any) {
+    errors.push(`CH1: ${err?.response?.status ?? 'ERR'} ${err?.response?.data?.message ?? err?.message ?? ''}`);
+  }
 
   // --- Try CloudHub 2.0 (AMC Application Manager API) ---
   let ch2Apps: Application[] = [];
@@ -159,7 +163,9 @@ export async function getApplications(params?: {
       const { data } = await api.get(amcPath);
       const items = Array.isArray(data) ? data : (data?.items ?? data?.data ?? []);
       ch2Apps = items.map(normalizeDeployment);
-    } catch (_) { /* CH2 not available */ }
+    } catch (err: any) {
+      errors.push(`CH2: ${err?.response?.status ?? 'ERR'} ${err?.response?.data?.message ?? err?.message ?? ''}`);
+    }
   }
 
   // --- Try Hybrid API (Runtime Manager) ---
@@ -168,7 +174,26 @@ export async function getApplications(params?: {
       const { data } = await api.get(`${HYBRID_BASE}/applications`);
       const items = Array.isArray(data) ? data : (data?.data ?? data?.items ?? []);
       if (items.length > 0) return items;
-    } catch (_) { /* not available */ }
+    } catch (err: any) {
+      errors.push(`Hybrid: ${err?.response?.status ?? 'ERR'}`);
+    }
+  }
+
+  // If ALL endpoints failed, throw a descriptive error so the UI can show it
+  // instead of silently showing "No applications found"
+  if (ch1Apps.length === 0 && ch2Apps.length === 0 && errors.length > 0) {
+    const orgId = getOrgId();
+    const envId = getEnvId();
+    const hasToken = !!(api.defaults.headers.common['Authorization']);
+    const debugInfo = [
+      `Token: ${hasToken ? 'present' : 'MISSING'}`,
+      `OrgID: ${orgId ?? 'MISSING'}`,
+      `EnvID: ${envId ?? 'MISSING'}`,
+      `BaseURL: ${api.defaults.baseURL ?? 'NOT SET'}`,
+    ].join(', ');
+    const errMsg = `${errors.join(' | ')}\n[Debug: ${debugInfo}]`;
+    console.error('[getApplications] All endpoints failed:', errMsg);
+    throw new Error(errMsg);
   }
 
   // Merge both lists (deduplicate by domain/name)
@@ -432,11 +457,45 @@ export async function restartApp(domain: string): Promise<Application> {
 // ---------- Logs ----------
 
 /**
+ * Module-level flag: skip log endpoints known to 404.
+ * Prevents spamming API calls that always fail.
+ */
+let _logEndpointsAvailable = true;
+let _logEndpointsChecked = false;
+
+/**
+ * Cache the working log strategy so subsequent polls skip straight to it.
+ * 'post-no-deplid' = POST without deploymentId (the one that works on EU1)
+ * 'post-with-deplid' = POST with deploymentId
+ * null = not yet determined, try all endpoints
+ */
+let _workingLogStrategy: string | null = null;
+
+/**
+ * Cache whether /instances endpoint is available.
+ * Once it 404s, we never try again — saves 2 x 404 per poll cycle.
+ */
+let _instancesEndpointAvailable = true;
+
+/**
+ * Check if log endpoints are known to be unavailable.
+ * When true, the UI should disable live polling to avoid spamming
+ * failing API calls every 5 seconds.
+ */
+export function areLogEndpointsAvailable(): boolean {
+  return _logEndpointsAvailable || !_logEndpointsChecked;
+}
+
+/**
  * Retrieve application log entries.
- * CloudHub API docs say:
- *   GET /cloudhub/api/applications/{domain}/log  — download log file
- *   GET /cloudhub/api/v2/applications/{domain}/instances/{instanceId}/log
- * Also tries POST /logs for structured search.
+ *
+ * Tries multiple CloudHub / Anypoint Monitoring endpoints because the available
+ * API varies by region, deployment target (CH1/CH2), and subscription level.
+ *
+ * IMPORTANT: On EU1 CloudHub 1.0:
+ * - GET /logs returns 405 (Method Not Allowed) → we try POST instead
+ * - Most /instances endpoints return 404
+ * - Monitoring log search endpoints require Titanium subscription
  */
 export async function getAppLogs(
   domain: string,
@@ -461,7 +520,26 @@ export async function getAppLogs(
 
   const limit = params?.limit ?? 200;
 
-  // GET query params — used by the official /log endpoint
+  // POST body — used by the CloudHub /logs POST endpoint.
+  //
+  // The server told us the EXACT 14 valid fields via a 400 error:
+  //   "deploymentId", "priority", "tenantId", "endTime", "text",
+  //   "startTime", "instanceId", "threadName", "descending",
+  //   "loggerName", "lowerId", "upperId", "limitMsgLen", "limit"
+  //
+  // NOTE: "lowPriority" and "search" are NOT valid and cause 400.
+  //       The text search field is "text", not "search".
+  const postBody: Record<string, any> = {
+    deploymentId: domain,
+    startTime: startMs,
+    endTime: endMs,
+    limit,
+    descending: true,
+  };
+  if (params?.priority) postBody.priority = params.priority;
+  if (params?.search) postBody.text = params.search; // field is "text", NOT "search"
+
+  // GET query params — used by some older /log endpoints
   const getParams: Record<string, any> = {
     startDate: startMs,
     endDate: endMs,
@@ -471,151 +549,437 @@ export async function getAppLogs(
   if (params?.priority) getParams.priority = params.priority;
   if (params?.search) getParams.search = params.search;
 
-  // POST body — used by the /logs search endpoint
-  const postBody: Record<string, any> = {
-    startDate: startMs,
-    endDate: endMs,
+  const orgId = getOrgId();
+  const envId = getEnvId();
+
+  // If we already know ALL log endpoints fail, skip the expensive enumeration
+  if (!_logEndpointsAvailable && _logEndpointsChecked) {
+    return [];
+  }
+
+  // POST body WITHOUT deploymentId — the domain is already in the URL path.
+  // Including a deploymentId that doesn't match the actual internal deployment ID
+  // can cause the server to return 200 OK with zero results (no error, just empty).
+  const postBodyNoDeplId: Record<string, any> = {
+    startTime: startMs,
+    endTime: endMs,
     limit,
     descending: true,
-    lowPriority: true,
   };
-  if (params?.priority) postBody.priority = params.priority;
-  if (params?.search) postBody.search = params.search;
+  if (params?.priority) postBodyNoDeplId.priority = params.priority;
+  if (params?.search) postBodyNoDeplId.text = params.search;
 
-  // First try to get instance IDs for instance-specific log download
-  let instanceIds: string[] = [];
-  try {
-    const { data: instances } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}/instances`);
-    if (Array.isArray(instances)) {
-      instanceIds = instances.map((i: any) => i.instanceId ?? i.id).filter(Boolean);
+  // ── FAST PATH: if we already know which strategy works, use it directly ──
+  // This eliminates ALL the /instances 404 spam and unnecessary fallback attempts.
+  if (_workingLogStrategy) {
+    try {
+      const { data } = await _getLogsByStrategy(_workingLogStrategy, domain, postBodyNoDeplId, postBody, getParams, orgId, envId);
+      const entries = extractLogEntries(data);
+      if (entries.length > 0) return entries;
+    } catch (_) {
+      // Working strategy failed (maybe different app) — fall through to full scan
+      _workingLogStrategy = null;
     }
-  } catch (_) { /* no instances endpoint */ }
+  }
 
-  const attempts: Array<() => Promise<any>> = [
-    // 1) GET /log — official CloudHub v1 log download endpoint
-    () => api.get(`${CLOUDHUB_V1}/applications/${domain}/log`, { params: getParams }),
-    // 2) GET /log — v2 path
-    () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/log`, { params: getParams }),
-    // 3) GET /logs — v2 (some deployments use plural)
-    () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/logs`, { params: getParams }),
-    // 4) GET /logs — v1
-    () => api.get(`${CLOUDHUB_V1}/applications/${domain}/logs`, { params: getParams }),
-    // 5) POST /logs search — v2
-    () => api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBody),
-    // 6) POST /logs search — v1
-    () => api.post(`${CLOUDHUB_V1}/applications/${domain}/logs`, postBody),
-  ];
+  // ── Named strategies for the attempt loop ──
+  const strategies: Array<{ name: string; fn: () => Promise<any> }> = [];
 
-  // Instance-specific log endpoints (if we found instances)
-  for (const instanceId of instanceIds.slice(0, 2)) {
-    attempts.push(
-      () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/instances/${instanceId}/log`, { params: getParams }),
-      () => api.get(`${CLOUDHUB_V1}/applications/${domain}/instances/${instanceId}/log`, { params: getParams }),
+  // ---------------------------------------------------------------
+  // 1) POST /logs — this is the CORRECT method for CloudHub log search
+  // ---------------------------------------------------------------
+  strategies.push(
+    { name: 'post-v2-no-deplid', fn: () => api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId) },
+    { name: 'post-v2-with-deplid', fn: () => api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBody) },
+    { name: 'post-v1-no-deplid', fn: () => api.post(`${CLOUDHUB_V1}/applications/${domain}/logs`, postBodyNoDeplId) },
+    { name: 'post-v1-with-deplid', fn: () => api.post(`${CLOUDHUB_V1}/applications/${domain}/logs`, postBody) },
+  );
+
+  // ---------------------------------------------------------------
+  // 2) Deployment-based GET /logs (real browser flow)
+  //    The Anypoint web UI fetches logs via:
+  //      GET .../applications/{domain}/deployments?orderByDate=DESC&loggingVersion=VERSION_2
+  //      GET .../applications/{domain}/deployments/{deploymentId}/logs?tail=true&limitMsgLen=5000
+  //    The deployment ID (e.g. "69959c9d64b87b16e38cdb96") is NOT the domain name.
+  // ---------------------------------------------------------------
+  strategies.push(
+    { name: 'ch1-deploy-lookup', fn: async () => {
+      // Step 1: Get the real deployment ID
+      const { data: deploymentsData } = await api.get(
+        `${CLOUDHUB_BASE}/applications/${domain}/deployments`,
+        { params: { orderByDate: 'DESC', loggingVersion: 'VERSION_2' } },
+      );
+      const deployments = Array.isArray(deploymentsData)
+        ? deploymentsData
+        : (deploymentsData?.data ?? deploymentsData?.items ?? []);
+      if (deployments.length === 0) throw new Error('No deployments found');
+
+      const deploymentId = deployments[0]?.deploymentId ?? deployments[0]?.id ?? deployments[0]?._id;
+      if (!deploymentId) throw new Error('No deploymentId in deployments response');
+
+      // Cache for fast path
+      _cachedCh1DeploymentId = deploymentId;
+      _cachedCh1Domain = domain;
+      console.log(`[getAppLogs] CH1 deployment discovered: ${deploymentId}`);
+
+      // Step 2: Get logs using the real deployment ID
+      return api.get(
+        `${CLOUDHUB_BASE}/applications/${domain}/deployments/${deploymentId}/logs`,
+        { params: { tail: true, limitMsgLen: 5000 } },
+      );
+    }},
+    // Fallback: try with domain as deployment ID (older API pattern)
+    { name: 'get-deploy-v2', fn: () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/deployments/${domain}/logs`, { params: getParams }) },
+    { name: 'get-deploy-v1', fn: () => api.get(`${CLOUDHUB_V1}/applications/${domain}/deployments/${domain}/logs`, { params: getParams }) },
+  );
+
+  // ---------------------------------------------------------------
+  // 3) Instance-specific endpoints (only if /instances hasn't failed before)
+  // ---------------------------------------------------------------
+  if (_instancesEndpointAvailable) {
+    let instanceIds: string[] = [];
+    try {
+      const { data: instances } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}/instances`);
+      if (Array.isArray(instances)) {
+        instanceIds = instances.map((i: any) => i.instanceId ?? i.id).filter(Boolean);
+      }
+    } catch (_) { /* no instances endpoint */ }
+
+    if (instanceIds.length === 0) {
+      try {
+        const { data: instances } = await api.get(`${CLOUDHUB_V1}/applications/${domain}/instances`);
+        if (Array.isArray(instances)) {
+          instanceIds = instances.map((i: any) => i.instanceId ?? i.id).filter(Boolean);
+        }
+      } catch (_) { /* not available */ }
+    }
+
+    // If both /instances calls returned nothing, cache the failure
+    if (instanceIds.length === 0) {
+      _instancesEndpointAvailable = false;
+      console.log('[getAppLogs] /instances endpoints returned nothing — skipping for session');
+    }
+
+    for (const instanceId of instanceIds.slice(0, 2)) {
+      strategies.push(
+        { name: `get-instance-logfile-v2-${instanceId}`, fn: () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/instances/${instanceId}/log-file`, {
+          params: { startDate: startMs, endDate: endMs },
+          transformResponse: [(data: any) => data],
+        })},
+        { name: `get-instance-logfile-v1-${instanceId}`, fn: () => api.get(`${CLOUDHUB_V1}/applications/${domain}/instances/${instanceId}/log-file`, {
+          params: { startDate: startMs, endDate: endMs },
+          transformResponse: [(data: any) => data],
+        })},
+        { name: `get-instance-log-v2-${instanceId}`, fn: () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/instances/${instanceId}/log`, { params: getParams }) },
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // 4) Application-level log endpoints (CH1 fallbacks)
+  // ---------------------------------------------------------------
+  strategies.push(
+    { name: 'get-logfile-v1', fn: () => api.get(`${CLOUDHUB_V1}/applications/${domain}/log-file`, {
+      params: { startDate: startMs, endDate: endMs },
+      transformResponse: [(data: any) => data],
+    })},
+    { name: 'get-log-v1', fn: () => api.get(`${CLOUDHUB_V1}/applications/${domain}/log`, { params: getParams }) },
+    { name: 'get-log-v2', fn: () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/log`, { params: getParams }) },
+  );
+
+  // ---------------------------------------------------------------
+  // 5) Anypoint Monitoring / Observability log search (CH1 + CH2)
+  // ---------------------------------------------------------------
+  if (orgId && envId && monitoringApiAvailable) {
+    strategies.push(
+      { name: 'monitoring-query', fn: () => api.post(`/monitoring/query/api/v2/organizations/${orgId}/environments/${envId}/logs`, {
+        query: `*${domain}*`,
+        from: new Date(startMs).toISOString(),
+        to: new Date(endMs).toISOString(),
+        limit,
+        ascending: false,
+      })},
+      { name: 'monitoring-es', fn: () => api.post(`/monitoring/log/api/v1/organizations/${orgId}/environments/${envId}/search`, {
+        query: { query_string: { query: `applicationName:"${domain}"` } },
+        from: 0,
+        size: limit,
+        sort: [{ timestamp: { order: 'desc' } }],
+      })},
     );
   }
 
-  // CloudHub 2.0 (AMC) log endpoints
+  // ---------------------------------------------------------------
+  // 6) CloudHub 2.0 (AMC) deployment log endpoints
+  // ---------------------------------------------------------------
   const amcPath = amcDeploymentsPath();
   if (amcPath) {
-    attempts.push(
-      // CH2 deployment logs
-      () => api.get(`${amcPath}/${domain}/logs`, { params: getParams }),
-      // Try searching all deployments for a matching name
-      async () => {
+    strategies.push(
+      { name: 'amc-direct', fn: () => api.get(`${amcPath}/${domain}/logs`, { params: getParams }) },
+      { name: 'amc-lookup', fn: async () => {
         const { data: deps } = await api.get(amcPath!);
         const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
         const match = items.find((d: any) => d.name === domain || d.id === domain);
         if (!match) throw new Error('No CH2 deployment found');
         return api.get(`${amcPath}/${match.id}/logs`, { params: getParams });
-      },
+      }},
+    );
+
+    // ── AMC specs-based logs (the REAL CH2/AMC log endpoint) ──
+    // The actual Anypoint web UI fetches logs via:
+    //   GET .../deployments/{deploymentId}/specs?limit=1000  → get specId
+    //   GET .../deployments/{deploymentId}/specs/{specId}/logs?descending=true
+    strategies.push(
+      { name: 'amc-specs-logs', fn: async () => {
+        // Step 1: Find the deployment
+        const { data: deps } = await api.get(amcPath!);
+        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        if (!match) throw new Error('No CH2 deployment found');
+        const deploymentId = match.id;
+
+        // Step 2: Get specs for this deployment
+        const { data: specsData } = await api.get(
+          `${amcPath}/${deploymentId}/specs`,
+          { params: { limit: 1000 } },
+        );
+        const specs = Array.isArray(specsData)
+          ? specsData
+          : (specsData?.items ?? specsData?.data ?? specsData?.specs ?? []);
+        if (specs.length === 0) throw new Error('No specs found for deployment');
+
+        // Use the first (most recent) spec
+        const specId = specs[0]?.id ?? specs[0]?.specId;
+        if (!specId) throw new Error('No specId found in specs response');
+
+        // Cache for fast path on subsequent polls
+        _cachedAmcDeploymentId = deploymentId;
+        _cachedAmcSpecId = specId;
+        _cachedAmcDomain = domain;
+
+        console.log(`[getAppLogs] AMC specs discovered: deploymentId=${deploymentId}, specId=${specId}`);
+
+        // Step 3: Get logs using specId
+        return api.get(
+          `${amcPath}/${deploymentId}/specs/${specId}/logs`,
+          { params: { descending: true, limit } },
+        );
+      }},
     );
   }
 
-  // Anypoint Monitoring log search (works for both CH1 and CH2)
-  const orgId = getOrgId();
-  const envId = getEnvId();
-  if (orgId && envId) {
-    attempts.push(
-      // Elasticsearch-like query format (Anypoint Monitoring Log Search API)
-      () => api.post(`/monitoring/log/api/v1/organizations/${orgId}/environments/${envId}/search`, {
-        query: {
-          query_string: {
-            query: `applicationName:"${domain}"`,
-          },
-        },
-        from: 0,
-        size: limit,
-        sort: [{ timestamp: { order: 'desc' } }],
-      }),
-      // Alternative: simpler query format (some versions support this)
-      () => api.post(`/monitoring/log/api/v1/organizations/${orgId}/environments/${envId}/search`, {
-        query: domain,
-        from: startMs,
-        to: endMs,
-        limit,
-      }),
-      // ARM log endpoint
-      () => api.get(`${RUNTIME_BASE}/applications/${domain}/logs`, { params: getParams }),
-    );
-  }
-
-  for (const attempt of attempts) {
+  const logErrors: string[] = [];
+  for (let i = 0; i < strategies.length; i++) {
+    const { name, fn } = strategies[i];
     try {
-      const { data } = await attempt();
+      const { data } = await fn();
       const entries = extractLogEntries(data);
-      if (entries.length > 0) return entries;
-    } catch (_) {
-      // try next endpoint
+      if (entries.length > 0) {
+        _logEndpointsAvailable = true;
+        _logEndpointsChecked = true;
+        _workingLogStrategy = name; // ← Cache this for next poll
+        console.log(`[getAppLogs] ✅ Got ${entries.length} log entries via "${name}"`);
+        return entries;
+      }
+
+      // Diagnostic: endpoint returned 200 but no entries extracted
+      if (!_logEndpointsChecked) {
+        const preview = typeof data === 'string'
+          ? data.slice(0, 800)
+          : JSON.stringify(data).slice(0, 800);
+        console.log(`[getAppLogs] "${name}" returned 200 OK but extractLogEntries found nothing. Response:`, preview);
+      }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status) logErrors.push(String(status));
+      if (status === 400 && !_logEndpointsChecked) {
+        const respBody = err?.response?.data;
+        const url = err?.config?.url ?? 'unknown';
+        console.warn(`[getAppLogs] 400 from ${url}:`,
+          typeof respBody === 'object' ? JSON.stringify(respBody).slice(0, 500) : String(respBody ?? '').slice(0, 500));
+      }
     }
+  }
+
+  // Log summary (only once per session)
+  if (!_logEndpointsChecked) {
+    if (logErrors.length > 0) {
+      console.warn(`[getAppLogs] All ${strategies.length} strategies failed for ${domain}. Statuses: ${logErrors.join(', ')}`);
+    } else {
+      console.warn(`[getAppLogs] All ${strategies.length} strategies returned empty results for ${domain}`);
+    }
+    const allPermanent = logErrors.length > 0 && logErrors.every((s) => s === '400' || s === '404' || s === '405');
+    if (allPermanent) {
+      _logEndpointsAvailable = false;
+      console.log('[getAppLogs] All log endpoints return 400/404/405 — disabling live polling for session');
+    }
+    _logEndpointsChecked = true;
   }
 
   return [];
 }
 
+/**
+ * Execute a specific log strategy by name (fast path for cached strategies).
+ */
+async function _getLogsByStrategy(
+  strategy: string,
+  domain: string,
+  postBodyNoDeplId: Record<string, any>,
+  postBody: Record<string, any>,
+  getParams: Record<string, any>,
+  orgId: string | undefined,
+  envId: string | undefined,
+): Promise<{ data: any }> {
+  switch (strategy) {
+    case 'post-v2-no-deplid':
+      return api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
+    case 'post-v2-with-deplid':
+      return api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBody);
+    case 'post-v1-no-deplid':
+      return api.post(`${CLOUDHUB_V1}/applications/${domain}/logs`, postBodyNoDeplId);
+    case 'post-v1-with-deplid':
+      return api.post(`${CLOUDHUB_V1}/applications/${domain}/logs`, postBody);
+    case 'ch1-deploy-lookup': {
+      // Fast path: use cached CH1 deployment ID (skip the deployment lookup)
+      if (!_cachedCh1DeploymentId || _cachedCh1Domain !== domain) {
+        throw new Error('CH1 deployment not cached for this domain — need re-discovery');
+      }
+      return api.get(
+        `${CLOUDHUB_BASE}/applications/${domain}/deployments/${_cachedCh1DeploymentId}/logs`,
+        { params: { tail: true, limitMsgLen: 5000 } },
+      );
+    }
+    case 'get-deploy-v2':
+      return api.get(`${CLOUDHUB_BASE}/applications/${domain}/deployments/${domain}/logs`, { params: getParams });
+    case 'get-deploy-v1':
+      return api.get(`${CLOUDHUB_V1}/applications/${domain}/deployments/${domain}/logs`, { params: getParams });
+    case 'get-logfile-v1':
+      return api.get(`${CLOUDHUB_V1}/applications/${domain}/log-file`, {
+        params: { startDate: getParams.startDate, endDate: getParams.endDate },
+        transformResponse: [(data: any) => data],
+      });
+    case 'get-log-v1':
+      return api.get(`${CLOUDHUB_V1}/applications/${domain}/log`, { params: getParams });
+    case 'get-log-v2':
+      return api.get(`${CLOUDHUB_BASE}/applications/${domain}/log`, { params: getParams });
+    case 'amc-specs-logs': {
+      // Fast path: use cached deployment/spec IDs (skip the 3-step lookup)
+      if (!_cachedAmcDeploymentId || !_cachedAmcSpecId || _cachedAmcDomain !== domain) {
+        throw new Error('AMC specs not cached for this domain — need re-discovery');
+      }
+      const amcP = amcDeploymentsPath();
+      if (!amcP) throw new Error('No AMC path available');
+      return api.get(
+        `${amcP}/${_cachedAmcDeploymentId}/specs/${_cachedAmcSpecId}/logs`,
+        { params: { descending: true, limit: getParams.limit ?? 200 } },
+      );
+    }
+    default:
+      // Instance-specific or monitoring strategies — just re-discover
+      throw new Error(`Strategy "${strategy}" requires re-discovery`);
+  }
+}
+
 /** Extract log entries from various CloudHub response shapes. */
 function extractLogEntries(data: any): AppLogEntry[] {
-  if (Array.isArray(data)) return data;
+  if (Array.isArray(data)) return normalizeLogArray(data);
 
-  // Handle plain text log responses (GET /log returns raw text)
+  // Handle plain text log responses (GET /log-file returns raw text)
   if (typeof data === 'string' && data.trim().length > 0) {
-    const lines = data.split('\n').filter((l: string) => l.trim());
-    if (lines.length > 0) {
-      return lines.map((line: string, idx: number) => {
-        // Try to parse structured log lines: [timestamp] PRIORITY message
-        const match = line.match(/^\[?(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}[^\]]*)\]?\s*(ERROR|WARN|INFO|DEBUG|TRACE|FATAL|SYSTEM)?\s*(.*)/i);
-        if (match) {
-          return {
-            timestamp: match[1],
-            priority: (match[2] ?? 'INFO').toUpperCase(),
-            message: match[3] ?? line,
-          } as AppLogEntry;
-        }
-        return {
-          timestamp: new Date().toISOString(),
-          priority: 'INFO',
-          message: line,
-        } as AppLogEntry;
-      });
-    }
+    return parseRawLogText(data);
   }
 
   if (data && typeof data === 'object') {
+    // Elasticsearch / Monitoring response: { hits: { hits: [ { _source: {...} } ] } }
+    if (data.hits?.hits && Array.isArray(data.hits.hits)) {
+      const entries = data.hits.hits.map((hit: any) => {
+        const src = hit._source ?? hit;
+        return {
+          timestamp: src.timestamp ?? src['@timestamp'] ?? src.instant ?? '',
+          priority: (src.priority ?? src.level ?? src.logLevel ?? 'INFO').toUpperCase(),
+          message: src.message ?? src.msg ?? src.log ?? JSON.stringify(src),
+          threadName: src.threadName ?? src.thread ?? '',
+          loggerName: src.loggerName ?? src.logger ?? '',
+        } as AppLogEntry;
+      });
+      if (entries.length > 0) return entries;
+    }
+
     // Try all known response wrapper fields
     const candidates = [
       data.data, data.logs, data.items, data.entries,
       data.records, data.results, data.logEntries,
     ];
     for (const candidate of candidates) {
-      if (Array.isArray(candidate) && candidate.length > 0) return candidate;
+      if (Array.isArray(candidate) && candidate.length > 0) {
+        return normalizeLogArray(candidate);
+      }
     }
     // If the response has a total/count field, look for any array value
     if (data.total !== undefined || data.count !== undefined) {
       for (const val of Object.values(data)) {
-        if (Array.isArray(val) && val.length > 0) return val as AppLogEntry[];
+        if (Array.isArray(val) && val.length > 0) return normalizeLogArray(val as any[]);
       }
     }
   }
   return [];
+}
+
+/** Normalize an array of log objects (could be raw API shape or pre-formatted) */
+function normalizeLogArray(arr: any[]): AppLogEntry[] {
+  if (arr.length === 0) return [];
+  // Check if already in our format
+  if (arr[0]?.message !== undefined || arr[0]?.msg !== undefined) {
+    return arr.map((e) => ({
+      timestamp: e.timestamp ?? e['@timestamp'] ?? e.instant ?? e.date ?? '',
+      priority: (e.priority ?? e.level ?? e.logLevel ?? 'INFO').toUpperCase(),
+      message: e.message ?? e.msg ?? e.log ?? e.line ?? JSON.stringify(e),
+      threadName: e.threadName ?? e.thread ?? '',
+      loggerName: e.loggerName ?? e.logger ?? '',
+    } as AppLogEntry));
+  }
+  return arr;
+}
+
+/** Parse raw text log output (from GET /log-file or /log endpoints) */
+function parseRawLogText(text: string): AppLogEntry[] {
+  const lines = text.split('\n').filter((l: string) => l.trim());
+  if (lines.length === 0) return [];
+
+  const entries: AppLogEntry[] = [];
+  let currentEntry: AppLogEntry | null = null;
+
+  for (const line of lines) {
+    // Match common Mule log patterns:
+    // [2024-01-15 10:30:45.123] INFO  org.mule.runtime - message
+    // 2024-01-15T10:30:45.123Z  INFO [thread-1] org.mule.runtime: message
+    const match = line.match(
+      /^\[?(\d{4}[-/]\d{2}[-/]\d{2}[T ]\d{2}:\d{2}:\d{2}[^\]]*)\]?\s*(ERROR|WARN|WARNING|INFO|DEBUG|TRACE|FATAL|SYSTEM)\s+(.*)/i,
+    );
+    if (match) {
+      // Save previous entry
+      if (currentEntry) entries.push(currentEntry);
+      currentEntry = {
+        timestamp: match[1].trim(),
+        priority: match[2].toUpperCase().replace('WARNING', 'WARN'),
+        message: match[3].trim(),
+      } as AppLogEntry;
+    } else if (currentEntry) {
+      // Continuation of multi-line log (stack trace, etc.)
+      currentEntry.message += '\n' + line;
+    } else {
+      // No pattern match and no current entry — standalone line
+      entries.push({
+        timestamp: new Date().toISOString(),
+        priority: 'INFO',
+        message: line,
+      } as AppLogEntry);
+    }
+  }
+  // Don't forget the last entry
+  if (currentEntry) entries.push(currentEntry);
+
+  return entries;
 }
 
 // ---------- Schedulers ----------
@@ -750,46 +1114,494 @@ export async function scaleWorkers(
 // ---------- Metrics / Dashboard Stats ----------
 
 /**
+ * Module-level flags to remember which monitoring endpoints are unavailable.
+ * Once an endpoint returns 404, we stop retrying it for the session.
+ * This prevents spamming the console with 404s (common on EU1 CloudHub 1.0).
+ */
+let dashboardStatsAvailable = true; // /dashboardStats, /statistics
+let monitoringApiAvailable = true;  // /monitoring/*, /observability/*
+let _dashStatsCheckDone = false;
+
+/**
+ * Promise-based gate for the first stats/monitoring endpoint discovery.
+ * When multiple getDashboardStats calls fire in parallel (via useQueries),
+ * the first one checks all endpoints and resolves this promise. Subsequent
+ * calls await it instead of making redundant 404 requests.
+ *
+ * The discovery covers BOTH dashboardStats AND monitoring endpoints so
+ * all parallel callers wait for a single set of API calls.
+ */
+let _statsDiscoveryPromise: Promise<void> | null = null;
+
+/**
+ * ── InfluxDB Monitoring (Grafana-style datasource proxy) ──
+ * The REAL Anypoint Monitoring endpoint uses an InfluxDB proxy:
+ *   GET /monitoring/api/visualizer/api/datasources/proxy/{datasourceId}/query
+ *     ?db=hybrid_metric_{region}&q=SELECT...&epoch=ms
+ *
+ * We discover the datasource ID once, then cache it for the session.
+ */
+let _influxDatasourceId: number | null = null;
+let _influxDbName: string | null = null;
+let _influxAvailable: boolean | null = null; // null = not checked yet
+
+/**
+ * ── AMC specs-based log retrieval cache ──
+ * CH2/AMC logs require: deployments → specs (specId) → logs
+ * We cache the deployment ID and spec ID per domain to avoid repeated lookups.
+ */
+let _cachedAmcDeploymentId: string | null = null;
+let _cachedAmcSpecId: string | null = null;
+let _cachedAmcDomain: string | null = null;
+
+/**
+ * ── CH1 deployment-based log retrieval cache ──
+ * The browser UI fetches logs via:
+ *   GET /cloudhub/api/v2/applications/{domain}/deployments?orderByDate=DESC&loggingVersion=VERSION_2
+ *   GET /cloudhub/api/v2/applications/{domain}/deployments/{deploymentId}/logs?tail=true&limitMsgLen=5000
+ * We cache the deployment ID per domain so subsequent polls skip the lookup.
+ */
+let _cachedCh1DeploymentId: string | null = null;
+let _cachedCh1Domain: string | null = null;
+
+/**
+ * Check if monitoring endpoints are known to be unavailable.
+ * Returns true when discovery is done AND both stats + monitoring APIs
+ * AND InfluxDB proxy all failed.
+ * The UI uses this to show a "monitoring requires subscription" banner.
+ */
+export function isMonitoringUnavailable(): boolean {
+  return _dashStatsCheckDone && !dashboardStatsAvailable && !monitoringApiAvailable && _influxAvailable === false;
+}
+
+export function resetSessionFlags(): void {
+  dashboardStatsAvailable = true;
+  monitoringApiAvailable = true;
+  _dashStatsCheckDone = false;
+  _statsDiscoveryPromise = null;
+  _logEndpointsAvailable = true;
+  _logEndpointsChecked = false;
+  _workingLogStrategy = null;
+  _instancesEndpointAvailable = true;
+  _influxDatasourceId = null;
+  _influxDbName = null;
+  _influxAvailable = null;
+  _cachedAmcDeploymentId = null;
+  _cachedAmcSpecId = null;
+  _cachedAmcDomain = null;
+  _cachedCh1DeploymentId = null;
+  _cachedCh1Domain = null;
+  console.log('[runtimeService] Session flags reset');
+}
+
+// ---------- InfluxDB Monitoring Helpers ----------
+
+/**
+ * Extract the region slug from the API base URL.
+ * e.g. "https://eu1.anypoint.mulesoft.com" → "eu1"
+ *      "https://anypoint.mulesoft.com" → "us" (default region has no prefix)
+ */
+function getRegionSlug(): string {
+  const baseUrl = api.defaults.baseURL ?? '';
+  const match = baseUrl.match(/https?:\/\/(\w+)\.anypoint\.mulesoft\.com/);
+  if (match && match[1] !== 'anypoint') return match[1];
+  return 'us';
+}
+
+/**
+ * Discover the InfluxDB datasource for Anypoint Monitoring.
+ * The Anypoint Monitoring visualizer uses a Grafana-style datasource proxy.
+ * Returns true if an InfluxDB datasource was found.
+ */
+async function discoverInfluxDatasource(): Promise<boolean> {
+  if (_influxAvailable !== null) return _influxAvailable;
+
+  try {
+    const { data } = await api.get('/monitoring/api/visualizer/api/datasources');
+    if (Array.isArray(data)) {
+      // Find an InfluxDB datasource — prefer ones with 'hybrid_metric' in the DB name
+      const influxDs = data.find((ds: any) =>
+        (ds.type === 'influxdb' || ds.typeName === 'InfluxDB') &&
+        (ds.database?.includes('hybrid_metric') || ds.jsonData?.database?.includes('hybrid_metric'))
+      ) ?? data.find((ds: any) =>
+        ds.type === 'influxdb' || ds.typeName === 'InfluxDB'
+      );
+
+      if (influxDs) {
+        _influxDatasourceId = influxDs.id;
+        _influxDbName = influxDs.database ?? influxDs.jsonData?.database ?? null;
+
+        // If database name not found in datasource config, try to construct it
+        if (!_influxDbName) {
+          const region = getRegionSlug();
+          _influxDbName = region === 'us' ? 'hybrid_metric' : `hybrid_metric_${region}`;
+        }
+
+        _influxAvailable = true;
+        console.log(`[Monitoring] InfluxDB datasource found: id=${_influxDatasourceId}, db=${_influxDbName}`);
+        return true;
+      }
+    }
+  } catch (err: any) {
+    console.log(`[Monitoring] Datasource discovery failed: ${err?.response?.status ?? err?.message}`);
+  }
+
+  // Fallback: try with a constructed database name and common datasource ID patterns
+  const region = getRegionSlug();
+  _influxDbName = region === 'us' ? 'hybrid_metric' : `hybrid_metric_${region}`;
+
+  // Try a few common datasource IDs (these are assigned by the platform)
+  for (const tryId of [7513, 1, 2, 3]) {
+    try {
+      const testQ = 'SHOW MEASUREMENTS LIMIT 1';
+      const { data } = await api.get(
+        `/monitoring/api/visualizer/api/datasources/proxy/${tryId}/query`,
+        { params: { db: _influxDbName, q: testQ, epoch: 'ms' } },
+      );
+      if (data?.results) {
+        _influxDatasourceId = tryId;
+        _influxAvailable = true;
+        console.log(`[Monitoring] InfluxDB found via fallback: id=${tryId}, db=${_influxDbName}`);
+        return true;
+      }
+    } catch (_) {
+      continue;
+    }
+  }
+
+  _influxAvailable = false;
+  console.log('[Monitoring] No InfluxDB datasource found');
+  return false;
+}
+
+/**
+ * Run an InfluxDB query via the Grafana proxy endpoint.
+ */
+async function queryInfluxDB(query: string): Promise<any> {
+  if (!_influxDatasourceId || !_influxDbName) return null;
+
+  const { data } = await api.get(
+    `/monitoring/api/visualizer/api/datasources/proxy/${_influxDatasourceId}/query`,
+    {
+      params: {
+        db: _influxDbName,
+        q: query,
+        epoch: 'ms',
+      },
+    },
+  );
+
+  return data;
+}
+
+/**
+ * Parse an InfluxDB query response into a monitoring metrics format.
+ * InfluxDB returns: { results: [{ series: [{ columns, values }] }] }
+ */
+function parseInfluxDBResults(data: any): {
+  cpuPercent: number | null;
+  memoryPercent: number | null;
+  timeSeries: Array<{ timestamp: number; cpu: number | null; memory: number | null }>;
+} | null {
+  const results = data?.results;
+  if (!Array.isArray(results)) return null;
+
+  let cpuPercent: number | null = null;
+  let memoryPercent: number | null = null;
+  const timeSeriesMap = new Map<number, { cpu: number | null; memory: number | null }>();
+
+  for (const result of results) {
+    const seriesList = result?.series;
+    if (!Array.isArray(seriesList)) continue;
+
+    for (const s of seriesList) {
+      const columns: string[] = s.columns ?? [];
+      const values: any[][] = s.values ?? [];
+      const name = (s.name ?? '').toLowerCase();
+
+      // Determine what metric this series represents
+      const isCpu = name.includes('cpu') || columns.some((c: string) => c.toLowerCase().includes('cpu'));
+      const isMem = name.includes('memory') || name.includes('mem') || columns.some((c: string) => c.toLowerCase().includes('mem'));
+
+      const timeIdx = columns.indexOf('time');
+
+      for (const row of values) {
+        if (!Array.isArray(row)) continue;
+        const ts = timeIdx >= 0 ? row[timeIdx] : row[0];
+        // Get the first non-time, non-null value
+        for (let ci = 0; ci < columns.length; ci++) {
+          if (columns[ci] === 'time') continue;
+          const val = row[ci];
+          if (val == null) continue;
+
+          if (isCpu) {
+            cpuPercent = val;
+            const entry = timeSeriesMap.get(ts) ?? { cpu: null, memory: null };
+            entry.cpu = val;
+            timeSeriesMap.set(ts, entry);
+          } else if (isMem) {
+            memoryPercent = val;
+            const entry = timeSeriesMap.get(ts) ?? { cpu: null, memory: null };
+            entry.memory = val;
+            timeSeriesMap.set(ts, entry);
+          }
+          break; // only first data column per row
+        }
+      }
+    }
+  }
+
+  if (cpuPercent == null && memoryPercent == null && timeSeriesMap.size === 0) return null;
+
+  const timeSeries = Array.from(timeSeriesMap.entries())
+    .map(([timestamp, metrics]) => ({ timestamp, ...metrics }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  return { cpuPercent, memoryPercent, timeSeries };
+}
+
+/**
+ * Fetch monitoring metrics from InfluxDB for a specific application.
+ * Tries several InfluxDB query patterns because the measurement and field
+ * names vary between CloudHub versions and regions.
+ */
+async function getInfluxDBMonitoringData(
+  domain: string,
+  periodMinutes: number,
+): Promise<any | null> {
+  if (!(await discoverInfluxDatasource())) return null;
+
+  const timeRange = `time > now() - ${periodMinutes}m`;
+  const groupBy = periodMinutes <= 60 ? '1m' : '5m';
+
+  // Build multiple query patterns — different CH versions use different schemas
+  const queryPatterns = [
+    // Pattern 1: worker_metric measurement (common on CH1)
+    {
+      cpu: `SELECT mean("cpu") FROM "worker_metric" WHERE ${timeRange} AND "app" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+      mem: `SELECT mean("memory_usage") FROM "worker_metric" WHERE ${timeRange} AND "app" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+    },
+    // Pattern 2: worker_statistic measurement
+    {
+      cpu: `SELECT mean("cpuPercentageUsed") FROM "worker_statistic" WHERE ${timeRange} AND "domain" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+      mem: `SELECT mean("memoryPercentageUsed") FROM "worker_statistic" WHERE ${timeRange} AND "domain" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+    },
+    // Pattern 3: Using app_id tag
+    {
+      cpu: `SELECT mean("cpu") FROM "worker_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+      mem: `SELECT mean("memory_usage") FROM "worker_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+    },
+    // Pattern 4: Combined query with applicationName
+    {
+      cpu: `SELECT mean("cpu") FROM "worker_metric" WHERE ${timeRange} AND "applicationName" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+      mem: `SELECT mean("memory_usage") FROM "worker_metric" WHERE ${timeRange} AND "applicationName" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+    },
+    // Pattern 5: app_inbound_metric for API traffic (at least we can show request count)
+    {
+      cpu: `SELECT mean("app_inbound_metric_request_count") FROM "app_inbound_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+      mem: `SELECT mean("app_inbound_metric_response_time") FROM "app_inbound_metric" WHERE ${timeRange} AND "app_id" = '${domain}' GROUP BY time(${groupBy}) fill(null)`,
+    },
+  ];
+
+  for (const pattern of queryPatterns) {
+    try {
+      // Combine CPU and memory queries into one request (InfluxDB supports multi-statement)
+      const combinedQ = `${pattern.cpu};${pattern.mem}`;
+      const result = await queryInfluxDB(combinedQ);
+      const parsed = parseInfluxDBResults(result);
+      if (parsed && (parsed.cpuPercent != null || parsed.memoryPercent != null)) {
+        console.log(`[Monitoring] InfluxDB query succeeded for ${domain}: CPU=${parsed.cpuPercent?.toFixed(1)}%, Mem=${parsed.memoryPercent?.toFixed(1)}%`);
+        // Return in a format that extractMetrics can handle
+        return {
+          _source: 'influxdb',
+          workerStatistics: [{
+            statistics: {
+              ...(parsed.cpuPercent != null ? { cpu: { [Date.now()]: parsed.cpuPercent } } : {}),
+              ...(parsed.memoryPercent != null ? { memoryPercentageUsed: { [Date.now()]: parsed.memoryPercent } } : {}),
+            },
+          }],
+          _timeSeries: parsed.timeSeries,
+        };
+      }
+    } catch (err: any) {
+      // Try next pattern
+      continue;
+    }
+  }
+
+  console.log(`[Monitoring] InfluxDB queries returned no data for ${domain}`);
+  return null;
+}
+
+/**
  * Retrieve application dashboard statistics (CPU, memory, threads, etc.).
- * Tries CloudHub dashboardStats, worker statistics, Anypoint Monitoring archive,
- * and the Observability Metrics API (/observability/api/v1/metrics:search).
+ *
+ * Strategy:
+ * 1. First, try to get metrics from the app detail endpoint (workerStatuses).
+ *    This is the MOST RELIABLE source for EU1 CloudHub 1.0 and doesn't require
+ *    any extra API calls since the app detail is already fetched separately.
+ *
+ * 2. If dashboardStats endpoints are known to be unavailable (they return 404
+ *    on EU1), skip them entirely to avoid 404 spam in the console.
+ *
+ * 3. Only try monitoring/observability endpoints if they haven't returned 404.
+ *
+ * Returns the first non-empty response, or null if all fail.
  */
 export async function getDashboardStats(
   domain: string,
   periodMinutes: number = 60,
   context?: { organizationId?: string; environmentId?: string },
 ): Promise<any> {
+  // ── FAST PATH: discovery already done, nothing works → skip immediately ──
+  // This prevents ALL redundant API calls on subsequent React Query refetches.
+  if (_dashStatsCheckDone && !dashboardStatsAvailable && !monitoringApiAvailable && _influxAvailable === false) {
+    return null;
+  }
+
   const now = Date.now();
   const startMs = now - periodMinutes * 60 * 1000;
 
-  const attempts: Array<() => Promise<any>> = [
-    // CloudHub v2 dashboardStats (most common)
-    () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/dashboardStats`, {
-      params: { startDate: startMs, endDate: now },
-    }),
-    // CloudHub v1 dashboardStats
-    () => api.get(`${CLOUDHUB_V1}/applications/${domain}/dashboardStats`, {
-      params: { startDate: startMs, endDate: now },
-    }),
-    // CloudHub v2 statistics
-    () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/statistics`, {
-      params: { startDate: startMs, endDate: now },
-    }),
-    // CloudHub v1 statistics
-    () => api.get(`${CLOUDHUB_V1}/applications/${domain}/statistics`, {
-      params: { startDate: startMs, endDate: now },
-    }),
-  ];
+  const orgId = context?.organizationId ?? getOrgId();
+  const envId = context?.environmentId ?? getEnvId();
 
-  // Anypoint Monitoring / Observability APIs (require orgId and envId)
-  if (context?.organizationId && context?.environmentId) {
-    const orgId = context.organizationId;
-    const envId = context.environmentId;
+  // --- Primary: Try the app detail endpoint FIRST ---
+  // The GET /applications/{domain} response often includes workerStatuses
+  // with live CPU/memory/thread data. This is the most reliable on EU1.
+  try {
+    const { data: appDetail } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}`);
+    if (appDetail) {
+      const ws = appDetail.workerStatuses ?? appDetail.workers?.statuses;
+      if (ws && (Array.isArray(ws) ? ws.length > 0 : Object.keys(ws).length > 0)) {
+        return appDetail; // Return the full app detail — extractMetrics handles it
+      }
+
+      // Log diagnostics once per session
+      if (!_dashStatsCheckDone) {
+        const wsType = ws == null ? 'null' : Array.isArray(ws) ? `array(${ws.length})` : `object(${Object.keys(ws).length})`;
+        const hasKeys = appDetail ? Object.keys(appDetail).filter(k =>
+          k.includes('worker') || k.includes('monitor') || k.includes('stat')
+        ).join(',') : '';
+        console.log(`[getDashboardStats] App detail for ${domain}: workerStatuses=${wsType}, relevant keys=[${hasKeys}]`);
+      }
+    }
+  } catch (_) {
+    // App detail fetch failed, try other sources
+  }
+
+  // ── CONSOLIDATED DISCOVERY GATE ──
+  // When multiple getDashboardStats calls fire in parallel (via useQueries),
+  // the FIRST call tests ALL stat + monitoring endpoints in one pass.
+  // All other calls await the same promise → zero redundant 404s.
+  if (!_dashStatsCheckDone) {
+    if (!_statsDiscoveryPromise) {
+      _statsDiscoveryPromise = (async () => {
+        const testDomain = domain;
+        const fromIso = new Date(startMs).toISOString();
+        const toIso = new Date(now).toISOString();
+
+        // ── Test dashboardStats endpoints ──
+        let statsFailed = true;
+        const statsTests = [
+          () => api.get(`${CLOUDHUB_BASE}/applications/${testDomain}/dashboardStats`, {
+            params: { startDate: startMs, endDate: now },
+          }),
+          () => api.get(`${CLOUDHUB_V1}/applications/${testDomain}/dashboardStats`, {
+            params: { startDate: startMs, endDate: now },
+          }),
+        ];
+
+        for (const attempt of statsTests) {
+          try {
+            const { data } = await attempt();
+            if (data) { statsFailed = false; break; }
+          } catch (err: any) {
+            if (err?.response?.status !== 404) statsFailed = false;
+          }
+        }
+        if (statsFailed) {
+          dashboardStatsAvailable = false;
+          console.log('[getDashboardStats] dashboardStats endpoints return 404 — disabling for session');
+        }
+
+        // ── Test monitoring/observability endpoints ──
+        if (orgId && envId) {
+          let monFailed = true;
+          const monTests: Array<() => Promise<any>> = [
+            () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
+              targets: [{ target: 'worker-cpu-usage', type: 'timeserie' }],
+              range: { from: fromIso, to: toIso },
+              app: testDomain,
+            }),
+            () => api.post('/observability/api/v1/metrics:search', {
+              query: `SELECT avg(cpuUsage) FROM "mulesoft.cloudhub.worker" WHERE timestamp BETWEEN '${fromIso}' AND '${toIso}' AND applicationName = '${testDomain}' AND organizationId = '${orgId}' AND environmentId = '${envId}'`,
+            }),
+          ];
+
+          for (const attempt of monTests) {
+            try {
+              const { data } = await attempt();
+              if (data) { monFailed = false; break; }
+            } catch (err: any) {
+              const s = err?.response?.status;
+              if (s !== 404 && s !== 400) monFailed = false;
+            }
+          }
+          if (monFailed) {
+            monitoringApiAvailable = false;
+            console.log('[getDashboardStats] Monitoring APIs unavailable — disabling for session');
+          }
+        } else {
+          // No org/env → can't use monitoring APIs
+          monitoringApiAvailable = false;
+        }
+
+        // ── Test InfluxDB proxy (the REAL monitoring endpoint) ──
+        // This is the Grafana-style datasource proxy that the Anypoint web UI uses.
+        if (_influxAvailable === null) {
+          await discoverInfluxDatasource();
+        }
+
+        _dashStatsCheckDone = true;
+      })();
+    }
+    await _statsDiscoveryPromise;
+
+    // After discovery, if nothing works, return null immediately
+    if (!dashboardStatsAvailable && !monitoringApiAvailable && _influxAvailable !== true) {
+      return null;
+    }
+  }
+
+  // ── Use the endpoints we know work (discovery passed) ──
+  if (dashboardStatsAvailable) {
+    const statsAttempts: Array<() => Promise<any>> = [
+      () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/dashboardStats`, {
+        params: { startDate: startMs, endDate: now },
+      }),
+      () => api.get(`${CLOUDHUB_V1}/applications/${domain}/dashboardStats`, {
+        params: { startDate: startMs, endDate: now },
+      }),
+      () => api.get(`${CLOUDHUB_BASE}/applications/${domain}/statistics`, {
+        params: { startDate: startMs, endDate: now },
+      }),
+    ];
+
+    for (const attempt of statsAttempts) {
+      try {
+        const { data } = await attempt();
+        if (data) return data;
+      } catch (_) {
+        // continue
+      }
+    }
+  }
+
+  if (monitoringApiAvailable && orgId && envId) {
     const fromIso = new Date(startMs).toISOString();
     const toIso = new Date(now).toISOString();
 
-    attempts.push(
-      // Anypoint Monitoring archive query
+    const monAttempts: Array<() => Promise<any>> = [
       () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
         targets: [
           { target: 'worker-cpu-usage', type: 'timeserie' },
@@ -799,51 +1611,91 @@ export async function getDashboardStats(
         range: { from: fromIso, to: toIso },
         app: domain,
       }),
-      // Observability Metrics API — AMQL query for CPU
       () => api.post('/observability/api/v1/metrics:search', {
-        query: `SELECT avg(cpuUsage), avg(memoryUsage), avg(threadCount) FROM mulesoft.cloudhub.worker WHERE timestamp BETWEEN '${fromIso}' AND '${toIso}' AND applicationName = '${domain}' AND organizationId = '${orgId}' AND environmentId = '${envId}'`,
+        query: `SELECT avg(cpuUsage), avg(memoryUsage), avg(threadCount) FROM "mulesoft.cloudhub.worker" WHERE timestamp BETWEEN '${fromIso}' AND '${toIso}' AND applicationName = '${domain}' AND organizationId = '${orgId}' AND environmentId = '${envId}'`,
       }),
-      // Alternative Observability query format
-      () => api.post('/observability/api/v1/metrics:search', {
-        query: `SELECT avg(cpuPercentageUsed), avg(memoryPercentageUsed), avg(threadCount) FROM mulesoft.app.request WHERE timestamp BETWEEN '${fromIso}' AND '${toIso}' AND applicationName = '${domain}'`,
-      }),
-      // Monitoring metrics endpoint
-      () => api.get(`/monitoring/api/v1/organizations/${orgId}/environments/${envId}/applications/${domain}/metrics`, {
-        params: { from: startMs, to: now },
-      }),
-    );
+    ];
 
-    // CloudHub 2.0 deployment metrics (AMC API)
-    const amcPath = amcDeploymentsPath();
-    if (amcPath) {
-      attempts.push(
-        // CH2 deployment statistics
-        async () => {
-          const { data: deps } = await api.get(amcPath!);
-          const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-          const match = items.find((d: any) => d.name === domain || d.id === domain);
-          if (!match) throw new Error('No CH2 deployment');
-          // The deployment itself may contain monitoring/metrics data
-          const detail = await api.get(`${amcPath}/${match.id}`);
-          return detail;
-        },
-      );
+    for (const attempt of monAttempts) {
+      try {
+        const { data } = await attempt();
+        if (data) return data;
+      } catch (_) {
+        // continue
+      }
     }
   }
 
-  for (const attempt of attempts) {
+  // --- InfluxDB proxy (the real Anypoint Monitoring endpoint) ---
+  if (_influxAvailable) {
     try {
-      const { data } = await attempt();
-      if (data) return data;
-    } catch (_) {
-      // try next
+      const influxData = await getInfluxDBMonitoringData(domain, periodMinutes);
+      if (influxData) return influxData;
+    } catch (err: any) {
+      console.log(`[getDashboardStats] InfluxDB query failed for ${domain}: ${err?.message}`);
     }
   }
+
+  // --- CloudHub 2.0 deployment detail (AMC API) — may contain replica status ---
+  const amcPath = amcDeploymentsPath();
+  if (amcPath) {
+    try {
+      const { data: deps } = await api.get(amcPath);
+      const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+      const match = items.find((d: any) => d.name === domain || d.id === domain);
+      if (match) {
+        const { data: detail } = await api.get(`${amcPath}/${match.id}`);
+        if (detail) return detail;
+      }
+    } catch (_) {
+      // CH2 not available
+    }
+  }
+
   return null;
 }
 
 /**
+ * Extract a time-series array from a CloudHub statistics map.
+ * Input:  { "1709564000000": 2.5, "1709564060000": 3.1 }
+ * Output: [{ timestamp: 1709564000000, value: 2.5 }, ...]
+ *
+ * If `statisticsByWorker` is nested by worker ID, unwrap the first worker.
+ */
+function extractTimeSeries(
+  statsObj: any,
+  metricName: string,
+): Array<{ timestamp: number; value: number }> {
+  if (!statsObj || typeof statsObj !== 'object') return [];
+
+  // Direct access: statsObj might be { cpu: {...}, memoryPercentageUsed: {...} }
+  let metricMap = statsObj[metricName];
+
+  // If not found, the object might be nested by worker ID
+  if (metricMap == null) {
+    const workerKeys = Object.keys(statsObj);
+    for (const wk of workerKeys) {
+      const nested = statsObj[wk];
+      if (nested && typeof nested === 'object' && nested[metricName] != null) {
+        metricMap = nested[metricName];
+        break;
+      }
+    }
+  }
+
+  if (metricMap == null || typeof metricMap !== 'object' || Array.isArray(metricMap)) return [];
+
+  return Object.entries(metricMap)
+    .map(([ts, val]) => ({ timestamp: Number(ts), value: typeof val === 'number' ? val : 0 }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+/**
  * Retrieve application metrics (CPU, memory, etc.).
+ * Returns an array of { timestamp, value } data points for the requested metric.
+ *
+ * If dashboardStats is unavailable (common on EU1), tries to extract
+ * time-series from the app detail's workerStatuses instead.
  */
 export async function getAppMetrics(
   domain: string,
@@ -857,24 +1709,59 @@ export async function getAppMetrics(
   const startMs = new Date(params.startDate).getTime();
   const endMs = new Date(params.endDate).getTime();
 
-  try {
-    const { data } = await api.get(
-      `${CLOUDHUB_BASE}/applications/${domain}/dashboardStats`,
-      {
-        params: {
-          startDate: startMs,
-          endDate: endMs,
-          interval: params.interval,
+  // Map friendly metric names to CloudHub field names
+  const metricFieldMap: Record<string, string[]> = {
+    cpu: ['cpuPercentageUsed', 'cpu'],
+    memory: ['memoryPercentageUsed', 'memoryTotalUsed'],
+  };
+  const fieldNames = metricFieldMap[params.metricName] ?? [params.metricName];
+
+  // Skip dashboardStats if known to be unavailable
+  if (dashboardStatsAvailable) {
+    try {
+      const { data } = await api.get(
+        `${CLOUDHUB_BASE}/applications/${domain}/dashboardStats`,
+        {
+          params: {
+            startDate: startMs,
+            endDate: endMs,
+            interval: params.interval,
+          },
         },
-      },
-    );
-    return data;
-  } catch (err: any) {
-    if (err?.response?.status === 404) {
-      return null;
+      );
+
+      if (!data) return null;
+
+      // Extract time-series from workerStatistics (the main metrics container)
+      const statsSource = data.workerStatistics ?? data;
+
+      for (const fieldName of fieldNames) {
+        const series = extractTimeSeries(statsSource, fieldName);
+        if (series.length > 0) return series;
+      }
+
+      // Return the raw data if we couldn't extract a time-series
+      return data;
+    } catch (err: any) {
+      if (err?.response?.status === 404) {
+        // dashboardStats not available — will be disabled by getDashboardStats
+        return null;
+      }
+      throw err;
     }
-    throw err;
   }
+
+  // Fallback: try to get metrics from app detail workerStatuses
+  try {
+    const { data } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}`);
+    if (data?.workerStatuses || data?.workers?.statuses) {
+      return data; // extractMetrics in the UI layer will handle this shape
+    }
+  } catch (_) {
+    // not available
+  }
+
+  return null;
 }
 
 // ---------- Properties ----------

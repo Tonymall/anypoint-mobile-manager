@@ -27,7 +27,25 @@ export interface AuditLogResponse {
 
 /**
  * Query audit logs for the given organization.
- * Endpoint: POST /audit/v2/organizations/{orgId}/query
+ *
+ * Correct endpoint (from Postman collection):
+ *   POST /audit/v2/organizations/{orgId}/query?include_internal=false
+ *
+ * Body format (matching Postman):
+ * {
+ *   "startDate": "2021-04-20T12:05:21.714Z",  // ISO string
+ *   "endDate": "2021-04-21T12:05:21.714Z",     // ISO string
+ *   "platforms": [],
+ *   "objectTypes": [],
+ *   "environmentIds": [],                        // NOTE: environmentIds, not environments
+ *   "actions": [],
+ *   "objectIds": [],
+ *   "userIds": [],
+ *   "ascending": false,
+ *   "organizationId": "...",
+ *   "offset": 0,
+ *   "limit": 25
+ * }
  */
 export async function queryAuditLogs(
   organizationId: string,
@@ -36,6 +54,7 @@ export async function queryAuditLogs(
   const now = new Date();
   const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
+  // Build body matching the Postman collection format exactly
   const body: Record<string, any> = {
     startDate: params?.startDate ?? oneDayAgo.toISOString(),
     endDate: params?.endDate ?? now.toISOString(),
@@ -44,26 +63,44 @@ export async function queryAuditLogs(
     actions: params?.actions ?? [],
     objectIds: params?.objectIds ?? [],
     userIds: params?.userIds ?? [],
+    environmentIds: [],  // Postman uses environmentIds (not environments)
     offset: params?.offset ?? 0,
-    limit: params?.limit ?? 100,
+    limit: params?.limit ?? 25,
     ascending: params?.ascending ?? false,
     organizationId,
   };
 
-  // Try both possible endpoint paths
-  const endpoints = [
+  // --- Primary: The correct endpoint from Postman collection ---
+  // The `?include_internal=false` query param is REQUIRED in the Postman collection
+  try {
+    const { data } = await api.post(
+      `/audit/v2/organizations/${organizationId}/query?include_internal=false`,
+      body,
+    );
+    const result = normalizeAuditResponse(data);
+    if (result.data.length >= 0) return result; // Return even if empty — endpoint is correct
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (status === 401) throw err; // token expired, don't retry
+    console.warn(`[AuditLogs] Primary endpoint failed: ${status} ${err?.response?.data?.message ?? err?.message ?? ''}`);
+  }
+
+  // --- Fallback endpoints ---
+  const fallbackEndpoints = [
+    // Without query param
     `/audit/v2/organizations/${organizationId}/query`,
-    `/audit/v2/organizations/${organizationId}`,
-    `/apiplatform/repository/v2/organizations/${organizationId}/audit-logging/query`,
+    // v1 endpoint
+    `/audit/v1/organizations/${organizationId}/query`,
   ];
 
-  for (const endpoint of endpoints) {
+  for (const endpoint of fallbackEndpoints) {
     try {
       const { data } = await api.post(endpoint, body);
-      return normalizeAuditResponse(data);
+      const result = normalizeAuditResponse(data);
+      if (result.data.length > 0) return result;
     } catch (err: any) {
       const status = err?.response?.status;
-      if (status === 401) throw err; // token expired, don't retry
+      if (status === 401) throw err;
       // continue to next endpoint
     }
   }

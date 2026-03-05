@@ -115,7 +115,8 @@ const InfoItem: React.FC<{ label: string; value: string }> = ({ label, value }) 
     <View style={infoStyles.row}>
       <Text
         variant="labelMedium"
-        style={{ color: theme.colors.onSurfaceVariant, width: 140 }}
+        style={{ color: theme.colors.onSurfaceVariant, width: 110, flexShrink: 0 }}
+        numberOfLines={1}
       >
         {label}
       </Text>
@@ -123,6 +124,7 @@ const InfoItem: React.FC<{ label: string; value: string }> = ({ label, value }) 
         variant="bodyMedium"
         style={{ color: theme.colors.onSurface, flex: 1 }}
         selectable
+        numberOfLines={2}
       >
         {value}
       </Text>
@@ -734,12 +736,15 @@ const createStyles = (theme: MD3Theme) =>
     },
     actionsRow: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       paddingHorizontal: 16,
-      paddingTop: 16,
+      paddingTop: 12,
       gap: 8,
     },
     actionBtn: {
-      flex: 1,
+      minWidth: 80,
+      flexGrow: 1,
+      flexBasis: '28%',
       borderRadius: 8,
     },
     sectionTitle: {
