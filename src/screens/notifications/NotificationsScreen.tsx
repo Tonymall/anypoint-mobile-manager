@@ -29,7 +29,10 @@ const ACTION_ICONS: Record<NotificationAction, string> = {
   start: 'play-circle-outline',
   stop: 'stop-circle-outline',
   restart: 'restart',
+  status_change: 'swap-vertical',
   deploy: 'rocket-launch-outline',
+  undeploy: 'rocket-launch-outline',
+  error: 'alert-circle-outline',
   alert: 'alert-circle-outline',
   info: 'information-outline',
 };
@@ -38,7 +41,10 @@ const ACTION_COLORS: Record<NotificationAction, string> = {
   start: anypointColors.success,
   stop: anypointColors.warning,
   restart: anypointColors.info,
+  status_change: anypointColors.info,
   deploy: anypointColors.mulePurple,
+  undeploy: anypointColors.warning,
+  error: anypointColors.error,
   alert: anypointColors.error,
   info: anypointColors.primary,
 };

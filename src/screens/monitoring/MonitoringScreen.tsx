@@ -350,38 +350,44 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
     if (am.errorCount != null && metrics.errorCount == null) metrics.errorCount = Number(am.errorCount);
   }
 
-  // ── Handle direct JVM endpoint response ──
+  // Handle JVM metrics endpoint response
   if (dashStats?._jvmMetrics) {
     const jvm = dashStats._jvmMetrics;
+    if (jvm.processCpuLoad != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(jvm.processCpuLoad) * 100;
+    if (jvm.systemCpuLoad != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(jvm.systemCpuLoad) * 100;
+    if (jvm.cpuUsage != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(jvm.cpuUsage);
     if (jvm.heapUsed != null && metrics.heapUsed == null) metrics.heapUsed = Number(jvm.heapUsed);
     if (jvm.heapMax != null && metrics.heapCommitted == null) metrics.heapCommitted = Number(jvm.heapMax);
+    if (jvm.heapCommitted != null && metrics.heapCommitted == null) metrics.heapCommitted = Number(jvm.heapCommitted);
     if (jvm.nonHeapUsed != null && metrics.nonHeapUsed == null) metrics.nonHeapUsed = Number(jvm.nonHeapUsed);
     if (jvm.threadCount != null && metrics.threadCount == null) metrics.threadCount = Number(jvm.threadCount);
-    if (jvm.threadPeak != null && metrics.threadCount == null) metrics.threadCount = Number(jvm.threadPeak);
     if (jvm.gcCollections != null && metrics.gcCollections == null) metrics.gcCollections = Number(jvm.gcCollections);
     if (jvm.gcTime != null && metrics.gcTime == null) metrics.gcTime = Number(jvm.gcTime);
     if (jvm.classesLoaded != null && metrics.classesLoaded == null) metrics.classesLoaded = Number(jvm.classesLoaded);
-    // Compute memory percent from heap usage
-    if (jvm.heapUsed != null && jvm.heapMax != null && jvm.heapMax > 0 && metrics.memoryPercent == null) {
+    // Derive memory percent from heap
+    if (metrics.memoryPercent == null && jvm.heapUsed != null && jvm.heapMax != null && jvm.heapMax > 0) {
       metrics.memoryPercent = Math.round((Number(jvm.heapUsed) / Number(jvm.heapMax)) * 100);
-      metrics.memoryUsedMB = Number(jvm.heapUsed);
-      metrics.memoryTotalMB = Number(jvm.heapMax);
+    }
+    if (metrics.memoryUsedMB == null && jvm.heapUsed != null) {
+      metrics.memoryUsedMB = Number(jvm.heapUsed) / (1024 * 1024);
+    }
+    if (metrics.memoryTotalMB == null && jvm.heapMax != null) {
+      metrics.memoryTotalMB = Number(jvm.heapMax) / (1024 * 1024);
     }
   }
 
-  // ── Handle monitoring metrics endpoint response ──
+  // Handle monitoring metrics series
   if (dashStats?._metricSeries && Array.isArray(dashStats._metricSeries)) {
     for (const series of dashStats._metricSeries) {
-      const name = (series.name ?? '').toLowerCase();
-      const data = series.data ?? [];
-      if (data.length === 0) continue;
-      const latest = data[data.length - 1];
-      const val = latest?.value ?? latest;
-      if (val == null) continue;
-
-      if (name.includes('cpu') && metrics.cpuPercent == null) metrics.cpuPercent = Number(val);
-      if (name.includes('memory.usage') && metrics.memoryPercent == null) metrics.memoryPercent = Number(val);
-      if (name.includes('memory.total') && metrics.memoryTotalMB == null) metrics.memoryTotalMB = Number(val);
+      const name = series?.name ?? series?.metric ?? '';
+      const points = series?.datapoints ?? series?.data ?? [];
+      if (points.length === 0) continue;
+      const lastPoint = points[points.length - 1];
+      const value = Array.isArray(lastPoint) ? lastPoint[0] : lastPoint?.value;
+      if (value == null) continue;
+      if (name.includes('cpu') && metrics.cpuPercent == null) metrics.cpuPercent = Number(value);
+      if (name.includes('memory.usage') && metrics.memoryPercent == null) metrics.memoryPercent = Number(value);
+      if (name.includes('memory.total') && metrics.memoryTotalMB == null) metrics.memoryTotalMB = Number(value) / (1024 * 1024);
     }
   }
 
@@ -607,6 +613,16 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
             {metrics.outboundAvgResponseTime != null ? (
               <StatRow label="Outbound Avg RT" value={`${Math.round(metrics.outboundAvgResponseTime)} ms`} theme={theme} />
             ) : null}
+          </View>
+        ) : null}
+
+        {/* Info message when app-level metrics are not available */}
+        {metrics.inboundRequestCount == null && metrics.messageCount == null && metrics.inboundAvgResponseTime == null && status === 'STARTED' && !detailLoading ? (
+          <View style={[styles.monitoringSection, { flexDirection: 'row', alignItems: 'flex-start', gap: 6 }]}>
+            <Icon source="information-outline" size={13} color={theme.colors.onSurfaceVariant} />
+            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, flex: 1, lineHeight: 15 }}>
+              App-level metrics (inbound, outbound, messages) require Anypoint Monitoring with an active InfluxDB datasource or Observability API access.
+            </Text>
           </View>
         ) : null}
       </Card.Content>

@@ -35,13 +35,6 @@ const OrgSelectScreen: React.FC = () => {
 
   const { data: organizations, isLoading, error } = useOrganizations();
 
-  // Auto-select if only one org
-  useEffect(() => {
-    if (organizations && organizations.length === 1) {
-      handleSelect(organizations[0]);
-    }
-  }, [organizations]);
-
   const handleSelect = useCallback(
     (org: Organization) => {
       hapticLight();
@@ -55,6 +48,13 @@ const OrgSelectScreen: React.FC = () => {
     },
     [switchOrganization, router, fromSettings, queryClient],
   );
+
+  // Auto-select if only one org
+  useEffect(() => {
+    if (organizations && organizations.length === 1) {
+      handleSelect(organizations[0]);
+    }
+  }, [organizations, handleSelect]);
 
   const handleBack = useCallback(() => {
     if (fromSettings === '1') {

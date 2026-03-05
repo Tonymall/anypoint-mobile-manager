@@ -130,7 +130,19 @@ const SSOLoginScreen: React.FC = () => {
       if (!url) return false;
       try {
         const parsed = new URL(url);
+        const host = parsed.hostname;
         const path = parsed.pathname;
+
+        // Don't trigger extraction on MFA / verification pages
+        if (
+          host.includes('verify.salesforce.com') ||
+          host.includes('login.salesforce.com') ||
+          path.includes('/verify') ||
+          path.includes('/mfa')
+        ) {
+          return false;
+        }
+
         // Still on the login page — not post-login
         if (path === '/accounts/login' || path === '/accounts/login/') {
           return false;
@@ -165,17 +177,35 @@ const SSOLoginScreen: React.FC = () => {
 
         if (typeof tokenOrUserData === 'string') {
           token = tokenOrUserData;
-        } else if (typeof tokenOrUserData === 'object') {
+        } else if (typeof tokenOrUserData === 'object' && tokenOrUserData !== null) {
+          // Try multiple well-known property paths for the access token
           token =
             tokenOrUserData.access_token ??
             tokenOrUserData.token ??
             tokenOrUserData.properties?.cs_token ??
+            tokenOrUserData.tokenValue ??
+            tokenOrUserData.session?.access_token ??
             undefined;
         }
 
-        if (token && typeof token === 'string') {
+        console.log('[SSO] Token type:', typeof token, 'length:', token?.length);
+
+        if (token != null && typeof token !== 'string') {
+          // Safety: coerce non-string truthy values to string
+          token = String(token);
+        }
+
+        if (token && typeof token === 'string' && token.length > 0) {
           setAuthHeader(token);
-          await storeTokens(token);
+          try {
+            await storeTokens(token);
+          } catch (storeError: any) {
+            // SecureStore write failed — log but continue (session cookies may suffice)
+            console.warn('[SSO] storeTokens failed, continuing without persist:', storeError?.message);
+          }
+        } else {
+          // Token is missing/empty — session cookies from the WebView may still allow API calls
+          console.warn('[SSO] No token extracted — relying on session cookies for /accounts/api/me');
         }
 
         // Fetch user profile using the session/token
@@ -216,13 +246,24 @@ const SSOLoginScreen: React.FC = () => {
       const { url } = navState;
       if (!url || hasInjectedRef.current) return;
 
+      // Let the user complete MFA / verification — do NOT inject extraction JS
+      if (
+        url.includes('verify.salesforce.com') ||
+        url.includes('login.salesforce.com') ||
+        url.includes('/verify') ||
+        url.includes('/mfa')
+      ) {
+        console.log('[SSO] MFA / verification page detected, waiting for user:', url);
+        return;
+      }
+
       if (isPostLoginUrl(url)) {
         console.log('[SSO] Post-login URL detected:', url);
         hasInjectedRef.current = true;
-        // Give the page a moment to settle, then inject extraction script
+        // Give the page a moment to settle (extra time for MFA redirect), then inject extraction script
         setTimeout(() => {
           webViewRef.current?.injectJavaScript(INJECTED_JS);
-        }, 1500);
+        }, 2500);
       }
     },
     [isPostLoginUrl],

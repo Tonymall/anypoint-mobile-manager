@@ -1,8 +1,7 @@
 // ============================================================
 // App Monitoring Detail Screen
-// Full dashboard view for a single application with CPU,
-// memory, response time metrics, date range selection,
-// and performance indicators.
+// Tab-based dashboard for a single application with
+// Overview, Inbound, Outbound, JVM, Infrastructure tabs.
 // ============================================================
 
 import React, { useState, useMemo, useCallback } from 'react';
@@ -20,6 +19,26 @@ import ErrorState from '../../components/common/ErrorState';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_MAX_WIDTH = 768;
+
+// ---------------------------------------------------------------------------
+// Tab definitions
+// ---------------------------------------------------------------------------
+
+type TabId = 'overview' | 'inbound' | 'outbound' | 'jvm' | 'infrastructure';
+
+interface TabDef {
+  id: TabId;
+  label: string;
+  icon: string;
+}
+
+const TABS: TabDef[] = [
+  { id: 'overview', label: 'Overview', icon: 'view-dashboard-outline' },
+  { id: 'inbound', label: 'Inbound', icon: 'arrow-down-bold' },
+  { id: 'outbound', label: 'Outbound', icon: 'arrow-up-bold' },
+  { id: 'jvm', label: 'JVM', icon: 'coffee' },
+  { id: 'infrastructure', label: 'Infra', icon: 'server' },
+];
 
 // ---------------------------------------------------------------------------
 // Date range presets
@@ -40,10 +59,10 @@ const DATE_RANGES: DateRange[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Mini Bar Chart (simple native visualization)
+// Simple Line Chart (pure React Native visualization)
 // ---------------------------------------------------------------------------
 
-interface MiniChartProps {
+interface SimpleLineChartProps {
   data: number[];
   maxValue?: number;
   color: string;
@@ -51,47 +70,133 @@ interface MiniChartProps {
   theme: MD3Theme;
   label: string;
   unit?: string;
+  fillOpacity?: number;
 }
 
-const MiniChart: React.FC<MiniChartProps> = ({ data, maxValue, color, height = 60, theme, label, unit = '%' }) => {
+const SimpleLineChart: React.FC<SimpleLineChartProps> = ({
+  data, maxValue, color, height = 80, theme, label, unit = '%', fillOpacity = 0.1
+}) => {
+  const chartWidth = SCREEN_WIDTH - 80;
   const max = maxValue ?? Math.max(...data, 1);
-  const barWidth = Math.max(2, (SCREEN_WIDTH - 100) / Math.max(data.length, 1));
   const latestValue = data.length > 0 ? data[data.length - 1] : 0;
+  const minValue = data.length > 0 ? Math.min(...data) : 0;
+  const avgValue = data.length > 0 ? data.reduce((a, b) => a + b, 0) / data.length : 0;
+
+  const points = data.map((value, idx) => ({
+    x: (idx / Math.max(data.length - 1, 1)) * chartWidth,
+    y: height - Math.max(1, (value / max) * height),
+  }));
 
   return (
     <View style={{ marginBottom: 16 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, fontWeight: '600' }}>
           {label}
         </Text>
-        <Text variant="titleMedium" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-          {Math.round(latestValue)}{unit}
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+          <Text variant="titleMedium" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
+            {unit === ' MB' ? Math.round(latestValue).toLocaleString() : Math.round(latestValue)}
+          </Text>
+          <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>{unit}</Text>
+        </View>
       </View>
+      {data.length > 1 && (
+        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 6 }}>
+          <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant }}>
+            Min: {Math.round(minValue)}{unit}
+          </Text>
+          <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant }}>
+            Avg: {Math.round(avgValue)}{unit}
+          </Text>
+          <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant }}>
+            Max: {Math.round(Math.max(...data))}{unit}
+          </Text>
+        </View>
+      )}
       <View
         style={{
-          flexDirection: 'row',
-          alignItems: 'flex-end',
           height,
-          backgroundColor: theme.colors.surfaceVariant,
-          borderRadius: 6,
+          backgroundColor: theme.colors.surfaceVariant + '40',
+          borderRadius: 8,
           overflow: 'hidden',
-          paddingHorizontal: 2,
+          position: 'relative',
         }}
       >
-        {data.map((value, idx) => (
+        {[0.25, 0.5, 0.75].map((pct) => (
           <View
-            key={idx}
+            key={pct}
             style={{
-              width: barWidth - 1,
-              height: Math.max(1, (value / max) * height),
-              backgroundColor: color,
-              marginHorizontal: 0.5,
-              borderTopLeftRadius: 2,
-              borderTopRightRadius: 2,
-              opacity: idx === data.length - 1 ? 1 : 0.6 + (idx / data.length) * 0.4,
+              position: 'absolute',
+              top: height * pct,
+              left: 0,
+              right: 0,
+              height: StyleSheet.hairlineWidth,
+              backgroundColor: theme.colors.outlineVariant,
+              opacity: 0.5,
             }}
           />
+        ))}
+        <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}>
+          {points.map((point, idx) => {
+            if (idx >= points.length - 1) return null;
+            const nextPoint = points[idx + 1];
+            const segWidth = nextPoint.x - point.x;
+            const maxY = Math.max(height - point.y, height - nextPoint.y);
+            return (
+              <View
+                key={`fill-${idx}`}
+                style={{
+                  position: 'absolute',
+                  left: point.x,
+                  bottom: 0,
+                  width: segWidth + 1,
+                  height: maxY,
+                  backgroundColor: color,
+                  opacity: fillOpacity,
+                }}
+              />
+            );
+          })}
+        </View>
+        {points.map((point, idx) => (
+          <React.Fragment key={idx}>
+            {idx < points.length - 1 && (() => {
+              const nextPoint = points[idx + 1];
+              const dx = nextPoint.x - point.x;
+              const dy = nextPoint.y - point.y;
+              const length = Math.sqrt(dx * dx + dy * dy);
+              const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+              return (
+                <View
+                  style={{
+                    position: 'absolute',
+                    left: point.x,
+                    top: point.y,
+                    width: length,
+                    height: 2,
+                    backgroundColor: color,
+                    transformOrigin: 'left center',
+                    transform: [{ rotate: `${angle}deg` }],
+                  }}
+                />
+              );
+            })()}
+            {(idx === points.length - 1 || data.length <= 10) && (
+              <View
+                style={{
+                  position: 'absolute',
+                  left: point.x - 3,
+                  top: point.y - 3,
+                  width: 6,
+                  height: 6,
+                  borderRadius: 3,
+                  backgroundColor: color,
+                  borderWidth: 1.5,
+                  borderColor: theme.colors.surface,
+                }}
+              />
+            )}
+          </React.Fragment>
         ))}
       </View>
     </View>
@@ -123,7 +228,6 @@ const MetricCard: React.FC<MetricCardProps> = ({ title, value, subtitle, icon, c
       overflow: 'hidden',
     }}
   >
-    {/* Accent glow at top */}
     <View style={{ height: 2.5, backgroundColor: color, opacity: 0.5 }} />
     <View style={{ padding: 14 }}>
       <View
@@ -160,23 +264,12 @@ const MetricCard: React.FC<MetricCardProps> = ({ title, value, subtitle, icon, c
 // Helpers: extract values from CloudHub time-series maps
 // ---------------------------------------------------------------------------
 
-/**
- * CloudHub workerStatistics fields like `cpuPercentageUsed`, `memoryPercentageUsed`,
- * `cpu` can be:
- *   - A single number (e.g. threadCount: 42)
- *   - A time-series map: { "1709564000000": 2.5, "1709564060000": 3.1 }
- *   - undefined / null
- *
- * This helper returns the latest numeric value, or the fallback.
- */
 function extractNumericValue(val: any, fallback: number = 0): number {
   if (val == null) return fallback;
   if (typeof val === 'number') return val;
   if (typeof val === 'object' && !Array.isArray(val)) {
-    // Time-series map — get the value at the latest timestamp
     const keys = Object.keys(val);
     if (keys.length === 0) return fallback;
-    // Keys are typically numeric timestamps as strings
     const sorted = keys.sort((a, b) => Number(b) - Number(a));
     const latest = val[sorted[0]];
     return typeof latest === 'number' ? latest : fallback;
@@ -185,19 +278,11 @@ function extractNumericValue(val: any, fallback: number = 0): number {
   return Number.isFinite(num) ? num : fallback;
 }
 
-/**
- * Extract flat statistics from workerStatuses[0].statisticsByWorker.
- * `statisticsByWorker` may contain metrics directly, OR be nested one level
- * deeper keyed by worker ID:
- *   { "workerId123": { cpu: 2.5, memoryPercentageUsed: 50 } }
- */
 function flattenWorkerStats(raw: any): Record<string, any> {
   if (!raw || typeof raw !== 'object') return {};
-  // If the object has known metric keys at the top level, it's direct
   const metricKeys = ['cpu', 'cpuPercentageUsed', 'memoryTotalUsed', 'memoryPercentageUsed', 'memoryTotalMax', 'threadCount'];
   const hasDirectMetric = metricKeys.some((k) => k in raw);
   if (hasDirectMetric) return raw;
-  // Otherwise, try to unwrap the first worker ID key
   const values = Object.values(raw);
   if (values.length > 0 && values[0] && typeof values[0] === 'object') {
     return values[0] as Record<string, any>;
@@ -218,7 +303,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
   const isWide = windowWidth > CONTENT_MAX_WIDTH;
   const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
 
-  const [selectedRange, setSelectedRange] = useState(3); // index 3 = 24h
+  const [selectedRange, setSelectedRange] = useState(0); // index 0 = 1h (default)
+  const [activeTab, setActiveTab] = useState<TabId>('overview');
 
   const rangeHours = DATE_RANGES[selectedRange].hours;
   const now = useMemo(() => new Date(), []);
@@ -239,7 +325,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
 
   const interval = rangeHours <= 4 ? '1m' : rangeHours <= 24 ? '5m' : rangeHours <= 72 ? '15m' : '1h';
 
-  // Fetch CPU metrics
   const {
     data: cpuMetrics,
     isLoading: cpuLoading,
@@ -247,7 +332,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
     isRefetching: cpuRefetching,
   } = useAppMetrics(domain as string, { metricName: 'cpu', startDate, endDate, interval });
 
-  // Fetch Memory metrics
   const {
     data: memoryMetrics,
     isLoading: memLoading,
@@ -255,7 +339,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
     isRefetching: memRefetching,
   } = useAppMetrics(domain as string, { metricName: 'memory', startDate, endDate, interval });
 
-  // Fetch full dashboard stats (handles InfluxDB proxy, monitoring APIs, etc.)
   const {
     data: dashStats,
     isLoading: dashStatsLoading,
@@ -274,15 +357,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
     if (!cpuMetrics) return [];
     if (Array.isArray(cpuMetrics)) {
       if (cpuMetrics.length === 0) return [];
-      // Array of { timestamp, value } from extractTimeSeries
-      if (cpuMetrics[0]?.value !== undefined) {
-        return cpuMetrics.map((p: any) => p.value ?? 0);
-      }
-      // Array of { data: [...] } from Monitoring API
-      if (cpuMetrics[0]?.data) {
-        return cpuMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
-      }
-      // Direct array of numbers
+      if (cpuMetrics[0]?.value !== undefined) return cpuMetrics.map((p: any) => p.value ?? 0);
+      if (cpuMetrics[0]?.data) return cpuMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
       if (typeof cpuMetrics[0] === 'number') return cpuMetrics;
     }
     return [];
@@ -292,12 +368,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
     if (!memoryMetrics) return [];
     if (Array.isArray(memoryMetrics)) {
       if (memoryMetrics.length === 0) return [];
-      if (memoryMetrics[0]?.value !== undefined) {
-        return memoryMetrics.map((p: any) => p.value ?? 0);
-      }
-      if (memoryMetrics[0]?.data) {
-        return memoryMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
-      }
+      if (memoryMetrics[0]?.value !== undefined) return memoryMetrics.map((p: any) => p.value ?? 0);
+      if (memoryMetrics[0]?.data) return memoryMetrics[0].data.map((p: any) => p.value ?? p.y ?? 0);
       if (typeof memoryMetrics[0] === 'number') return memoryMetrics;
     }
     return [];
@@ -308,7 +380,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
   const sColor = getStatusColor(status);
   const workerInfo = useMemo(() => getWorkerInfo(app), [app]);
 
-  // CloudHub embeds live metrics in workerStatuses[].statisticsByWorker
   const workerStats = useMemo(() => {
     const appObj = app as any;
     const statuses = appObj?.workerStatuses ?? appObj?.workers?.statuses ?? [];
@@ -320,7 +391,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
     return appObj?.monitoring ?? {};
   }, [app]);
 
-  // Use extractNumericValue to handle time-series maps, plain numbers, or undefined
   const cpuPercent = extractNumericValue(workerStats?.cpuPercentageUsed)
     || extractNumericValue(workerStats?.cpu)
     || extractNumericValue(workerStats?.cpuUsage)
@@ -328,7 +398,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
 
   const memTotalRaw = extractNumericValue(workerStats?.memoryTotalMax);
   const memUsedRaw = extractNumericValue(workerStats?.memoryTotalUsed) || extractNumericValue(workerStats?.memoryUsage);
-  // Normalise to MB when values look like bytes (> 10 000)
   const memTotal = memTotalRaw > 10_000 ? Math.round(memTotalRaw / (1024 * 1024)) : memTotalRaw;
   const memUsage = memUsedRaw > 10_000 ? Math.round(memUsedRaw / (1024 * 1024)) : memUsedRaw;
   const memPercent = extractNumericValue(workerStats?.memoryPercentageUsed)
@@ -339,36 +408,21 @@ const AppMonitoringDetailScreen: React.FC = () => {
   const workerStatuses = (app as any)?.workerStatuses ?? [];
   const numWorkers = workerStatuses.length;
 
-  // ── Extract InfluxDB data when available ──
+  // ── Extract InfluxDB data ──
   const influxData = useMemo(() => {
     if (!dashStats) return null;
-    // dashStats._source === 'influxdb' means we have InfluxDB monitoring data
     if (dashStats._source === 'influxdb') {
-      return {
-        timeSeries: dashStats._timeSeries ?? [],
-        extraMetrics: dashStats._extraMetrics ?? {},
-      };
+      return { timeSeries: dashStats._timeSeries ?? [], extraMetrics: dashStats._extraMetrics ?? {} };
     }
-    // Even when not from InfluxDB, dashStats may carry workerStatistics
     return null;
   }, [dashStats]);
 
-  // ── Extract Observability API app-level metrics ──
-  const observabilityMetrics = useMemo(() => {
-    if (!dashStats?._appMetrics) return null;
-    return dashStats._appMetrics;
-  }, [dashStats]);
-
-  // ── Extract direct JVM endpoint data ──
-  const jvmMetrics = useMemo(() => {
-    if (!dashStats?._jvmMetrics) return null;
-    return dashStats._jvmMetrics;
-  }, [dashStats]);
+  const observabilityMetrics = useMemo(() => dashStats?._appMetrics ?? null, [dashStats]);
+  const jvmMetrics = useMemo(() => dashStats?._jvmMetrics ?? null, [dashStats]);
 
   const messageCount = influxData?.extraMetrics?.messageCount ?? observabilityMetrics?.messageCount ?? null;
   const influxThreadCount = influxData?.extraMetrics?.threadCount ?? jvmMetrics?.threadCount ?? null;
   const influxHeapUsed = influxData?.extraMetrics?.heapUsed ?? jvmMetrics?.heapUsed ?? null;
-  // Inbound / Outbound HTTP metrics from InfluxDB or Observability API
   const inboundAvgResponseTime = influxData?.extraMetrics?.inboundAvgResponseTime ?? observabilityMetrics?.inboundAvgResponseTime ?? null;
   const inboundRequestCount = influxData?.extraMetrics?.inboundRequestCount ?? observabilityMetrics?.inboundRequestCount ?? null;
   const inboundErrorCount = influxData?.extraMetrics?.inboundErrorCount ?? observabilityMetrics?.errorCount ?? null;
@@ -377,36 +431,87 @@ const AppMonitoringDetailScreen: React.FC = () => {
   const outboundErrorCount = influxData?.extraMetrics?.outboundErrorCount ?? null;
   const hasOutboundData = outboundAvgResponseTime != null || outboundRequestCount != null || outboundErrorCount != null;
   const hasInboundHttpData = inboundAvgResponseTime != null || inboundRequestCount != null || inboundErrorCount != null;
+
   const influxCpu = useMemo(() => {
     if (!influxData?.timeSeries) return null;
-    const ts = influxData.timeSeries;
-    const cpuPts = ts.filter((p: any) => p.cpu != null);
-    if (cpuPts.length === 0) return null;
-    return cpuPts[cpuPts.length - 1].cpu;
-  }, [influxData]);
-  const influxMem = useMemo(() => {
-    if (!influxData?.timeSeries) return null;
-    const ts = influxData.timeSeries;
-    const memPts = ts.filter((p: any) => p.memory != null);
-    if (memPts.length === 0) return null;
-    return memPts[memPts.length - 1].memory;
+    const cpuPts = influxData.timeSeries.filter((p: any) => p.cpu != null);
+    return cpuPts.length > 0 ? cpuPts[cpuPts.length - 1].cpu : null;
   }, [influxData]);
 
-  // Detect if we have REAL metrics (vs just defaulting to 0 because monitoring is unavailable)
-  const hasRealCpu = workerStats?.cpuPercentageUsed != null
-    || workerStats?.cpu != null
-    || workerStats?.cpuUsage != null
-    || cpuData.length > 0
-    || influxCpu != null;
-  const hasRealMem = workerStats?.memoryPercentageUsed != null
-    || workerStats?.memoryTotalUsed != null
-    || workerStats?.memoryUsage != null
-    || memData.length > 0
-    || influxMem != null;
+  const influxMem = useMemo(() => {
+    if (!influxData?.timeSeries) return null;
+    const memPts = influxData.timeSeries.filter((p: any) => p.memory != null);
+    return memPts.length > 0 ? memPts[memPts.length - 1].memory : null;
+  }, [influxData]);
+
+  // ── Chart series ──
+  const inboundRequestSeries = useMemo(() => {
+    if (!influxData?.timeSeries) return [];
+    return influxData.timeSeries
+      .filter((p: any) => p.inboundRequests != null || p.inbound_request_count != null)
+      .map((p: any) => p.inboundRequests ?? p.inbound_request_count ?? 0);
+  }, [influxData]);
+
+  const inboundResponseTimeSeries = useMemo(() => {
+    if (!influxData?.timeSeries) return [];
+    return influxData.timeSeries
+      .filter((p: any) => p.inboundResponseTime != null || p.inbound_avg_response_time != null)
+      .map((p: any) => p.inboundResponseTime ?? p.inbound_avg_response_time ?? 0);
+  }, [influxData]);
+
+  const outboundRequestSeries = useMemo(() => {
+    if (!influxData?.timeSeries) return [];
+    return influxData.timeSeries
+      .filter((p: any) => p.outboundRequests != null || p.outbound_request_count != null)
+      .map((p: any) => p.outboundRequests ?? p.outbound_request_count ?? 0);
+  }, [influxData]);
+
+  const outboundResponseTimeSeries = useMemo(() => {
+    if (!influxData?.timeSeries) return [];
+    return influxData.timeSeries
+      .filter((p: any) => p.outboundResponseTime != null || p.outbound_avg_response_time != null)
+      .map((p: any) => p.outboundResponseTime ?? p.outbound_avg_response_time ?? 0);
+  }, [influxData]);
+
+  const jvmCpuSeries = useMemo(() => {
+    if (cpuData.length > 0) return cpuData;
+    if (!influxData?.timeSeries) return [];
+    return influxData.timeSeries.filter((p: any) => p.cpu != null).map((p: any) => p.cpu ?? 0);
+  }, [cpuData, influxData]);
+
+  const jvmHeapSeries = useMemo(() => {
+    if (memData.length > 0) return memData;
+    if (!influxData?.timeSeries) return [];
+    return influxData.timeSeries
+      .filter((p: any) => p.memory != null || p.heapUsed != null)
+      .map((p: any) => {
+        const val = p.memory ?? p.heapUsed ?? 0;
+        return val > 10_000 ? val / (1024 * 1024) : val;
+      });
+  }, [memData, influxData]);
+
+  const jvmThreadSeries = useMemo(() => {
+    if (!influxData?.timeSeries) return threadCount > 0 ? [threadCount] : [];
+    return influxData.timeSeries
+      .filter((p: any) => p.threadCount != null || p.threads != null)
+      .map((p: any) => p.threadCount ?? p.threads ?? 0);
+  }, [influxData, threadCount]);
+
+  // Detect real metrics availability
+  const hasRealCpu = workerStats?.cpuPercentageUsed != null || workerStats?.cpu != null || workerStats?.cpuUsage != null || cpuData.length > 0 || influxCpu != null;
+  const hasRealMem = workerStats?.memoryPercentageUsed != null || workerStats?.memoryTotalUsed != null || workerStats?.memoryUsage != null || memData.length > 0 || influxMem != null;
   const hasRealThreads = workerStats?.threadCount != null || influxThreadCount != null;
   const hasInfluxData = messageCount != null || influxCpu != null || influxMem != null || influxThreadCount != null;
   const hasAnyMetrics = hasRealCpu || hasRealMem || hasRealThreads || hasInfluxData;
 
+  // JVM extra metrics
+  const jvmGcCollections = influxData?.extraMetrics?.gcCollections ?? jvmMetrics?.gcCollections ?? null;
+  const jvmGcTime = influxData?.extraMetrics?.gcTime ?? jvmMetrics?.gcTime ?? null;
+  const jvmClassesLoaded = influxData?.extraMetrics?.classesLoaded ?? jvmMetrics?.classesLoaded ?? null;
+  const jvmHeapCommitted = influxData?.extraMetrics?.heapCommitted ?? jvmMetrics?.heapCommitted ?? jvmMetrics?.heapMax ?? null;
+  const jvmNonHeapUsed = influxData?.extraMetrics?.nonHeapUsed ?? jvmMetrics?.nonHeapUsed ?? null;
+
+  // ---- Loading / Error states ----
   if (appLoading) {
     return (
       <View style={styles.container}>
@@ -434,6 +539,638 @@ const AppMonitoringDetailScreen: React.FC = () => {
     );
   }
 
+  // ---- Health indicator helpers ----
+  const cpuHealthColor = !hasRealCpu ? theme.colors.onSurfaceVariant
+    : (influxCpu ?? cpuPercent) > 80 ? anypointColors.error
+    : (influxCpu ?? cpuPercent) > 60 ? anypointColors.warning
+    : anypointColors.success;
+  const cpuHealthLabel = !hasRealCpu ? 'No data' : (influxCpu ?? cpuPercent) > 80 ? 'Critical' : (influxCpu ?? cpuPercent) > 60 ? 'Warning' : 'Healthy';
+  const cpuVal = influxCpu ?? cpuPercent;
+
+  const memHealthColor = !hasRealMem ? theme.colors.onSurfaceVariant
+    : (influxMem ?? memPercent) > 80 ? anypointColors.error
+    : (influxMem ?? memPercent) > 60 ? anypointColors.warning
+    : anypointColors.success;
+  const memHealthLabel = !hasRealMem ? 'No data' : (influxMem ?? memPercent) > 80 ? 'Critical' : (influxMem ?? memPercent) > 60 ? 'Warning' : 'Healthy';
+  const memVal = influxMem ?? memPercent;
+
+  // ===========================================================================
+  // TAB CONTENT RENDERERS
+  // ===========================================================================
+
+  const renderOverviewTab = () => (
+    <>
+      {/* Monitoring unavailable banner */}
+      {!hasAnyMetrics && status === 'STARTED' && !cpuLoading && !memLoading && !dashStatsLoading && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 12 }}>
+            <Icon name="information-outline" size={18} color={anypointColors.warning} />
+            <View style={{ flex: 1 }}>
+              <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 2 }}>
+                Live metrics unavailable
+              </Text>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
+                CPU, memory, and thread monitoring require an Anypoint Monitoring subscription (Titanium or Platinum).
+              </Text>
+            </View>
+          </Card.Content>
+        </Card>
+      )}
+
+      {/* Overview Metric Cards */}
+      <View style={styles.metricsRow}>
+        <MetricCard
+          title="CPU"
+          value={hasRealCpu ? `${Math.round(cpuVal)}%` : 'N/A'}
+          icon="chip"
+          color={hasRealCpu
+            ? (cpuVal > 80 ? anypointColors.error : cpuVal > 60 ? anypointColors.warning : anypointColors.primary)
+            : theme.colors.onSurfaceVariant}
+          theme={theme}
+        />
+        <MetricCard
+          title="Memory"
+          value={hasRealMem ? `${Math.round(memVal)}%` : 'N/A'}
+          subtitle={hasRealMem && memTotal > 0 ? `${memUsage}/${memTotal} MB` : undefined}
+          icon="memory"
+          color={hasRealMem
+            ? (memVal > 80 ? anypointColors.error : memVal > 60 ? anypointColors.warning : anypointColors.accent)
+            : theme.colors.onSurfaceVariant}
+          theme={theme}
+        />
+        <MetricCard
+          title={messageCount != null ? 'Messages' : 'Threads'}
+          value={messageCount != null ? String(messageCount) : (hasRealThreads ? String(influxThreadCount ?? threadCount) : 'N/A')}
+          icon={messageCount != null ? 'message-text-outline' : 'format-list-numbered'}
+          color={messageCount != null ? anypointColors.primary : (hasRealThreads ? anypointColors.secondary : theme.colors.onSurfaceVariant)}
+          theme={theme}
+        />
+      </View>
+
+      {/* Health Indicators */}
+      <Card style={styles.card} mode="contained">
+        <Card.Content>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Icon name="heart-pulse" size={16} color={anypointColors.primary} />
+            <Text variant="titleSmall" style={styles.sectionLabel}>Health Indicators</Text>
+          </View>
+          <Divider style={{ marginBottom: 12 }} />
+
+          {/* CPU Health */}
+          <View style={styles.healthRow}>
+            <View style={styles.healthLabelRow}>
+              <View style={[styles.healthDot, { backgroundColor: cpuHealthColor }]} />
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>CPU Health</Text>
+            </View>
+            <Text variant="labelMedium" style={{ color: cpuHealthColor, fontWeight: '700' }}>
+              {cpuHealthLabel}
+            </Text>
+          </View>
+          {hasRealCpu && (
+            <ProgressBar
+              progress={Math.min(cpuVal / 100, 1)}
+              color={cpuHealthColor}
+              style={styles.healthBar}
+            />
+          )}
+
+          {/* Memory Health */}
+          <View style={[styles.healthRow, { marginTop: 14 }]}>
+            <View style={styles.healthLabelRow}>
+              <View style={[styles.healthDot, { backgroundColor: memHealthColor }]} />
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>Memory Health</Text>
+            </View>
+            <Text variant="labelMedium" style={{ color: memHealthColor, fontWeight: '700' }}>
+              {memHealthLabel}
+            </Text>
+          </View>
+          {hasRealMem && (
+            <ProgressBar
+              progress={Math.min(memVal / 100, 1)}
+              color={memHealthColor}
+              style={styles.healthBar}
+            />
+          )}
+
+          {/* Application Status */}
+          <View style={[styles.healthRow, { marginTop: 14 }]}>
+            <View style={styles.healthLabelRow}>
+              <View style={[styles.healthDot, { backgroundColor: sColor }]} />
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>Application Status</Text>
+            </View>
+            <Text variant="labelMedium" style={{ color: sColor, fontWeight: '700' }}>
+              {getStatusLabel(status)}
+            </Text>
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* CPU + Memory Charts (quick overview) */}
+      {hasRealCpu && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content>
+            <SimpleLineChart
+              data={cpuData.length > 0 ? cpuData : [cpuPercent]}
+              maxValue={100}
+              color={cpuPercent > 80 ? anypointColors.error : cpuPercent > 60 ? anypointColors.warning : anypointColors.primary}
+              height={70}
+              theme={theme}
+              label="CPU Usage"
+            />
+          </Card.Content>
+        </Card>
+      )}
+      {hasRealMem && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content>
+            <SimpleLineChart
+              data={memData.length > 0 ? memData : [memPercent]}
+              maxValue={100}
+              color={memPercent > 80 ? anypointColors.error : memPercent > 60 ? anypointColors.warning : anypointColors.accent}
+              height={70}
+              theme={theme}
+              label="Memory Usage"
+            />
+          </Card.Content>
+        </Card>
+      )}
+
+      {/* Application Details */}
+      <Card style={styles.card} mode="contained">
+        <Card.Content>
+          <Text variant="titleSmall" style={styles.sectionLabel}>Application Details</Text>
+          <Divider style={{ marginVertical: 8 }} />
+          {[
+            { label: 'Domain', value: (app as any)?.domain },
+            { label: 'Full Domain', value: (app as any)?.fullDomain },
+            { label: 'Last Updated', value: (app as any)?.lastUpdateTime ? new Date((app as any).lastUpdateTime).toLocaleString() : undefined },
+            { label: 'Runtime Version', value: getMuleVersion(app) },
+            { label: 'Region', value: (app as any)?.region },
+            { label: 'Monitoring Enabled', value: (app as any)?.monitoringEnabled != null ? ((app as any).monitoringEnabled ? 'Yes' : 'No') : undefined },
+          ]
+            .filter((item) => item.value != null && item.value !== '')
+            .map((item) => (
+              <View key={item.label} style={{ flexDirection: 'row', paddingVertical: 4 }}>
+                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, width: 140 }} numberOfLines={1}>
+                  {item.label}
+                </Text>
+                <Text variant="bodySmall" style={{ color: theme.colors.onSurface, flex: 1 }} numberOfLines={1}>
+                  {item.value}
+                </Text>
+              </View>
+            ))}
+        </Card.Content>
+      </Card>
+    </>
+  );
+
+  const renderInboundTab = () => (
+    <>
+      <Card style={styles.card} mode="contained">
+        <Card.Content>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Icon name="arrow-down-bold" size={16} color={anypointColors.primary} />
+            <Text variant="titleSmall" style={styles.sectionLabel}>Inbound Metrics</Text>
+            {(messageCount != null || hasInboundHttpData) && (
+              <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: anypointColors.primary + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                <Icon name="database" size={10} color={anypointColors.primary} />
+                <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.primary }}>InfluxDB</Text>
+              </View>
+            )}
+          </View>
+          <Divider style={{ marginBottom: 12 }} />
+
+          {/* Summary stats */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Avg Response Time</Text>
+              <Text variant="titleLarge" style={{ color: inboundAvgResponseTime != null ? anypointColors.primary : theme.colors.onSurface, fontWeight: '700' }}>
+                {inboundAvgResponseTime != null ? `${inboundAvgResponseTime}ms` : '\u2014'}
+              </Text>
+            </View>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                {inboundRequestCount != null ? 'Total Requests' : 'Messages'}
+              </Text>
+              <Text variant="titleLarge" style={{ color: (messageCount != null || inboundRequestCount != null) ? anypointColors.primary : theme.colors.onSurface, fontWeight: '700' }}>
+                {inboundRequestCount != null ? String(inboundRequestCount) : messageCount != null ? String(messageCount) : '\u2014'}
+              </Text>
+            </View>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Errors</Text>
+              <Text variant="titleLarge" style={{ color: (inboundErrorCount ?? 0) > 0 ? anypointColors.error : theme.colors.onSurface, fontWeight: '700' }}>
+                {inboundErrorCount != null ? String(inboundErrorCount) : '\u2014'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Charts */}
+          {inboundRequestSeries.length > 1 && (
+            <SimpleLineChart
+              data={inboundRequestSeries}
+              color={anypointColors.primary}
+              height={80}
+              theme={theme}
+              label="Total Requests"
+              unit=""
+            />
+          )}
+          {inboundResponseTimeSeries.length > 1 && (
+            <SimpleLineChart
+              data={inboundResponseTimeSeries}
+              color={anypointColors.secondary}
+              height={80}
+              theme={theme}
+              label="Average Response Time"
+              unit="ms"
+            />
+          )}
+
+          {messageCount == null && !hasInboundHttpData && !dashStatsLoading && (
+            <View style={{ paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.colors.outlineVariant }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
+                Inbound metrics require Anypoint Monitoring or an active InfluxDB datasource
+              </Text>
+            </View>
+          )}
+        </Card.Content>
+      </Card>
+    </>
+  );
+
+  const renderOutboundTab = () => (
+    <>
+      <Card style={styles.card} mode="contained">
+        <Card.Content>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Icon name="arrow-up-bold" size={16} color={anypointColors.accent} />
+            <Text variant="titleSmall" style={styles.sectionLabel}>Outbound Metrics</Text>
+            {hasOutboundData && (
+              <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: anypointColors.accent + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
+                <Icon name="database" size={10} color={anypointColors.accent} />
+                <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.accent }}>InfluxDB</Text>
+              </View>
+            )}
+          </View>
+          <Divider style={{ marginBottom: 12 }} />
+
+          {/* Summary stats */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Avg Response Time</Text>
+              <Text variant="titleLarge" style={{ color: outboundAvgResponseTime != null ? anypointColors.accent : theme.colors.onSurface, fontWeight: '700' }}>
+                {outboundAvgResponseTime != null ? `${outboundAvgResponseTime}ms` : '\u2014'}
+              </Text>
+            </View>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Total Requests</Text>
+              <Text variant="titleLarge" style={{ color: outboundRequestCount != null ? anypointColors.accent : theme.colors.onSurface, fontWeight: '700' }}>
+                {outboundRequestCount != null ? String(outboundRequestCount) : '\u2014'}
+              </Text>
+            </View>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Errors</Text>
+              <Text variant="titleLarge" style={{ color: (outboundErrorCount ?? 0) > 0 ? anypointColors.error : theme.colors.onSurface, fontWeight: '700' }}>
+                {outboundErrorCount != null ? String(outboundErrorCount) : '\u2014'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Charts */}
+          {outboundRequestSeries.length > 1 && (
+            <SimpleLineChart
+              data={outboundRequestSeries}
+              color={anypointColors.accent}
+              height={80}
+              theme={theme}
+              label="Total Requests"
+              unit=""
+            />
+          )}
+          {outboundResponseTimeSeries.length > 1 && (
+            <SimpleLineChart
+              data={outboundResponseTimeSeries}
+              color={anypointColors.warning}
+              height={80}
+              theme={theme}
+              label="Average Response Time"
+              unit="ms"
+            />
+          )}
+
+          {!hasOutboundData && !dashStatsLoading && (
+            <View style={{ paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.colors.outlineVariant }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
+                Outbound metrics require Anypoint Monitoring or an active InfluxDB datasource
+              </Text>
+            </View>
+          )}
+        </Card.Content>
+      </Card>
+    </>
+  );
+
+  const renderJvmTab = () => (
+    <>
+      {/* JVM Charts */}
+      <Card style={styles.card} mode="contained">
+        <Card.Content>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Icon name="coffee" size={16} color={anypointColors.mulePurple} />
+            <Text variant="titleSmall" style={styles.sectionLabel}>JVM Performance</Text>
+          </View>
+          <Divider style={{ marginBottom: 12 }} />
+
+          {hasRealCpu ? (
+            <SimpleLineChart
+              data={jvmCpuSeries.length > 0 ? jvmCpuSeries : [cpuPercent]}
+              maxValue={100}
+              color={anypointColors.primary}
+              height={80}
+              theme={theme}
+              label="CPU % Utilization"
+            />
+          ) : (
+            <View style={{ paddingVertical: 12 }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
+                No CPU data available
+              </Text>
+            </View>
+          )}
+
+          {hasRealMem ? (
+            <SimpleLineChart
+              data={jvmHeapSeries.length > 0 ? jvmHeapSeries : [memPercent]}
+              maxValue={memTotal > 0 ? memTotal : 100}
+              color={anypointColors.accent}
+              height={80}
+              theme={theme}
+              label="Heap Used"
+              unit={memTotal > 0 ? ' MB' : '%'}
+            />
+          ) : (
+            <View style={{ paddingVertical: 12 }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
+                No heap data available
+              </Text>
+            </View>
+          )}
+
+          {hasRealThreads ? (
+            <SimpleLineChart
+              data={jvmThreadSeries.length > 0 ? jvmThreadSeries : [threadCount]}
+              color={anypointColors.warning}
+              height={80}
+              theme={theme}
+              label="Thread Count"
+              unit=""
+            />
+          ) : (
+            <View style={{ paddingVertical: 12 }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
+                No thread data available
+              </Text>
+            </View>
+          )}
+        </Card.Content>
+      </Card>
+
+      {/* JVM Detail Stats */}
+      {(jvmGcCollections != null || jvmClassesLoaded != null || jvmHeapCommitted != null || jvmNonHeapUsed != null) && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content>
+            <Text variant="titleSmall" style={[styles.sectionLabel, { marginBottom: 8 }]}>JVM Details</Text>
+            <Divider style={{ marginBottom: 8 }} />
+            {influxHeapUsed != null && (
+              <DetailRow label="Heap Used" value={influxHeapUsed > 10_000 ? `${Math.round(influxHeapUsed / (1024 * 1024))} MB` : `${Math.round(influxHeapUsed)}`} theme={theme} />
+            )}
+            {jvmHeapCommitted != null && (
+              <DetailRow label="Heap Committed" value={jvmHeapCommitted > 10_000 ? `${Math.round(jvmHeapCommitted / (1024 * 1024))} MB` : `${Math.round(jvmHeapCommitted)}`} theme={theme} />
+            )}
+            {jvmNonHeapUsed != null && (
+              <DetailRow label="Non-Heap Used" value={jvmNonHeapUsed > 10_000 ? `${Math.round(jvmNonHeapUsed / (1024 * 1024))} MB` : `${Math.round(jvmNonHeapUsed)}`} theme={theme} />
+            )}
+            {jvmClassesLoaded != null && (
+              <DetailRow label="Classes Loaded" value={String(jvmClassesLoaded)} theme={theme} />
+            )}
+            {jvmGcCollections != null && (
+              <DetailRow label="GC Collections" value={String(jvmGcCollections)} theme={theme} />
+            )}
+            {jvmGcTime != null && (
+              <DetailRow label="GC Time" value={`${jvmGcTime} ms`} theme={theme} />
+            )}
+          </Card.Content>
+        </Card>
+      )}
+
+      {!hasRealCpu && !hasRealMem && !hasRealThreads && !dashStatsLoading && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 12 }}>
+            <Icon name="information-outline" size={18} color={anypointColors.warning} />
+            <View style={{ flex: 1 }}>
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
+                JVM metrics require Anypoint Monitoring with an active InfluxDB datasource or Observability API access.
+              </Text>
+            </View>
+          </Card.Content>
+        </Card>
+      )}
+    </>
+  );
+
+  const renderInfrastructureTab = () => (
+    <>
+      {/* Worker Info */}
+      <Card style={styles.card} mode="contained">
+        <Card.Content>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <Icon name="server" size={16} color={anypointColors.secondary} />
+            <Text variant="titleSmall" style={styles.sectionLabel}>Infrastructure</Text>
+          </View>
+          <Divider style={{ marginBottom: 12 }} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <View>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Workers</Text>
+              <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                {workerInfo.amount}x {workerInfo.typeName}
+              </Text>
+            </View>
+            <View>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Mule Version</Text>
+              <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                {getMuleVersion(app) || 'N/A'}
+              </Text>
+            </View>
+            <View>
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Region</Text>
+              <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                {app?.region ?? 'N/A'}
+              </Text>
+            </View>
+          </View>
+        </Card.Content>
+      </Card>
+
+      {/* Per-Worker Details */}
+      {numWorkers > 0 && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content>
+            <Text variant="titleSmall" style={styles.sectionLabel}>
+              Worker Details ({numWorkers} worker{numWorkers !== 1 ? 's' : ''})
+            </Text>
+            <Divider style={{ marginVertical: 8 }} />
+            {workerStatuses.map((worker: any, idx: number) => {
+              const rawStats = worker?.statisticsByWorker ?? worker?.statistics ?? {};
+              const wStats = flattenWorkerStats(rawStats);
+              const wCpu = extractNumericValue(wStats?.cpuPercentageUsed) || extractNumericValue(wStats?.cpu);
+              const wMem = extractNumericValue(wStats?.memoryPercentageUsed);
+              const wMemUsed = extractNumericValue(wStats?.memoryTotalUsed);
+              const wMemMax = extractNumericValue(wStats?.memoryTotalMax);
+              const wMemUsedMB = wMemUsed > 10_000 ? Math.round(wMemUsed / (1024 * 1024)) : wMemUsed;
+              const wMemMaxMB = wMemMax > 10_000 ? Math.round(wMemMax / (1024 * 1024)) : wMemMax;
+              const wThreads = extractNumericValue(wStats?.threadCount);
+              const wStatus = worker?.status ?? 'UNKNOWN';
+              const wRegion = worker?.deployedRegion ?? worker?.region ?? '';
+              const wHost = worker?.host ?? '';
+              const wPort = worker?.port ?? '';
+
+              return (
+                <View
+                  key={worker?.id ?? `worker-${idx}`}
+                  style={{
+                    marginBottom: idx < numWorkers - 1 ? 12 : 0,
+                    paddingBottom: idx < numWorkers - 1 ? 12 : 0,
+                    borderBottomWidth: idx < numWorkers - 1 ? StyleSheet.hairlineWidth : 0,
+                    borderBottomColor: theme.colors.outlineVariant,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Icon name="server" size={14} color={theme.colors.onSurfaceVariant} />
+                      <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                        Worker {idx + 1}
+                      </Text>
+                    </View>
+                    <View style={{
+                      paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+                      backgroundColor: (wStatus === 'STARTED' ? anypointColors.success : anypointColors.error) + '20',
+                    }}>
+                      <Text style={{
+                        fontSize: 10, fontWeight: '700',
+                        color: wStatus === 'STARTED' ? anypointColors.success : anypointColors.error,
+                      }}>
+                        {wStatus}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
+                    {wHost ? <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>Host: {wHost}{wPort ? `:${wPort}` : ''}</Text> : null}
+                    {wRegion ? <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>Region: {wRegion}</Text> : null}
+                  </View>
+
+                  <View style={{ marginBottom: 6 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>CPU</Text>
+                      <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>{Math.round(wCpu)}%</Text>
+                    </View>
+                    <ProgressBar
+                      progress={Math.min(wCpu / 100, 1)}
+                      color={wCpu > 80 ? anypointColors.error : wCpu > 60 ? anypointColors.warning : anypointColors.primary}
+                      style={styles.healthBar}
+                    />
+                  </View>
+
+                  <View style={{ marginBottom: 6 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                      <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Memory</Text>
+                      <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                        {Math.round(wMem)}% {wMemMaxMB > 0 ? `(${wMemUsedMB}/${wMemMaxMB} MB)` : ''}
+                      </Text>
+                    </View>
+                    <ProgressBar
+                      progress={Math.min(wMem / 100, 1)}
+                      color={wMem > 80 ? anypointColors.error : wMem > 60 ? anypointColors.warning : anypointColors.accent}
+                      style={styles.healthBar}
+                    />
+                  </View>
+
+                  {wThreads > 0 && (
+                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                      Threads: {wThreads}
+                    </Text>
+                  )}
+                </View>
+              );
+            })}
+          </Card.Content>
+        </Card>
+      )}
+
+      {/* Configured Resources (when no live metrics) */}
+      {!hasAnyMetrics && status === 'STARTED' && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content>
+            <Text variant="titleSmall" style={styles.sectionLabel}>Configured Resources</Text>
+            <Divider style={{ marginVertical: 8 }} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              <View>
+                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Worker Type</Text>
+                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>{workerInfo.typeName}</Text>
+              </View>
+              <View>
+                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Workers</Text>
+                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>{workerInfo.amount}</Text>
+              </View>
+              <View>
+                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Mule Version</Text>
+                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>{getMuleVersion(app) || 'N/A'}</Text>
+              </View>
+            </View>
+          </Card.Content>
+        </Card>
+      )}
+
+      {/* Properties */}
+      {app?.properties && Object.keys(app.properties).length > 0 && (
+        <Card style={styles.card} mode="contained">
+          <Card.Content>
+            <Text variant="titleSmall" style={styles.sectionLabel}>
+              Properties ({Object.keys(app.properties).length})
+            </Text>
+            <Divider style={{ marginVertical: 8 }} />
+            {Object.entries(app.properties as Record<string, string>).slice(0, 8).map(([key, value]) => (
+              <View key={key} style={{ flexDirection: 'row', paddingVertical: 4 }}>
+                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, width: 140 }} numberOfLines={1}>
+                  {key}
+                </Text>
+                <Text variant="bodySmall" style={{ color: theme.colors.onSurface, flex: 1 }} numberOfLines={1}>
+                  {typeof value === 'string' && value.includes('****') ? '********' : String(value ?? '')}
+                </Text>
+              </View>
+            ))}
+            {Object.keys(app.properties).length > 8 && (
+              <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+                +{Object.keys(app.properties).length - 8} more properties
+              </Text>
+            )}
+          </Card.Content>
+        </Card>
+      )}
+    </>
+  );
+
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'overview': return renderOverviewTab();
+      case 'inbound': return renderInboundTab();
+      case 'outbound': return renderOutboundTab();
+      case 'jvm': return renderJvmTab();
+      case 'infrastructure': return renderInfrastructureTab();
+      default: return renderOverviewTab();
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Appbar.Header>
@@ -457,7 +1194,7 @@ const AppMonitoringDetailScreen: React.FC = () => {
           />
         }
       >
-        {/* ---- Status Banner ---- */}
+        {/* Status Banner */}
         <Card style={[styles.statusCard, { borderLeftColor: sColor }]} mode="contained">
           <Card.Content style={{ paddingVertical: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -467,12 +1204,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
               </Text>
               <View
                 style={{
-                  paddingHorizontal: 8,
-                  paddingVertical: 3,
-                  borderRadius: 8,
-                  backgroundColor: sColor + '20',
-                  borderWidth: 1,
-                  borderColor: sColor + '40',
+                  paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
+                  backgroundColor: sColor + '20', borderWidth: 1, borderColor: sColor + '40',
                 }}
               >
                 <Text style={{ color: sColor, fontSize: 11, fontWeight: '700' }}>{status}</Text>
@@ -484,7 +1217,7 @@ const AppMonitoringDetailScreen: React.FC = () => {
           </Card.Content>
         </Card>
 
-        {/* ---- Date Range Selector ---- */}
+        {/* Date Range Selector */}
         <View style={styles.dateRangeRow}>
           <Icon name="clock-outline" size={16} color={theme.colors.onSurfaceVariant} style={{ marginRight: 6 }} />
           <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginRight: 10 }}>
@@ -501,14 +1234,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
                 compact
                 accessibilityLabel={`Time range: ${range.label}${isSelected ? ', selected' : ''}`}
                 accessibilityRole="button"
-                style={[
-                  styles.dateChip,
-                  isSelected && { backgroundColor: theme.colors.primary },
-                ]}
-                textStyle={[
-                  styles.dateChipText,
-                  isSelected && { color: '#FFFFFF' },
-                ]}
+                style={[styles.dateChip, isSelected && { backgroundColor: theme.colors.primary }]}
+                textStyle={[styles.dateChipText, isSelected && { color: '#FFFFFF' }]}
               >
                 {range.label}
               </Chip>
@@ -516,620 +1243,55 @@ const AppMonitoringDetailScreen: React.FC = () => {
           })}
         </View>
 
-        {/* ---- Monitoring unavailable banner ---- */}
-        {!hasAnyMetrics && status === 'STARTED' && !cpuLoading && !memLoading && !dashStatsLoading && (
-          <Card
-            style={{
-              marginHorizontal: 16,
-              marginBottom: 12,
-              borderRadius: 12,
-              elevation: 0,
-              backgroundColor: anypointColors.warning + '15',
-              borderWidth: 1,
-              borderColor: anypointColors.warning + '30',
-            }}
-            mode="contained"
-          >
-            <Card.Content style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 12 }}>
-              <Icon name="information-outline" size={18} color={anypointColors.warning} />
-              <View style={{ flex: 1 }}>
-                <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600', marginBottom: 2 }}>
-                  Live metrics unavailable
-                </Text>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
-                  CPU, memory, and thread monitoring require an Anypoint Monitoring subscription (Titanium or Platinum). Configured resources and deployment info are shown below.
-                </Text>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- Overview Metrics ---- */}
-        <View style={styles.metricsRow}>
-          <MetricCard
-            title="CPU"
-            value={hasRealCpu ? `${Math.round(influxCpu ?? cpuPercent)}%` : 'N/A'}
-            icon="chip"
-            color={hasRealCpu
-              ? ((influxCpu ?? cpuPercent) > 80 ? anypointColors.error : (influxCpu ?? cpuPercent) > 60 ? anypointColors.warning : anypointColors.primary)
-              : theme.colors.onSurfaceVariant}
-            theme={theme}
-          />
-          <MetricCard
-            title="Memory"
-            value={hasRealMem ? `${Math.round(influxMem ?? memPercent)}%` : 'N/A'}
-            subtitle={hasRealMem && memTotal > 0 ? `${memUsage}/${memTotal} MB` : undefined}
-            icon="memory"
-            color={hasRealMem
-              ? ((influxMem ?? memPercent) > 80 ? anypointColors.error : (influxMem ?? memPercent) > 60 ? anypointColors.warning : anypointColors.accent)
-              : theme.colors.onSurfaceVariant}
-            theme={theme}
-          />
-          <MetricCard
-            title={messageCount != null ? 'Messages' : 'Threads'}
-            value={messageCount != null ? String(messageCount) : (hasRealThreads ? String(influxThreadCount ?? threadCount) : 'N/A')}
-            icon={messageCount != null ? 'message-text-outline' : 'format-list-numbered'}
-            color={messageCount != null ? anypointColors.primary : (hasRealThreads ? anypointColors.secondary : theme.colors.onSurfaceVariant)}
-            theme={theme}
-          />
-        </View>
-
-        {/* ---- Inbound / Outbound (Anypoint Monitoring style) ---- */}
-        <Card style={styles.card} mode="contained">
-          <Card.Content>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Icon name="arrow-down-bold" size={16} color={anypointColors.primary} />
-              <Text variant="titleSmall" style={styles.sectionLabel}>Inbound</Text>
-              {(messageCount != null || hasInboundHttpData) && (
-                <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: anypointColors.primary + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                  <Icon name="database" size={10} color={anypointColors.primary} />
-                  <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.primary }}>InfluxDB</Text>
-                </View>
-              )}
-            </View>
-            <Divider style={{ marginBottom: 12 }} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Avg Response Time</Text>
-                <Text variant="titleLarge" style={{ color: inboundAvgResponseTime != null ? anypointColors.primary : theme.colors.onSurface, fontWeight: '700' }}>
-                  {inboundAvgResponseTime != null ? `${inboundAvgResponseTime}ms` : '—'}
-                </Text>
-              </View>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                  {messageCount != null || inboundRequestCount != null ? 'Requests / Messages' : 'Message Count'}
-                </Text>
-                <Text variant="titleLarge" style={{ color: (messageCount != null || inboundRequestCount != null) ? anypointColors.primary : theme.colors.onSurface, fontWeight: '700' }}>
-                  {inboundRequestCount != null
-                    ? String(inboundRequestCount)
-                    : messageCount != null ? String(messageCount) : '—'}
-                </Text>
-              </View>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Errors</Text>
-                <Text variant="titleLarge" style={{ color: (inboundErrorCount ?? 0) > 0 ? anypointColors.error : theme.colors.onSurface, fontWeight: '700' }}>
-                  {inboundErrorCount != null ? String(inboundErrorCount) : '—'}
-                </Text>
-              </View>
-            </View>
-            {messageCount == null && !hasInboundHttpData && !dashStatsLoading && (
-              <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.colors.outlineVariant }}>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
-                  Inbound metrics require Anypoint Monitoring or an active InfluxDB datasource
-                </Text>
-              </View>
-            )}
-          </Card.Content>
-        </Card>
-        <Card style={styles.card} mode="contained">
-          <Card.Content>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <Icon name="arrow-up-bold" size={16} color={anypointColors.accent} />
-              <Text variant="titleSmall" style={styles.sectionLabel}>Outbound</Text>
-              {hasOutboundData && (
-                <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: anypointColors.accent + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                  <Icon name="database" size={10} color={anypointColors.accent} />
-                  <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.accent }}>InfluxDB</Text>
-                </View>
-              )}
-            </View>
-            <Divider style={{ marginBottom: 12 }} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Avg Response Time</Text>
-                <Text variant="titleLarge" style={{ color: outboundAvgResponseTime != null ? anypointColors.accent : theme.colors.onSurface, fontWeight: '700' }}>
-                  {outboundAvgResponseTime != null ? `${outboundAvgResponseTime}ms` : '—'}
-                </Text>
-              </View>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Request Count</Text>
-                <Text variant="titleLarge" style={{ color: outboundRequestCount != null ? anypointColors.accent : theme.colors.onSurface, fontWeight: '700' }}>
-                  {outboundRequestCount != null ? String(outboundRequestCount) : '—'}
-                </Text>
-              </View>
-              <View style={{ flex: 1, alignItems: 'center' }}>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Errors</Text>
-                <Text variant="titleLarge" style={{ color: (outboundErrorCount ?? 0) > 0 ? anypointColors.error : theme.colors.onSurface, fontWeight: '700' }}>
-                  {outboundErrorCount != null ? String(outboundErrorCount) : '—'}
-                </Text>
-              </View>
-            </View>
-            {!hasOutboundData && !dashStatsLoading && (
-              <View style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: theme.colors.outlineVariant }}>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontStyle: 'italic', textAlign: 'center' }}>
-                  Outbound metrics require Anypoint Monitoring or an active InfluxDB datasource
-                </Text>
-              </View>
-            )}
-          </Card.Content>
-        </Card>
-
-        {/* ---- Worker Info ---- */}
-        <Card style={styles.card} mode="contained">
-          <Card.Content>
-            <Text variant="titleSmall" style={styles.sectionLabel}>
-              Infrastructure
-            </Text>
-            <Divider style={{ marginVertical: 8 }} />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <View>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Workers</Text>
-                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                  {workerInfo.amount}x {workerInfo.typeName}
-                </Text>
-              </View>
-              <View>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Mule Version</Text>
-                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                  {getMuleVersion(app) || 'N/A'}
-                </Text>
-              </View>
-              <View>
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Region</Text>
-                <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                  {app?.region ?? 'N/A'}
-                </Text>
-              </View>
-            </View>
-          </Card.Content>
-        </Card>
-
-        {/* ---- CPU Chart ---- */}
-        {hasRealCpu && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <MiniChart
-                data={cpuData.length > 0 ? cpuData : [cpuPercent]}
-                maxValue={100}
-                color={cpuPercent > 80 ? anypointColors.error : cpuPercent > 60 ? anypointColors.warning : anypointColors.primary}
-                height={70}
-                theme={theme}
-                label="CPU Usage"
-              />
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- Memory Chart ---- */}
-        {hasRealMem && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <MiniChart
-                data={memData.length > 0 ? memData : [memPercent]}
-                maxValue={100}
-                color={memPercent > 80 ? anypointColors.error : memPercent > 60 ? anypointColors.warning : anypointColors.accent}
-                height={70}
-                theme={theme}
-                label="Memory Usage"
-              />
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- InfluxDB Metrics Summary (when InfluxDB data is available) ---- */}
-        {hasInfluxData && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <Icon name="database" size={16} color={anypointColors.primary} />
-                <Text variant="titleSmall" style={styles.sectionLabel}>Monitoring Data</Text>
-                <View style={{ marginLeft: 'auto', backgroundColor: anypointColors.success + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
-                  <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.success }}>CONNECTED</Text>
-                </View>
-              </View>
-              <Divider style={{ marginBottom: 12 }} />
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
-                {influxCpu != null && (
-                  <View style={{ minWidth: 80 }}>
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>CPU Usage</Text>
-                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-                      {Math.round(influxCpu)}%
-                    </Text>
-                  </View>
-                )}
-                {influxMem != null && (
-                  <View style={{ minWidth: 80 }}>
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Memory Usage</Text>
-                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-                      {Math.round(influxMem)}%
-                    </Text>
-                  </View>
-                )}
-                {influxThreadCount != null && (
-                  <View style={{ minWidth: 80 }}>
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Thread Count</Text>
-                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-                      {Math.round(influxThreadCount)}
-                    </Text>
-                  </View>
-                )}
-                {influxHeapUsed != null && (
-                  <View style={{ minWidth: 80 }}>
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Heap Used</Text>
-                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-                      {influxHeapUsed > 10_000 ? `${Math.round(influxHeapUsed / (1024 * 1024))} MB` : `${Math.round(influxHeapUsed)}`}
-                    </Text>
-                  </View>
-                )}
-                {messageCount != null && (
-                  <View style={{ minWidth: 80 }}>
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Total Messages</Text>
-                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-                      {messageCount}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- JVM Metrics (combined CPU / Heap / Threads section) ---- */}
-        {(hasRealCpu || hasRealMem || hasRealThreads) && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <Icon name="coffee" size={16} color={anypointColors.mulePurple} />
-                <Text variant="titleSmall" style={styles.sectionLabel}>JVM</Text>
-              </View>
-              <Divider style={{ marginBottom: 12 }} />
-              {/* JVM CPU */}
-              {hasRealCpu && (
-                <MiniChart
-                  data={cpuData.length > 0 ? cpuData : [cpuPercent]}
-                  maxValue={100}
-                  color={anypointColors.primary}
-                  height={55}
-                  theme={theme}
-                  label="CPU % Utilization"
-                />
-              )}
-              {/* JVM Heap Used */}
-              {hasRealMem && (
-                <MiniChart
-                  data={memData.length > 0 ? memData : [memPercent]}
-                  maxValue={100}
-                  color={anypointColors.accent}
-                  height={55}
-                  theme={theme}
-                  label="Heap Used"
-                  unit={memTotal > 0 ? ' MB' : '%'}
-                />
-              )}
-              {/* JVM Thread Count */}
-              {hasRealThreads && (
-                <MiniChart
-                  data={[threadCount]}
-                  color={anypointColors.warning}
-                  height={55}
-                  theme={theme}
-                  label="Thread Count"
-                  unit=""
-                />
-              )}
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- Configured Resources (when no live metrics) ---- */}
-        {!hasAnyMetrics && status === 'STARTED' && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <Text variant="titleSmall" style={styles.sectionLabel}>
-                Configured Resources
-              </Text>
-              <Divider style={{ marginVertical: 8 }} />
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                <View>
-                  <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Worker Type</Text>
-                  <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                    {workerInfo.typeName}
-                  </Text>
-                </View>
-                <View>
-                  <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Workers</Text>
-                  <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                    {workerInfo.amount}
-                  </Text>
-                </View>
-                <View>
-                  <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Mule Version</Text>
-                  <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                    {getMuleVersion(app) || 'N/A'}
-                  </Text>
-                </View>
-              </View>
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- Performance Indicators ---- */}
-        <Card style={styles.card} mode="contained">
-          <Card.Content>
-            <Text variant="titleSmall" style={styles.sectionLabel}>
-              Health Indicators
-            </Text>
-            <Divider style={{ marginVertical: 8 }} />
-
-            {/* CPU Health */}
-            <View style={styles.healthRow}>
-              <View style={styles.healthLabelRow}>
-                <View style={[styles.healthDot, {
-                  backgroundColor: !hasRealCpu ? theme.colors.onSurfaceVariant
-                    : cpuPercent > 80 ? anypointColors.error : cpuPercent > 60 ? anypointColors.warning : anypointColors.success,
-                }]} />
-                <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>CPU Health</Text>
-              </View>
-              <Text
-                variant="labelMedium"
-                style={{
-                  color: !hasRealCpu ? theme.colors.onSurfaceVariant
-                    : cpuPercent > 80 ? anypointColors.error : cpuPercent > 60 ? anypointColors.warning : anypointColors.success,
-                  fontWeight: '700',
-                }}
+        {/* Tab Bar */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.tabBarScroll}
+          contentContainerStyle={styles.tabBarContent}
+        >
+          {TABS.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <Chip
+                key={tab.id}
+                icon={tab.icon}
+                mode={isActive ? 'flat' : 'outlined'}
+                selected={isActive}
+                onPress={() => setActiveTab(tab.id)}
+                compact
+                style={[
+                  styles.tabChip,
+                  isActive && { backgroundColor: theme.colors.primaryContainer },
+                ]}
+                textStyle={[
+                  styles.tabChipText,
+                  isActive && { color: theme.colors.onPrimaryContainer, fontWeight: '700' },
+                ]}
               >
-                {!hasRealCpu ? 'No data' : cpuPercent > 80 ? 'Critical' : cpuPercent > 60 ? 'Warning' : 'Healthy'}
-              </Text>
-            </View>
-            {hasRealCpu && (
-              <ProgressBar
-                progress={Math.min(cpuPercent / 100, 1)}
-                color={cpuPercent > 80 ? anypointColors.error : cpuPercent > 60 ? anypointColors.warning : anypointColors.success}
-                style={styles.healthBar}
-              />
-            )}
+                {tab.label}
+              </Chip>
+            );
+          })}
+        </ScrollView>
 
-            {/* Memory Health */}
-            <View style={[styles.healthRow, { marginTop: 12 }]}>
-              <View style={styles.healthLabelRow}>
-                <View style={[styles.healthDot, {
-                  backgroundColor: !hasRealMem ? theme.colors.onSurfaceVariant
-                    : memPercent > 80 ? anypointColors.error : memPercent > 60 ? anypointColors.warning : anypointColors.success,
-                }]} />
-                <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>Memory Health</Text>
-              </View>
-              <Text
-                variant="labelMedium"
-                style={{
-                  color: !hasRealMem ? theme.colors.onSurfaceVariant
-                    : memPercent > 80 ? anypointColors.error : memPercent > 60 ? anypointColors.warning : anypointColors.success,
-                  fontWeight: '700',
-                }}
-              >
-                {!hasRealMem ? 'No data' : memPercent > 80 ? 'Critical' : memPercent > 60 ? 'Warning' : 'Healthy'}
-              </Text>
-            </View>
-            {hasRealMem && (
-              <ProgressBar
-                progress={Math.min(memPercent / 100, 1)}
-                color={memPercent > 80 ? anypointColors.error : memPercent > 60 ? anypointColors.warning : anypointColors.success}
-                style={styles.healthBar}
-              />
-            )}
-
-            {/* Overall Status */}
-            <View style={[styles.healthRow, { marginTop: 12 }]}>
-              <View style={styles.healthLabelRow}>
-                <View style={[styles.healthDot, { backgroundColor: sColor }]} />
-                <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>Application Status</Text>
-              </View>
-              <Text variant="labelMedium" style={{ color: sColor, fontWeight: '700' }}>
-                {getStatusLabel(status)}
-              </Text>
-            </View>
-          </Card.Content>
-        </Card>
-
-        {/* ---- Per-Worker Details ---- */}
-        {numWorkers > 0 && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <Text variant="titleSmall" style={styles.sectionLabel}>
-                Worker Details ({numWorkers} worker{numWorkers !== 1 ? 's' : ''})
-              </Text>
-              <Divider style={{ marginVertical: 8 }} />
-              {workerStatuses.map((worker: any, idx: number) => {
-                const rawStats = worker?.statisticsByWorker ?? worker?.statistics ?? {};
-                const wStats = flattenWorkerStats(rawStats);
-                const wCpu = extractNumericValue(wStats?.cpuPercentageUsed) || extractNumericValue(wStats?.cpu);
-                const wMem = extractNumericValue(wStats?.memoryPercentageUsed);
-                const wMemUsed = extractNumericValue(wStats?.memoryTotalUsed);
-                const wMemMax = extractNumericValue(wStats?.memoryTotalMax);
-                const wMemUsedMB = wMemUsed > 10_000 ? Math.round(wMemUsed / (1024 * 1024)) : wMemUsed;
-                const wMemMaxMB = wMemMax > 10_000 ? Math.round(wMemMax / (1024 * 1024)) : wMemMax;
-                const wThreads = extractNumericValue(wStats?.threadCount);
-                const wStatus = worker?.status ?? 'UNKNOWN';
-                const wRegion = worker?.deployedRegion ?? worker?.region ?? '';
-                const wHost = worker?.host ?? '';
-                const wPort = worker?.port ?? '';
-
-                return (
-                  <View
-                    key={worker?.id ?? `worker-${idx}`}
-                    style={{
-                      marginBottom: idx < numWorkers - 1 ? 12 : 0,
-                      paddingBottom: idx < numWorkers - 1 ? 12 : 0,
-                      borderBottomWidth: idx < numWorkers - 1 ? StyleSheet.hairlineWidth : 0,
-                      borderBottomColor: theme.colors.outlineVariant,
-                    }}
-                  >
-                    {/* Worker header */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Icon name="server" size={14} color={theme.colors.onSurfaceVariant} />
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                          Worker {idx + 1}
-                        </Text>
-                      </View>
-                      <View style={{
-                        paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
-                        backgroundColor: (wStatus === 'STARTED' ? anypointColors.success : anypointColors.error) + '20',
-                      }}>
-                        <Text style={{
-                          fontSize: 10, fontWeight: '700',
-                          color: wStatus === 'STARTED' ? anypointColors.success : anypointColors.error,
-                        }}>
-                          {wStatus}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {/* Worker stats */}
-                    <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
-                      {wHost ? (
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>
-                          Host: {wHost}{wPort ? `:${wPort}` : ''}
-                        </Text>
-                      ) : null}
-                      {wRegion ? (
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 11 }}>
-                          Region: {wRegion}
-                        </Text>
-                      ) : null}
-                    </View>
-
-                    {/* CPU bar */}
-                    <View style={{ marginBottom: 6 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                        <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>CPU</Text>
-                        <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                          {Math.round(wCpu)}%
-                        </Text>
-                      </View>
-                      <ProgressBar
-                        progress={Math.min(wCpu / 100, 1)}
-                        color={wCpu > 80 ? anypointColors.error : wCpu > 60 ? anypointColors.warning : anypointColors.primary}
-                        style={styles.healthBar}
-                      />
-                    </View>
-
-                    {/* Memory bar */}
-                    <View style={{ marginBottom: 6 }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                        <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Memory</Text>
-                        <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
-                          {Math.round(wMem)}% {wMemMaxMB > 0 ? `(${wMemUsedMB}/${wMemMaxMB} MB)` : ''}
-                        </Text>
-                      </View>
-                      <ProgressBar
-                        progress={Math.min(wMem / 100, 1)}
-                        color={wMem > 80 ? anypointColors.error : wMem > 60 ? anypointColors.warning : anypointColors.accent}
-                        style={styles.healthBar}
-                      />
-                    </View>
-
-                    {/* Threads */}
-                    {wThreads > 0 && (
-                      <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                        Threads: {wThreads}
-                      </Text>
-                    )}
-                  </View>
-                );
-              })}
-            </Card.Content>
-          </Card>
-        )}
-
-        {/* ---- Application Details ---- */}
-        <Card style={styles.card} mode="contained">
-          <Card.Content>
-            <Text variant="titleSmall" style={styles.sectionLabel}>
-              Application Details
-            </Text>
-            <Divider style={{ marginVertical: 8 }} />
-            {[
-              { label: 'Domain', value: (app as any)?.domain },
-              { label: 'Full Domain', value: (app as any)?.fullDomain },
-              { label: 'Last Updated', value: (app as any)?.lastUpdateTime ? new Date((app as any).lastUpdateTime).toLocaleString() : undefined },
-              { label: 'Deploy Date', value: (app as any)?.deploymentUpdateDate ? new Date((app as any).deploymentUpdateDate).toLocaleString() : undefined },
-              { label: 'Runtime Version', value: getMuleVersion(app) },
-              { label: 'Region', value: (app as any)?.region },
-              { label: 'Persistent Queues', value: (app as any)?.persistentQueues != null ? ((app as any).persistentQueues ? 'Enabled' : 'Disabled') : undefined },
-              { label: 'Object Store V2', value: (app as any)?.objectStoreV2 != null ? ((app as any).objectStoreV2 ? 'Enabled' : 'Disabled') : undefined },
-              { label: 'Monitoring Enabled', value: (app as any)?.monitoringEnabled != null ? ((app as any).monitoringEnabled ? 'Yes' : 'No') : undefined },
-              { label: 'Static IPs', value: (app as any)?.staticIPsEnabled != null ? ((app as any).staticIPsEnabled ? 'Enabled' : 'Disabled') : undefined },
-            ]
-              .filter((item) => item.value != null && item.value !== '')
-              .map((item) => (
-                <View key={item.label} style={{ flexDirection: 'row', paddingVertical: 4 }}>
-                  <Text
-                    variant="labelSmall"
-                    style={{ color: theme.colors.onSurfaceVariant, width: 140 }}
-                    numberOfLines={1}
-                  >
-                    {item.label}
-                  </Text>
-                  <Text
-                    variant="bodySmall"
-                    style={{ color: theme.colors.onSurface, flex: 1 }}
-                    numberOfLines={1}
-                  >
-                    {item.value}
-                  </Text>
-                </View>
-              ))}
-          </Card.Content>
-        </Card>
-
-        {/* ---- Properties Summary ---- */}
-        {app?.properties && Object.keys(app.properties).length > 0 && (
-          <Card style={styles.card} mode="contained">
-            <Card.Content>
-              <Text variant="titleSmall" style={styles.sectionLabel}>
-                Properties ({Object.keys(app.properties).length})
-              </Text>
-              <Divider style={{ marginVertical: 8 }} />
-              {Object.entries(app.properties as Record<string, string>).slice(0, 8).map(([key, value]) => (
-                <View key={key} style={{ flexDirection: 'row', paddingVertical: 4 }}>
-                  <Text
-                    variant="labelSmall"
-                    style={{ color: theme.colors.onSurfaceVariant, width: 140 }}
-                    numberOfLines={1}
-                  >
-                    {key}
-                  </Text>
-                  <Text
-                    variant="bodySmall"
-                    style={{ color: theme.colors.onSurface, flex: 1 }}
-                    numberOfLines={1}
-                  >
-                    {typeof value === 'string' && value.includes('****') ? '********' : String(value ?? '')}
-                  </Text>
-                </View>
-              ))}
-              {Object.keys(app.properties).length > 8 && (
-                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                  +{Object.keys(app.properties).length - 8} more properties
-                </Text>
-              )}
-            </Card.Content>
-          </Card>
-        )}
+        {/* Tab Content */}
+        {renderTabContent()}
       </ScrollView>
     </View>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Detail Row helper
+// ---------------------------------------------------------------------------
+
+const DetailRow: React.FC<{ label: string; value: string; theme: MD3Theme }> = ({ label, value, theme }) => (
+  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 }}>
+    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, fontSize: 12 }}>{label}</Text>
+    <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600', fontSize: 12 }}>{value}</Text>
+  </View>
+);
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -1158,7 +1320,7 @@ const createStyles = (theme: MD3Theme) =>
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 16,
-      paddingVertical: 12,
+      paddingVertical: 10,
       flexWrap: 'wrap',
       gap: 6,
     },
@@ -1166,6 +1328,22 @@ const createStyles = (theme: MD3Theme) =>
       borderColor: theme.colors.outline,
     },
     dateChipText: {
+      fontSize: 12,
+      color: theme.colors.onSurfaceVariant,
+    },
+    tabBarScroll: {
+      maxHeight: 48,
+      marginBottom: 8,
+    },
+    tabBarContent: {
+      paddingHorizontal: 16,
+      gap: 8,
+      alignItems: 'center',
+    },
+    tabChip: {
+      borderColor: theme.colors.outline,
+    },
+    tabChipText: {
       fontSize: 12,
       color: theme.colors.onSurfaceVariant,
     },
@@ -1205,8 +1383,8 @@ const createStyles = (theme: MD3Theme) =>
       borderRadius: 4,
     },
     healthBar: {
-      height: 4,
-      borderRadius: 2,
+      height: 6,
+      borderRadius: 3,
       backgroundColor: theme.colors.surfaceVariant,
     },
   });

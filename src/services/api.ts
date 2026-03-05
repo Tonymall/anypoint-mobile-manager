@@ -18,6 +18,7 @@ import axios, {
 import * as SecureStore from 'expo-secure-store';
 
 import { DEFAULT_REGION_ID, getRegionUrl } from '../config/regions';
+import logger from '../utils/logger';
 import type { ControlPlaneRegionId } from '../types';
 
 const TOKEN_KEY = 'anypoint_access_token';
@@ -88,8 +89,12 @@ export async function storeTokens(
   accessToken: string,
   refreshToken?: string,
 ): Promise<void> {
+  if (typeof accessToken !== 'string' || accessToken.length === 0) {
+    logger.warn('[storeTokens] Invalid accessToken — skipping SecureStore write');
+    return;
+  }
   await SecureStore.setItemAsync(TOKEN_KEY, accessToken);
-  if (refreshToken) {
+  if (refreshToken && typeof refreshToken === 'string') {
     await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
   }
 }
@@ -127,7 +132,7 @@ api.interceptors.request.use(
           // Cache for next request
           inMemoryToken = token;
         } else {
-          console.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
+          logger.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
         }
       } catch (_) {
         // SecureStore read failed — proceed without token
@@ -140,7 +145,7 @@ api.interceptors.request.use(
       const hasAuth = !!config.headers.Authorization;
       const orgH = config.headers['X-ANYPNT-ORG-ID'] ?? api.defaults.headers.common['X-ANYPNT-ORG-ID'] ?? 'MISSING';
       const envH = config.headers['X-ANYPNT-ENV-ID'] ?? api.defaults.headers.common['X-ANYPNT-ENV-ID'] ?? 'MISSING';
-      console.log(`[API REQ] ${(config.method ?? 'GET').toUpperCase()} ${url} | Auth:${hasAuth ? 'YES' : 'NO'} Org:${orgH} Env:${envH}`);
+      logger.log(`[API REQ] ${(config.method ?? 'GET').toUpperCase()} ${url} | Auth:${hasAuth ? 'YES' : 'NO'} Org:${orgH} Env:${envH}`);
     }
 
     return config;
@@ -161,7 +166,7 @@ api.interceptors.response.use(
       const { status } = error.response;
       const url = error.config?.url ?? 'unknown';
       const method = (error.config?.method ?? 'GET').toUpperCase();
-      console.warn(
+      logger.warn(
         `[API ${status}] ${method} ${url}`,
         typeof error.response.data === 'object'
           ? JSON.stringify(error.response.data).slice(0, 200)

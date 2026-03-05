@@ -740,7 +740,7 @@ export interface ApiError {
 
 // --- Notifications (Local) ---
 export type NotificationType = 'lifecycle' | 'alert' | 'system' | 'deployment';
-export type NotificationAction = 'start' | 'stop' | 'restart' | 'deploy' | 'alert' | 'info';
+export type NotificationAction = 'start' | 'stop' | 'restart' | 'status_change' | 'deploy' | 'undeploy' | 'error' | 'alert' | 'info';
 
 export interface AppNotification {
   id: string;

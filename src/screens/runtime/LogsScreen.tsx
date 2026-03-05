@@ -414,14 +414,14 @@ const LogsScreen: React.FC = () => {
       console.log('[LogsScreen] First entry sample:', JSON.stringify(appLogs[0]).slice(0, 300));
     }
     if (count > 0) {
-      setLastUpdated(new Date());
+      setLastUpdated(new Date()); // eslint-disable-line react-hooks/set-state-in-effect -- syncs timestamp from query data
     }
   }, [appLogs, appLogsFetched, appLogsError]);
 
   // Update lastUpdated on refetch
   useEffect(() => {
     if (dataUpdatedAt > 0) {
-      setLastUpdated(new Date(dataUpdatedAt));
+      setLastUpdated(new Date(dataUpdatedAt)); // eslint-disable-line react-hooks/set-state-in-effect -- syncs timestamp from query
     }
   }, [dataUpdatedAt]);
 

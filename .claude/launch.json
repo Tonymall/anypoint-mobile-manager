@@ -2,21 +2,27 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "expo-start",
+      "name": "expo-web",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/@expo/cli/build/bin/cli", "start"],
+      "runtimeArgs": ["node_modules/@expo/cli/build/bin/cli", "start", "--web"],
+      "port": 8081
+    },
+    {
+      "name": "expo-start",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start"],
       "port": 8081
     },
     {
       "name": "expo-android",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/@expo/cli/build/bin/cli", "start", "--android"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--android"],
       "port": 8081
     },
     {
       "name": "expo-ios",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["node_modules/@expo/cli/build/bin/cli", "start", "--ios"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["expo", "start", "--ios"],
       "port": 8081
     }
   ]

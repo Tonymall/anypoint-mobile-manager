@@ -5,6 +5,7 @@
 
 import api from './api';
 import * as monitoringService from './monitoringService';
+import logger from '../utils/logger';
 import type {
   Application,
   AppLogEntry,
@@ -35,6 +36,20 @@ function amcDeploymentsPath(): string | null {
   const envId = getEnvId();
   if (!orgId || !envId) return null;
   return `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
+}
+
+/**
+ * Match a CH2/AMC deployment object against a domain string.
+ * Checks name, id, nested application fields, fullDomain, and partial matches.
+ */
+function matchDeployment(dep: any, domain: string): boolean {
+  if (dep.name === domain || dep.id === domain) return true;
+  if (dep.application?.ref?.artifactId === domain) return true;
+  if (dep.application?.name === domain) return true;
+  if (dep.fullDomain === domain || dep.application?.fullDomain === domain) return true;
+  const dName = dep.name ?? '';
+  if (dName && (dName.includes(domain) || domain.includes(dName))) return true;
+  return false;
 }
 
 // ---------- CH2 Deployment → Application normalizer ----------
@@ -232,7 +247,7 @@ export async function getApplication(domain: string): Promise<Application> {
     try {
       const { data } = await api.get(amcPath);
       const items = Array.isArray(data) ? data : (data?.items ?? data?.data ?? []);
-      const match = items.find((d: any) => d.name === domain || d.id === domain);
+      const match = items.find((d: any) => matchDeployment(d, domain));
       if (match) return normalizeDeployment(match);
     } catch (_) { /* not available */ }
   }
@@ -297,7 +312,7 @@ export async function startApp(domain: string): Promise<Application> {
   if (amcPath) {
     const { data: deps } = await api.get(amcPath);
     const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-    const match = items.find((d: any) => d.name === domain || d.id === domain);
+    const match = items.find((d: any) => matchDeployment(d, domain));
     if (match) {
       const { data } = await api.patch(`${amcPath}/${match.id}`, {
         application: { desiredState: 'STARTED' },
@@ -397,7 +412,7 @@ export async function stopApp(domain: string): Promise<Application> {
       // Find the deployment first
       const { data: deps } = await api.get(amcPath);
       const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-      const match = items.find((d: any) => d.name === domain || d.id === domain);
+      const match = items.find((d: any) => matchDeployment(d, domain));
       if (match) {
         const depId = match.id;
         // PATCH to stop — set replicas to 0 or desiredState to STOPPED
@@ -445,7 +460,7 @@ export async function restartApp(domain: string): Promise<Application> {
   if (amcPath) {
     const { data: deps } = await api.get(amcPath);
     const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-    const match = items.find((d: any) => d.name === domain || d.id === domain);
+    const match = items.find((d: any) => matchDeployment(d, domain));
     if (match) {
       // CH2 restart: set lastModifiedDate to trigger redeploy
       const { data } = await api.patch(`${amcPath}/${match.id}`, {
@@ -520,7 +535,7 @@ export async function getAppLogs(
   // ── PER-DOMAIN RESET: if switching to a different app, clear stale flags ──
   // This prevents a failed log discovery for app A from blocking app B's logs.
   if (_logCheckedForDomain && _logCheckedForDomain !== domain) {
-    console.log(`[getAppLogs] Domain changed from "${_logCheckedForDomain}" to "${domain}" — resetting log flags`);
+    logger.log(`[getAppLogs] Domain changed from "${_logCheckedForDomain}" to "${domain}" — resetting log flags`);
     _logEndpointsAvailable = true;
     _logEndpointsChecked = false;
     _workingLogStrategy = null;
@@ -640,7 +655,7 @@ export async function getAppLogs(
       // Cache for fast path
       _cachedCh1DeploymentId = deploymentId;
       _cachedCh1Domain = domain;
-      console.log(`[getAppLogs] CH1 deployment discovered: ${deploymentId}`);
+      logger.log(`[getAppLogs] CH1 deployment discovered: ${deploymentId}`);
 
       // Step 2: Get logs using POST (supports date range + all priorities)
       // Fall back to GET with date params if POST fails
@@ -682,7 +697,7 @@ export async function getAppLogs(
     // If both /instances calls returned nothing, cache the failure
     if (instanceIds.length === 0) {
       _instancesEndpointAvailable = false;
-      console.log('[getAppLogs] /instances endpoints returned nothing — skipping for session');
+      logger.log('[getAppLogs] /instances endpoints returned nothing — skipping for session');
     }
 
     for (const instanceId of instanceIds.slice(0, 2)) {
@@ -738,56 +753,114 @@ export async function getAppLogs(
   // ---------------------------------------------------------------
   const amcPath = amcDeploymentsPath();
   if (amcPath) {
-    strategies.push(
-      { name: 'amc-direct', fn: () => api.get(`${amcPath}/${domain}/logs`, { params: getParams, headers: { Accept: 'application/json' } }) },
-      { name: 'amc-lookup', fn: async () => {
-        const { data: deps } = await api.get(amcPath!);
-        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-        const match = items.find((d: any) => d.name === domain || d.id === domain);
-        if (!match) throw new Error('No CH2 deployment found');
-        return api.get(`${amcPath}/${match.id}/logs`, { params: getParams, headers: { Accept: 'application/json' } });
-      }},
-    );
-
-    // ── AMC specs-based logs (the REAL CH2/AMC log endpoint) ──
-    // The actual Anypoint web UI fetches logs via:
-    //   GET .../deployments/{deploymentId}/specs?limit=1000  → get specId
-    //   GET .../deployments/{deploymentId}/specs/{specId}/logs?descending=true
+    // ── CH2/AMC log discovery ──
+    // First resolve the deployment once, then try multiple log sub-paths.
     strategies.push(
       { name: 'amc-specs-logs', fn: async () => {
         // Step 1: Find the deployment
-        const { data: deps } = await api.get(amcPath!);
+        const { data: deps } = await api.get(amcPath!, { headers: { Accept: 'application/json' } });
         const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        const match = items.find((d: any) => matchDeployment(d, domain));
         if (!match) throw new Error('No CH2 deployment found');
         const deploymentId = match.id;
 
         // Step 2: Get specs for this deployment
         const { data: specsData } = await api.get(
           `${amcPath}/${deploymentId}/specs`,
-          { params: { limit: 1000 } },
+          { params: { limit: 1000 }, headers: { Accept: 'application/json' } },
         );
         const specs = Array.isArray(specsData)
           ? specsData
           : (specsData?.items ?? specsData?.data ?? specsData?.specs ?? []);
         if (specs.length === 0) throw new Error('No specs found for deployment');
 
-        // Use the first (most recent) spec
-        const specId = specs[0]?.id ?? specs[0]?.specId;
-        if (!specId) throw new Error('No specId found in specs response');
+        // Sort specs by date (newest first) to ensure we get the LATEST spec
+        specs.sort((a: any, b: any) => {
+          const dateA = new Date(a.lastModifiedDate ?? a.createdDate ?? a.updatedDate ?? 0).getTime();
+          const dateB = new Date(b.lastModifiedDate ?? b.createdDate ?? b.updatedDate ?? 0).getTime();
+          return dateB - dateA;
+        });
+
+        // Use the first (most recent) spec — try multiple field names
+        const spec0 = specs[0];
+        const specId = spec0?.id ?? spec0?.specId ?? spec0?._id ?? spec0?.version;
+        if (!specId) {
+          logger.warn('[getAppLogs] specs[0] has no recognizable ID field. Keys:', Object.keys(spec0 ?? {}));
+          throw new Error('No specId found in specs response');
+        }
 
         // Cache for fast path on subsequent polls
         _cachedAmcDeploymentId = deploymentId;
         _cachedAmcSpecId = specId;
         _cachedAmcDomain = domain;
 
-        console.log(`[getAppLogs] AMC specs discovered: deploymentId=${deploymentId}, specId=${specId}`);
+        logger.log(`[getAppLogs] AMC specs discovered: deploymentId=${deploymentId}, specId=${specId}`);
 
-        // Step 3: Get logs using specId
+        // Step 3: Try to get logs via replicas first (the standard CH2 pattern)
+        try {
+          const { data: replicasData } = await api.get(
+            `${amcPath}/${deploymentId}/specs/${specId}/replicas`,
+            { headers: { Accept: 'application/json' } },
+          );
+          const replicas = Array.isArray(replicasData)
+            ? replicasData
+            : (replicasData?.items ?? replicasData?.data ?? replicasData?.replicas ?? []);
+          if (replicas.length > 0) {
+            const replicaId = replicas[0]?.id ?? replicas[0]?.replicaId ?? replicas[0]?.name;
+            if (replicaId) {
+              logger.log(`[getAppLogs] AMC replica discovered: ${replicaId}`);
+              return api.get(
+                `${amcPath}/${deploymentId}/specs/${specId}/replicas/${replicaId}/logs`,
+                {
+                  params: { descending: true, limit },
+                  headers: { Accept: 'application/json' },
+                },
+              );
+            }
+          }
+        } catch (_replicaErr) {
+          // Replicas endpoint doesn't exist — fall through to direct spec logs
+        }
+
+        // Step 3b: Try direct spec-level logs
         return api.get(
           `${amcPath}/${deploymentId}/specs/${specId}/logs`,
-          { params: { descending: true, limit }, headers: { Accept: 'application/json' } },
+          {
+            params: {
+              descending: true,
+              limit,
+              startDate: new Date(startMs).toISOString(),
+              endDate: new Date(endMs).toISOString(),
+            },
+            headers: { Accept: 'application/json' },
+          },
         );
+      }},
+    );
+
+    // ── AMC aggregated logs (per-deployment, no specId needed) ──
+    strategies.push(
+      { name: 'amc-aggregated-logs', fn: async () => {
+        const { data: deps } = await api.get(amcPath!, { headers: { Accept: 'application/json' } });
+        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+        const match = items.find((d: any) => matchDeployment(d, domain));
+        if (!match) throw new Error('No CH2 deployment found');
+        return api.get(`${amcPath}/${match.id}/logs`, {
+          params: { descending: true, limit },
+          headers: { Accept: 'application/json' },
+        });
+      }},
+    );
+
+    // ── AMC direct/lookup fallbacks ──
+    strategies.push(
+      { name: 'amc-direct', fn: () => api.get(`${amcPath}/${domain}/logs`, { params: getParams, headers: { Accept: 'application/json' } }) },
+      { name: 'amc-lookup', fn: async () => {
+        const { data: deps } = await api.get(amcPath!, { headers: { Accept: 'application/json' } });
+        const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
+        const match = items.find((d: any) => matchDeployment(d, domain));
+        if (!match) throw new Error('No CH2 deployment found');
+        return api.get(`${amcPath}/${match.id}/logs`, { params: getParams, headers: { Accept: 'application/json' } });
       }},
     );
   }
@@ -804,7 +877,7 @@ export async function getAppLogs(
         const ch2Path = amcPath ?? `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
         const { data: deps } = await api.get(ch2Path);
         const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        const match = items.find((d: any) => matchDeployment(d, domain));
         if (!match) throw new Error('No deployment found for RTF logs');
         const deploymentId = match.id;
 
@@ -825,7 +898,7 @@ export async function getAppLogs(
         const ch2Path = amcPath ?? `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
         const { data: deps } = await api.get(ch2Path);
         const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        const match = items.find((d: any) => matchDeployment(d, domain));
         if (!match) throw new Error('No deployment found for Hybrid v2 logs');
         return api.get(
           `${HYBRID_BASE}/organizations/${orgId}/environments/${envId}/deployments/${match.id}/logs`,
@@ -854,7 +927,7 @@ export async function getAppLogs(
         const ch2Path = amcPath ?? `${AMC_BASE}/organizations/${orgId}/environments/${envId}/deployments`;
         const { data: deps } = await api.get(ch2Path);
         const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-        const match = items.find((d: any) => d.name === domain || d.id === domain);
+        const match = items.find((d: any) => matchDeployment(d, domain));
         if (!match) throw new Error('No deployment found for MC logs');
         return api.get(
           `/mc/v1/organizations/${orgId}/environments/${envId}/deployments/${match.id}/application/logs`,
@@ -865,40 +938,61 @@ export async function getAppLogs(
   }
 
   const logErrors: string[] = [];
+  let orgExpiredSeen = false;
+
   for (let i = 0; i < strategies.length; i++) {
     const { name, fn } = strategies[i];
     try {
-      const { data } = await fn();
+      const { data, headers: respHeaders } = await fn();
+
+      // Reject HTML responses early (server returned SPA page instead of JSON)
+      const contentType = respHeaders?.['content-type'] ?? '';
+      if (contentType.includes('text/html')) {
+        if (!_logEndpointsChecked) {
+          logger.warn(`[getAppLogs] "${name}" returned HTML (Content-Type: text/html) — skipping`);
+        }
+        continue;
+      }
+      if (typeof data === 'string' && data.trim().length > 0) {
+        const trimmed = data.trim();
+        if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+          if (!_logEndpointsChecked) {
+            logger.warn(`[getAppLogs] "${name}" returned HTML body — skipping`);
+          }
+          continue;
+        }
+      }
+
       const entries = extractLogEntries(data);
       if (entries.length > 0) {
         _logEndpointsAvailable = true;
         _logEndpointsChecked = true;
         _workingLogStrategy = name; // ← Cache this for next poll
-        console.log(`[getAppLogs] ✅ Got ${entries.length} log entries via "${name}"`);
+        logger.log(`[getAppLogs] ✅ Got ${entries.length} log entries via "${name}"`);
         return entries;
       }
 
-      // Detect and log HTML responses (common CH2/AMC issue)
-      if (typeof data === 'string' && data.trim().length > 0) {
-        const trimmed = data.trim();
-        if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
-          console.warn(`[getAppLogs] "${name}" returned HTML instead of JSON — skipping`);
-        }
-      }
-      // Diagnostic: endpoint returned 200 but no entries extracted
+      // Diagnostic: endpoint returned 200 but no entries extracted (once per session)
       if (!_logEndpointsChecked) {
         const preview = typeof data === 'string'
-          ? data.slice(0, 800)
-          : JSON.stringify(data).slice(0, 800);
-        console.log(`[getAppLogs] "${name}" returned 200 OK but extractLogEntries found nothing. Response:`, preview);
+          ? data.slice(0, 400)
+          : JSON.stringify(data).slice(0, 400);
+        logger.log(`[getAppLogs] "${name}" returned 200 OK but no log entries. Preview:`, preview);
       }
     } catch (err: any) {
       const status = err?.response?.status;
       if (status) logErrors.push(String(status));
+
+      // Detect "Organization is expired" — this is a permanent failure
+      const errMsg = err?.response?.data?.message ?? '';
+      if (typeof errMsg === 'string' && errMsg.toLowerCase().includes('organization is expired')) {
+        orgExpiredSeen = true;
+      }
+
       if (status === 400 && !_logEndpointsChecked) {
         const respBody = err?.response?.data;
         const url = err?.config?.url ?? 'unknown';
-        console.warn(`[getAppLogs] 400 from ${url}:`,
+        logger.warn(`[getAppLogs] 400 from ${url}:`,
           typeof respBody === 'object' ? JSON.stringify(respBody).slice(0, 500) : String(respBody ?? '').slice(0, 500));
       }
     }
@@ -906,15 +1000,17 @@ export async function getAppLogs(
 
   // Log summary (only once per session)
   if (!_logEndpointsChecked) {
-    if (logErrors.length > 0) {
-      console.warn(`[getAppLogs] All ${strategies.length} strategies failed for ${domain}. Statuses: ${logErrors.join(', ')}`);
+    if (orgExpiredSeen) {
+      logger.warn(`[getAppLogs] Organization is expired — log access may be restricted. Some endpoints returned 403.`);
+    } else if (logErrors.length > 0) {
+      logger.warn(`[getAppLogs] All ${strategies.length} strategies failed for ${domain}. Statuses: ${logErrors.join(', ')}`);
     } else {
-      console.warn(`[getAppLogs] All ${strategies.length} strategies returned empty results for ${domain}`);
+      logger.warn(`[getAppLogs] All ${strategies.length} strategies returned empty results for ${domain}`);
     }
-    const allPermanent = logErrors.length > 0 && logErrors.every((s) => s === '400' || s === '404' || s === '405');
+    const allPermanent = logErrors.length > 0 && logErrors.every((s) => s === '400' || s === '404' || s === '405' || s === '403');
     if (allPermanent) {
       _logEndpointsAvailable = false;
-      console.log('[getAppLogs] All log endpoints return 400/404/405 — disabling live polling for session');
+      logger.log('[getAppLogs] All log endpoints return 400/403/404/405 — disabling live polling for session');
     }
     _logEndpointsChecked = true;
   }
@@ -978,9 +1074,54 @@ async function _getLogsByStrategy(
       }
       const amcP = amcDeploymentsPath();
       if (!amcP) throw new Error('No AMC path available');
+
+      // Try replica-based logs first (the standard CH2 pattern)
+      try {
+        const { data: replicasData } = await api.get(
+          `${amcP}/${_cachedAmcDeploymentId}/specs/${_cachedAmcSpecId}/replicas`,
+          { headers: { Accept: 'application/json' } },
+        );
+        const replicas = Array.isArray(replicasData)
+          ? replicasData
+          : (replicasData?.items ?? replicasData?.data ?? replicasData?.replicas ?? []);
+        if (replicas.length > 0) {
+          const replicaId = replicas[0]?.id ?? replicas[0]?.replicaId ?? replicas[0]?.name;
+          if (replicaId) {
+            return api.get(
+              `${amcP}/${_cachedAmcDeploymentId}/specs/${_cachedAmcSpecId}/replicas/${replicaId}/logs`,
+              {
+                params: { descending: true, limit: getParams.limit ?? 200 },
+                headers: { Accept: 'application/json' },
+              },
+            );
+          }
+        }
+      } catch (_) {
+        // Replicas not available — fall through to spec-level logs
+      }
+
       return api.get(
         `${amcP}/${_cachedAmcDeploymentId}/specs/${_cachedAmcSpecId}/logs`,
-        { params: { descending: true, limit: getParams.limit ?? 200, startDate: getParams.startDate, endDate: getParams.endDate }, headers: { Accept: 'application/json' } },
+        {
+          params: {
+            descending: true,
+            limit: getParams.limit ?? 200,
+            startDate: new Date(getParams.startDate).toISOString(),
+            endDate: new Date(getParams.endDate).toISOString(),
+          },
+          headers: { Accept: 'application/json' },
+        },
+      );
+    }
+    case 'amc-aggregated-logs': {
+      if (!_cachedAmcDeploymentId || _cachedAmcDomain !== domain) {
+        throw new Error('AMC deployment not cached — need re-discovery');
+      }
+      const amcP2 = amcDeploymentsPath();
+      if (!amcP2) throw new Error('No AMC path available');
+      return api.get(
+        `${amcP2}/${_cachedAmcDeploymentId}/logs`,
+        { params: { descending: true, limit: getParams.limit ?? 200 }, headers: { Accept: 'application/json' } },
       );
     }
     case 'rtf-logs': {
@@ -1037,7 +1178,7 @@ function extractLogEntries(data: any): AppLogEntry[] {
   if (typeof data === 'string' && data.trim().length > 0) {
     const trimmed = data.trim();
     if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
-      console.warn('[extractLogEntries] Received HTML response instead of logs — skipping');
+      logger.warn('[extractLogEntries] Received HTML response instead of logs — skipping');
       return [];
     }
     return parseRawLogText(data);
@@ -1063,6 +1204,8 @@ function extractLogEntries(data: any): AppLogEntry[] {
     const candidates = [
       data.data, data.logs, data.items, data.entries,
       data.records, data.results, data.logEntries,
+      data.messages, data.lines, data.content, data.payload,
+      data.response, data.body,
     ];
     for (const candidate of candidates) {
       if (Array.isArray(candidate) && candidate.length > 0) {
@@ -1084,6 +1227,17 @@ function normalizeLogArray(arr: any[]): AppLogEntry[] {
   if (arr.length === 0) return [];
 
   const first = arr[0];
+
+  // ── CH2 specs-based logs: { docId, timestamp, message, replicaId, logLevel, context: { logger, class } } ──
+  if (first?.docId !== undefined || first?.logLevel !== undefined || first?.replicaId !== undefined) {
+    return arr.map((e) => ({
+      timestamp: e.timestamp ?? '',
+      priority: (e.logLevel ?? e.priority ?? e.level ?? 'INFO').toUpperCase(),
+      message: e.message ?? e.msg ?? '',
+      threadName: e.replicaId ?? e.threadName ?? '',
+      loggerName: e.context?.logger ?? e.context?.class ?? e.loggerName ?? '',
+    } as AppLogEntry));
+  }
 
   // ── CH1 POST /logs response: entries have a nested `event` wrapper ──
   // Shape: { recordId, deploymentId, instanceId, line (number),
@@ -1333,6 +1487,7 @@ export async function scaleWorkers(
  */
 let dashboardStatsAvailable = true; // /dashboardStats, /statistics
 let monitoringApiAvailable = true;  // /monitoring/*, /observability/*
+let _archiveAvailable = true;       // /monitoring/archive/* endpoints
 let _dashStatsCheckDone = false;
 
 /**
@@ -1397,6 +1552,7 @@ export function isMonitoringUnavailable(): boolean {
 export function resetSessionFlags(): void {
   dashboardStatsAvailable = true;
   monitoringApiAvailable = true;
+  _archiveAvailable = true;
   _dashStatsCheckDone = false;
   _statsDiscoveryPromise = null;
   _logEndpointsAvailable = true;
@@ -1412,7 +1568,7 @@ export function resetSessionFlags(): void {
   _cachedAmcDomain = null;
   _cachedCh1DeploymentId = null;
   _cachedCh1Domain = null;
-  console.log('[runtimeService] Session flags reset');
+  logger.log('[runtimeService] Session flags reset');
 }
 
 // ---------- InfluxDB Monitoring Helpers ----------
@@ -1445,7 +1601,7 @@ function getRegionSlug(): string {
  * Returns true if an InfluxDB datasource was found.
  */
 async function discoverInfluxDatasource(): Promise<boolean> {
-  console.log('[Monitoring] discoverInfluxDatasource() called, current state:', _influxAvailable);
+  logger.log('[Monitoring] discoverInfluxDatasource() called, current state:', _influxAvailable);
   if (_influxAvailable !== null) return _influxAvailable;
 
   let _influxTriedCount = 0;
@@ -1453,14 +1609,14 @@ async function discoverInfluxDatasource(): Promise<boolean> {
   // ── Step 1: List all datasources and find InfluxDB ones ──
   try {
     const { data } = await api.get('/monitoring/api/visualizer/api/datasources');
-    console.log(`[Monitoring] Datasources API returned: ${Array.isArray(data) ? data.length + ' entries' : typeof data}`);
+    logger.log(`[Monitoring] Datasources API returned: ${Array.isArray(data) ? data.length + ' entries' : typeof data}`);
 
     if (Array.isArray(data) && data.length > 0) {
       // Log datasource summary: total count and all types
-      console.log(`[Monitoring] Datasource list: ${data.length} total, types: ${[...new Set(data.map((d: any) => d.type))].join(', ')}`);
+      logger.log(`[Monitoring] Datasource list: ${data.length} total, types: ${[...new Set(data.map((d: any) => d.type))].join(', ')}`);
       // Log all datasources for debug
       for (const ds of data) {
-        console.log(`[Monitoring] Datasource: id=${ds.id}, type=${ds.type}, name=${ds.name}, db=${ds.database ?? ds.jsonData?.database ?? 'unknown'}`);
+        logger.log(`[Monitoring] Datasource: id=${ds.id}, type=${ds.type}, name=${ds.name}, db=${ds.database ?? ds.jsonData?.database ?? 'unknown'}`);
       }
 
       // Find ALL InfluxDB datasources
@@ -1469,7 +1625,7 @@ async function discoverInfluxDatasource(): Promise<boolean> {
       );
 
       if (influxDatasources.length > 0) {
-        console.log(`[Monitoring] Found ${influxDatasources.length} InfluxDB datasource(s), testing each...`);
+        logger.log(`[Monitoring] Found ${influxDatasources.length} InfluxDB datasource(s), testing each...`);
 
         // Test each datasource to find one that works
         for (const ds of influxDatasources) {
@@ -1493,12 +1649,12 @@ async function discoverInfluxDatasource(): Promise<boolean> {
               _influxDbName = dbName;
               _influxAvailable = true;
               const measurements = testResult.results?.[0]?.series?.[0]?.values?.map((v: any) => v[0]) ?? [];
-              console.log(`[Monitoring] InfluxDB datasource VERIFIED: id=${dsId}, db=${dbName}, measurements=[${measurements.slice(0, 5).join(', ')}]`);
+              logger.log(`[Monitoring] InfluxDB datasource VERIFIED: id=${dsId}, db=${dbName}, measurements=[${measurements.slice(0, 5).join(', ')}]`);
               return true;
             }
           } catch (testErr: any) {
             const errBody = testErr?.response?.data ? (typeof testErr.response.data === 'string' ? testErr.response.data : JSON.stringify(testErr.response.data)).slice(0, 200) : '';
-            console.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}${errBody ? ' body=' + errBody : ''}`);
+            logger.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}${errBody ? ' body=' + errBody : ''}`);
             // Also try without quotes
             if (rawDbName && !rawDbName.startsWith('"')) {
               try {
@@ -1510,7 +1666,7 @@ async function discoverInfluxDatasource(): Promise<boolean> {
                   _influxDatasourceId = dsId;
                   _influxDbName = rawDbName;
                   _influxAvailable = true;
-                  console.log(`[Monitoring] InfluxDB datasource VERIFIED (unquoted): id=${dsId}, db=${rawDbName}`);
+                  logger.log(`[Monitoring] InfluxDB datasource VERIFIED (unquoted): id=${dsId}, db=${rawDbName}`);
                   return true;
                 }
               } catch (_) {
@@ -1522,11 +1678,11 @@ async function discoverInfluxDatasource(): Promise<boolean> {
       }
     }
   } catch (err: any) {
-    console.log(`[Monitoring] Datasource list API failed: ${err?.response?.status ?? err?.message}`);
+    logger.log(`[Monitoring] Datasource list API failed: ${err?.response?.status ?? err?.message}`);
   }
 
   _influxAvailable = false;
-  console.log(`[Monitoring] No working InfluxDB datasource found (tried ${_influxTriedCount} InfluxDB datasource(s))`);
+  logger.log(`[Monitoring] No working InfluxDB datasource found (tried ${_influxTriedCount} InfluxDB datasource(s))`);
   return false;
 }
 
@@ -1799,7 +1955,7 @@ async function getInfluxDBMonitoringData(
   const org = orgId ?? getOrgId();
   const env = envId ?? getEnvId();
   if (!org || !env) {
-    console.log('[Monitoring] Cannot query InfluxDB — no org/env IDs');
+    logger.log('[Monitoring] Cannot query InfluxDB — no org/env IDs');
     return null;
   }
 
@@ -1837,11 +1993,11 @@ async function getInfluxDBMonitoringData(
 
   try {
     const combinedQ = queries.join(';');
-    console.log(`[Monitoring] InfluxDB query for ${domain} (appId=${appId}): ${queries.length} statements, period=${periodMinutes}m`);
+    logger.log(`[Monitoring] InfluxDB query for ${domain} (appId=${appId}): ${queries.length} statements, period=${periodMinutes}m`);
     const result = await queryInfluxDB(combinedQ);
 
     if (result?.results) {
-      console.log(`[Monitoring] InfluxDB returned ${result.results.length} result sets for ${domain}`);
+      logger.log(`[Monitoring] InfluxDB returned ${result.results.length} result sets for ${domain}`);
 
       // Parse multi-statement results into a monitoring-friendly format
       const parsed = parseInfluxDBResults(result);
@@ -1856,7 +2012,7 @@ async function getInfluxDBMonitoringData(
         || parsed.extraMetrics.outboundRequestCount != null
       );
       if (hasInfluxData) {
-        console.log(`[Monitoring] InfluxDB SUCCESS for ${domain}: CPU=${parsed!.cpuPercent?.toFixed(1)}%, Mem=${parsed!.memoryPercent?.toFixed(1)}%, MsgCount=${parsed!.extraMetrics.messageCount}`);
+        logger.log(`[Monitoring] InfluxDB SUCCESS for ${domain}: CPU=${parsed!.cpuPercent?.toFixed(1)}%, Mem=${parsed!.memoryPercent?.toFixed(1)}%, MsgCount=${parsed!.extraMetrics.messageCount}`);
         return {
           _source: 'influxdb',
           workerStatistics: [{
@@ -1871,7 +2027,7 @@ async function getInfluxDBMonitoringData(
       }
     }
   } catch (err: any) {
-    console.log(`[Monitoring] InfluxDB multi-query failed for ${domain}: ${err?.response?.status ?? err?.message}`);
+    logger.log(`[Monitoring] InfluxDB multi-query failed for ${domain}: ${err?.response?.status ?? err?.message}`);
   }
 
   // ── Fallback: try alternative measurement names (some orgs use different schemas) ──
@@ -1889,7 +2045,7 @@ async function getInfluxDBMonitoringData(
       const result = await queryInfluxDB(q);
       const parsed = parseInfluxDBResults(result);
       if (parsed && (parsed.cpuPercent != null || parsed.memoryPercent != null)) {
-        console.log(`[Monitoring] InfluxDB FALLBACK succeeded for ${domain}: CPU=${parsed.cpuPercent?.toFixed(1)}%`);
+        logger.log(`[Monitoring] InfluxDB FALLBACK succeeded for ${domain}: CPU=${parsed.cpuPercent?.toFixed(1)}%`);
         return {
           _source: 'influxdb',
           workerStatistics: [{
@@ -1906,7 +2062,7 @@ async function getInfluxDBMonitoringData(
     }
   }
 
-  console.log(`[Monitoring] InfluxDB queries returned no data for ${domain} (appId=${appId})`);
+  logger.log(`[Monitoring] InfluxDB queries returned no data for ${domain} (appId=${appId})`);
   return null;
 }
 
@@ -1933,11 +2089,11 @@ export async function getDashboardStats(
   // ── FAST PATH: discovery already done, nothing works → skip immediately ──
   // This prevents ALL redundant API calls on subsequent React Query refetches.
   if (_dashStatsCheckDone && !dashboardStatsAvailable && !monitoringApiAvailable && _influxAvailable === false) {
-    console.log(`[getDashboardStats] Fast-path exit for "${domain}" — all sources disabled`);
+    logger.log(`[getDashboardStats] Fast-path exit for "${domain}" — all sources disabled`);
     return null;
   }
 
-  console.log(`[getDashboardStats] Called for "${domain}" | dashStats=${dashboardStatsAvailable} monApi=${monitoringApiAvailable} influx=${_influxAvailable} checkDone=${_dashStatsCheckDone}`);
+  logger.log(`[getDashboardStats] Called for "${domain}" | dashStats=${dashboardStatsAvailable} monApi=${monitoringApiAvailable} influx=${_influxAvailable} checkDone=${_dashStatsCheckDone}`);
 
   const now = Date.now();
   const startMs = now - periodMinutes * 60 * 1000;
@@ -1974,7 +2130,7 @@ export async function getDashboardStats(
       const hasKeys = appDetail ? Object.keys(appDetail).filter(k =>
         k.includes('worker') || k.includes('monitor') || k.includes('stat')
       ).join(',') : '';
-      console.log(`[getDashboardStats] App detail for ${domain}: monitoringEnabled=${monitoringEnabled}, fullDomain=${_appFullDomain}, workerStatuses=${wsType}, hasStats=${hasStats}, relevant keys=[${hasKeys}]`);
+      logger.log(`[getDashboardStats] App detail for ${domain}: monitoringEnabled=${monitoringEnabled}, fullDomain=${_appFullDomain}, workerStatuses=${wsType}, hasStats=${hasStats}, relevant keys=[${hasKeys}]`);
     }
   } catch (_) {
     // App detail fetch failed, try other sources
@@ -1992,7 +2148,7 @@ export async function getDashboardStats(
         const toIso = new Date(now).toISOString();
 
         // ── Test dashboardStats endpoints ──
-        console.log('[getDashboardStats] Discovery gate: testing dashboardStats...');
+        logger.log('[getDashboardStats] Discovery gate: testing dashboardStats...');
         let statsFailed = true;
         const statsTests = [
           () => api.get(`${CLOUDHUB_BASE}/applications/${testDomain}/dashboardStats`, {
@@ -2013,28 +2169,39 @@ export async function getDashboardStats(
         }
         if (statsFailed) {
           dashboardStatsAvailable = false;
-          console.log('[getDashboardStats] dashboardStats endpoints return 404 — disabling for session');
+          logger.log('[getDashboardStats] dashboardStats endpoints return 404 — disabling for session');
         }
 
         // ── Test monitoring/observability endpoints ──
-        console.log('[getDashboardStats] Discovery gate: testing monitoring APIs...');
+        logger.log('[getDashboardStats] Discovery gate: testing monitoring APIs...');
         if (orgId && envId) {
           // First: discover available metric types (diagnostic)
           try {
             const { data: metricTypes } = await api.get('/observability/api/v1/metric_types');
             const typeNames = Array.isArray(metricTypes) ? metricTypes.map((t: any) => t.name ?? t.id ?? t).slice(0, 15) : [];
-            console.log(`[getDashboardStats] Available metric types: [${typeNames.join(', ')}]`);
+            logger.log(`[getDashboardStats] Available metric types: [${typeNames.join(', ')}]`);
           } catch (err: any) {
-            console.log(`[getDashboardStats] metric_types discovery failed: ${err?.response?.status ?? err?.message}`);
+            logger.log(`[getDashboardStats] metric_types discovery failed: ${err?.response?.status ?? err?.message}`);
           }
 
           let monFound = false;
           const monTests: Array<() => Promise<any>> = [
-            () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
-              targets: [{ target: 'worker-cpu-usage', type: 'timeserie' }],
-              range: { from: fromIso, to: toIso },
-              app: testDomain,
-            }),
+            async () => {
+              if (!_archiveAvailable) throw new Error('Archive disabled');
+              try {
+                return await api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
+                  targets: [{ target: 'worker-cpu-usage', type: 'timeserie' }],
+                  range: { from: fromIso, to: toIso },
+                  app: testDomain,
+                });
+              } catch (err: any) {
+                if (err?.response?.status === 404 || err?.response?.status === 405) {
+                  _archiveAvailable = false;
+                  logger.log('[getDashboardStats] monitoring-archive returned 404/405 — disabling for session');
+                }
+                throw err;
+              }
+            },
             // Observability Metrics API — use correct AMQL metric types
             () => api.post('/observability/api/v1/metrics:search', {
               query: `SELECT timestamp, count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES PT1H`,
@@ -2051,13 +2218,13 @@ export async function getDashboardStats(
               if (data) { monFound = true; break; }
             } catch (err: any) {
               const s = err?.response?.status;
-              console.log(`[getDashboardStats] Monitoring API test failed: status=${s}`);
+              logger.log(`[getDashboardStats] Monitoring API test failed: status=${s}`);
               // Continue to try next endpoint
             }
           }
           if (!monFound) {
             monitoringApiAvailable = false;
-            console.log('[getDashboardStats] Monitoring APIs unavailable — disabling for session');
+            logger.log('[getDashboardStats] Monitoring APIs unavailable — disabling for session');
           }
         } else {
           // No org/env → can't use monitoring APIs
@@ -2066,12 +2233,12 @@ export async function getDashboardStats(
 
         // ── Test InfluxDB proxy (the REAL monitoring endpoint) ──
         // This is the Grafana-style datasource proxy that the Anypoint web UI uses.
-        console.log('[getDashboardStats] Discovery gate: testing InfluxDB proxy...');
+        logger.log('[getDashboardStats] Discovery gate: testing InfluxDB proxy...');
         if (_influxAvailable === null) {
           await discoverInfluxDatasource();
         }
 
-        console.log('[getDashboardStats] Discovery complete:', { dashboardStatsAvailable, monitoringApiAvailable, _influxAvailable });
+        logger.log('[getDashboardStats] Discovery complete:', { dashboardStatsAvailable, monitoringApiAvailable, _influxAvailable });
         _dashStatsCheckDone = true;
       })();
     }
@@ -2118,15 +2285,26 @@ export async function getDashboardStats(
       // Grafana-style monitoring archive query (requires Titanium/Platinum)
       {
         label: 'monitoring-archive',
-        fn: () => api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
-          targets: [
-            { target: 'worker-cpu-usage', type: 'timeserie' },
-            { target: 'worker-memory-usage', type: 'timeserie' },
-            { target: 'worker-thread-count', type: 'timeserie' },
-          ],
-          range: { from: fromIso, to: toIso },
-          app: domain,
-        }),
+        fn: async () => {
+          if (!_archiveAvailable) throw new Error('Archive disabled');
+          try {
+            return await api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
+              targets: [
+                { target: 'worker-cpu-usage', type: 'timeserie' },
+                { target: 'worker-memory-usage', type: 'timeserie' },
+                { target: 'worker-thread-count', type: 'timeserie' },
+              ],
+              range: { from: fromIso, to: toIso },
+              app: domain,
+            });
+          } catch (err: any) {
+            if (err?.response?.status === 404 || err?.response?.status === 405) {
+              _archiveAvailable = false;
+              logger.log('[getDashboardStats] monitoring-archive returned 404/405 — disabling for session');
+            }
+            throw err;
+          }
+        },
       },
       // Observability Metrics API — inbound request metrics (correct AMQL)
       {
@@ -2141,7 +2319,7 @@ export async function getDashboardStats(
       try {
         const { data } = await attempt.fn();
         if (data) {
-          console.log(`[getDashboardStats] ${attempt.label} returned data for ${domain}`);
+          logger.log(`[getDashboardStats] ${attempt.label} returned data for ${domain}`);
           // Tag the response with source info
           if (typeof data === 'object' && !Array.isArray(data)) {
             data._source = attempt.label;
@@ -2149,7 +2327,7 @@ export async function getDashboardStats(
           return data;
         }
       } catch (err: any) {
-        console.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
+        logger.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
       }
     }
 
@@ -2216,12 +2394,12 @@ export async function getDashboardStats(
           }
         }
       } catch (err: any) {
-        console.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
+        logger.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
       }
     }
 
     if (hasAnyObservabilityData) {
-      console.log(`[getDashboardStats] Observability API returned app-level metrics for ${domain}:`, observabilityResult._appMetrics);
+      logger.log(`[getDashboardStats] Observability API returned app-level metrics for ${domain}:`, observabilityResult._appMetrics);
       return observabilityResult;
     }
   }
@@ -2231,14 +2409,14 @@ export async function getDashboardStats(
     try {
       const jvmData = await monitoringService.getJVMMetrics(orgId, envId, domain);
       if (jvmData && typeof jvmData === 'object' && Object.keys(jvmData).length > 0) {
-        console.log(`[getDashboardStats] JVM endpoint returned data for ${domain}:`, Object.keys(jvmData).join(', '));
+        logger.log(`[getDashboardStats] JVM endpoint returned data for ${domain}:`, Object.keys(jvmData).join(', '));
         return {
           _source: 'jvm-endpoint',
           _jvmMetrics: jvmData,
         };
       }
     } catch (err: any) {
-      console.log(`[getDashboardStats] JVM endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
+      logger.log(`[getDashboardStats] JVM endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
     }
   }
 
@@ -2255,14 +2433,14 @@ export async function getDashboardStats(
         interval: 'PT1M',
       });
       if (metricsData && Array.isArray(metricsData) && metricsData.length > 0) {
-        console.log(`[getDashboardStats] Monitoring metrics endpoint returned ${metricsData.length} series for ${domain}`);
+        logger.log(`[getDashboardStats] Monitoring metrics endpoint returned ${metricsData.length} series for ${domain}`);
         return {
           _source: 'monitoring-metrics',
           _metricSeries: metricsData,
         };
       }
     } catch (err: any) {
-      console.log(`[getDashboardStats] Monitoring metrics endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
+      logger.log(`[getDashboardStats] Monitoring metrics endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
     }
   }
 
@@ -2278,7 +2456,7 @@ export async function getDashboardStats(
       );
       if (influxData) return influxData;
     } catch (err: any) {
-      console.log(`[getDashboardStats] InfluxDB query failed for ${domain}: ${err?.message}`);
+      logger.log(`[getDashboardStats] InfluxDB query failed for ${domain}: ${err?.message}`);
     }
   }
 
@@ -2288,7 +2466,7 @@ export async function getDashboardStats(
     try {
       const { data: deps } = await api.get(amcPath);
       const items = Array.isArray(deps) ? deps : (deps?.items ?? deps?.data ?? []);
-      const match = items.find((d: any) => d.name === domain || d.id === domain);
+      const match = items.find((d: any) => matchDeployment(d, domain));
       if (match) {
         const { data: detail } = await api.get(`${amcPath}/${match.id}`);
         if (detail) return detail;

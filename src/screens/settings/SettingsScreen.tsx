@@ -28,6 +28,9 @@ import { resetSessionFlags } from '../../services/runtimeService';
 import { getRegionById } from '../../config/regions';
 import { hapticWarning, hapticSelection } from '../../utils/haptics';
 import { anypointColors } from '../../theme';
+import { requestPermissions } from '../../services/notificationService';
+import { useNotificationStore } from '../../stores/notificationStore';
+import logger from '../../utils/logger';
 
 // ── Reusable Setting Row ──
 const SettingRow: React.FC<{
@@ -128,19 +131,24 @@ const SettingsScreen: React.FC = () => {
 
   const handleLogout = useCallback(async () => {
     hapticWarning();
-    console.log('[Settings] Logout initiated');
+    logger.log('[Settings] Logout initiated');
     setLoggingOut(true);
     setLogoutDialogVisible(false);
     try {
       await authService.logout();
-      console.log('[Settings] authService.logout() complete (API state reset)');
+      logger.log('[Settings] authService.logout() complete (API state reset)');
       resetSessionFlags();
-      console.log('[Settings] runtimeService session flags reset');
+      logger.log('[Settings] runtimeService session flags reset');
     } finally {
       queryClient.clear();
-      console.log('[Settings] queryClient cleared');
+      logger.log('[Settings] queryClient cleared');
+      // Clear notifications — they belong to the current account/session.
+      // Prevents stale notifications from showing on a different account.
+      const { clearAll } = require('../../stores/notificationStore').useNotificationStore.getState();
+      clearAll();
+      logger.log('[Settings] notifications cleared');
       logout();
-      console.log('[Settings] authStore.logout() complete');
+      logger.log('[Settings] authStore.logout() complete');
       setLoggingOut(false);
     }
   }, [logout, queryClient]);
@@ -321,7 +329,16 @@ const SettingsScreen: React.FC = () => {
           right={
             <Switch
               value={settings.pushNotificationsEnabled}
-              onValueChange={(val) => { hapticSelection(); updateSettings({ pushNotificationsEnabled: val }); }}
+              onValueChange={async (val) => {
+                hapticSelection();
+                if (val) {
+                  // Request permission when user enables notifications
+                  const granted = await requestPermissions();
+                  useNotificationStore.getState().setPermissionGranted(granted);
+                  if (!granted) return; // Don't enable if permission denied
+                }
+                updateSettings({ pushNotificationsEnabled: val });
+              }}
               accessibilityLabel={`Push notifications ${settings.pushNotificationsEnabled ? 'enabled' : 'disabled'}`}
             />
           }

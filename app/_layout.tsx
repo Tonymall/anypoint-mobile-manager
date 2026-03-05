@@ -25,8 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QueryProvider } from '../src/providers/QueryProvider';
 import SplashScreen from '../src/components/common/SplashScreen';
 import ErrorBoundary from '../src/components/common/ErrorBoundary';
-import { requestPermissions } from '../src/services/notificationService';
-import { useNotificationStore } from '../src/stores/notificationStore';
+import { setupNotificationChannel } from '../src/services/notificationService';
 
 // Keep the native splash screen visible while we load
 ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
@@ -95,14 +94,10 @@ export default function RootLayout() {
     restore();
   }, []);
 
-  // Request notification permissions on first launch
+  // Set up Android notification channel on startup (no permission prompt).
+  // Permission is requested later from Settings when user enables push notifications.
   useEffect(() => {
-    const permissionGranted = useNotificationStore.getState().permissionGranted;
-    if (permissionGranted === null) {
-      requestPermissions().then((granted) => {
-        useNotificationStore.getState().setPermissionGranted(granted);
-      });
-    }
+    setupNotificationChannel();
   }, []);
 
   const handleSplashFinish = useCallback(() => {

@@ -80,7 +80,14 @@
       "Bash(find \"C:\\\\Users\\\\xTony\\\\Documents\\\\Projects\\\\anypoint-mobile-manager/app/\\(auth\\)\" -type f)",
       "Bash(xargs grep -l \"useWindowDimensions\\\\|orientation\\\\|landscape\")",
       "Bash(npx expo install --check react-native-webview)",
-      "Bash(npm install)"
+      "Bash(npm install)",
+      "Bash(npx tsc --noEmit --pretty src/screens/monitoring/MonitoringScreen.tsx src/screens/monitoring/AppMonitoringDetailScreen.tsx)",
+      "Bash(npx tsc --noEmit --pretty src/screens/monitoring/AppMonitoringDetailScreen.tsx)",
+      "Bash(npm install --save-dev @types/jest)",
+      "Bash(npx jest --no-cache)",
+      "Bash(npx eslint src/ --ext .ts,.tsx --max-warnings 50)",
+      "Bash(npx eslint src/ --ext .ts,.tsx --quiet)",
+      "Bash(npm install --save-dev eslint-plugin-react-hooks)"
     ]
   }
 }
