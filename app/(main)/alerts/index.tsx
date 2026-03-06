@@ -1,5 +1,5 @@
 // ============================================================
-// Alerts Tab — Segmented: Feed | Platform | Rules
+// Alerts Tab - Segmented: Feed | Platform
 // ============================================================
 
 import React, { useState, useCallback } from 'react';
@@ -10,12 +10,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import SegmentedControl from '../../../src/components/common/SegmentedControl';
 import NotificationsScreen from '../../../src/screens/notifications/NotificationsScreen';
 import PlatformAlertsScreen from '../../../src/screens/alerts/PlatformAlertsScreen';
-import AlertRulesScreen from '../../../src/screens/alerts/AlertRulesScreen';
 
 const SEGMENTS = [
   { key: 'feed', label: 'Feed' },
   { key: 'platform', label: 'Platform' },
-  { key: 'rules', label: 'Rules' },
 ];
 
 export default function AlertsIndex() {
@@ -36,7 +34,6 @@ export default function AlertsIndex() {
       />
       {activeSegment === 'feed' && <NotificationsScreen />}
       {activeSegment === 'platform' && <PlatformAlertsScreen />}
-      {activeSegment === 'rules' && <AlertRulesScreen />}
     </View>
   );
 }
@@ -44,3 +41,6 @@ export default function AlertsIndex() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
 });
+
+
+

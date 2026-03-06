@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Anypoint Mobile Platform - SSO / Browser Login Screen
 // WebView-based authentication flow supporting MFA, SSO,
 // and standard username/password login via the Anypoint web UI.
@@ -18,24 +18,17 @@ import {
   Snackbar,
 } from 'react-native-paper';
 import { WebView, type WebViewNavigation, type WebViewMessageEvent } from 'react-native-webview';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
-import { getBaseUrl, setAuthHeader, storeTokens } from '../../services/api';
+import { getBaseUrl, setAuthHeader, storeTokens, enableCookieSessionAuth } from '../../services/api';
+import * as authService from '../../services/authService';
 import type { AuthTokens } from '../../types';
 import logger from '../../utils/logger';
 
-// ── JavaScript injected after the user completes web-based login ──
-// Extracts EVERYTHING from within the WebView cookie context:
-//   1. Bearer token (from cookies or API response)
-//   2. User profile (from /accounts/api/me)
-//   3. Organization list (embedded in user profile)
-//
-// This avoids native Axios calls that can't access WebView cookies.
 const INJECTED_JS = `
   (function() {
     try {
-      // Step 1: Fetch full user profile using session cookies
       var xhr = new XMLHttpRequest();
       xhr.open('GET', '/accounts/api/me', false);
       xhr.withCredentials = true;
@@ -46,7 +39,6 @@ const INJECTED_JS = `
         var user = data.user || data;
         var orgs = user.memberOfOrganizations || [];
 
-        // Step 2: Try to extract a bearer token from cookies
         var token = null;
         try {
           var cookies = document.cookie.split(';');
@@ -57,9 +49,8 @@ const INJECTED_JS = `
               break;
             }
           }
-        } catch(cookieErr) {}
+        } catch (cookieErr) {}
 
-        // Also check if the /me response itself contained a token
         if (!token && data.access_token) token = data.access_token;
         if (!token && user.properties && user.properties.cs_token) token = user.properties.cs_token;
 
@@ -71,9 +62,8 @@ const INJECTED_JS = `
         }));
         return;
       }
-    } catch(e) {}
+    } catch (e) {}
 
-    // Fallback: try cookie-only token extraction
     try {
       var cookies = document.cookie.split(';');
       var token = null;
@@ -91,7 +81,7 @@ const INJECTED_JS = `
         }));
         return;
       }
-    } catch(e) {}
+    } catch (e) {}
 
     window.ReactNativeWebView.postMessage(JSON.stringify({
       type: 'extraction_failed',
@@ -101,7 +91,6 @@ const INJECTED_JS = `
   true;
 `;
 
-// URL path segments that indicate a successful post-login redirect
 const POST_LOGIN_PATHS = [
   '/home/',
   '/home',
@@ -121,30 +110,23 @@ const SSOLoginScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const webViewRef = useRef<WebView>(null);
-  const { mfaUsername } = useLocalSearchParams<{ mfaUsername?: string }>();
+  const pendingMfaChallenge = authService.getPendingMFAChallenge();
+  const isMfaContinuation = !!pendingMfaChallenge;
 
-  // When launched from LoginScreen after MFA detection, mfaUsername
-  // carries the already-entered username so we can pre-fill it in the
-  // Anypoint login form, avoiding a full credential re-entry.
-  const isMfaContinuation = !!mfaUsername;
-
-  // ── Auth store ──
   const loginPending = useAuthStore((state) => state.loginPending);
   const setOrganizations = useAuthStore((state) => state.setOrganizations);
 
-  // ── State ──
   const [isExtracting, setIsExtracting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [webViewKey, setWebViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
-  const hasPrefilled = useRef(false);
+  const hasPrefilledRef = useRef(false);
   const retryCountRef = useRef(0);
   const baseUrl = getBaseUrl();
-  const loginUrl = `${baseUrl}/accounts/login`;
+  const loginUrl = `${baseUrl}/login/signin`;
 
-  // ── Determine if a URL is a post-login page ──
   const isPostLoginUrl = useCallback(
     (url: string): boolean => {
       if (!url) return false;
@@ -153,7 +135,6 @@ const SSOLoginScreen: React.FC = () => {
         const host = parsed.hostname;
         const path = parsed.pathname;
 
-        // Don't trigger extraction on MFA / verification pages
         if (
           host.includes('verify.salesforce.com') ||
           host.includes('login.salesforce.com') ||
@@ -163,22 +144,29 @@ const SSOLoginScreen: React.FC = () => {
           return false;
         }
 
-        // Still on the login page — not post-login
-        if (path === '/accounts/login' || path === '/accounts/login/') {
+        if (
+          path === '/accounts/login' ||
+          path === '/accounts/login/' ||
+          path === '/login/signin' ||
+          path === '/login/signin/'
+        ) {
           return false;
         }
-        // Check against known post-login paths
+
         if (POST_LOGIN_PATHS.some((p) => path.startsWith(p))) {
           return true;
         }
-        // Also detect any path that is NOT the login page on the same domain
+
         if (
           parsed.origin === baseUrl &&
           path !== '/accounts/login' &&
-          !path.startsWith('/accounts/login')
+          path !== '/login/signin' &&
+          !path.startsWith('/accounts/login') &&
+          !path.startsWith('/login/signin')
         ) {
           return true;
         }
+
         return false;
       } catch {
         return false;
@@ -187,70 +175,97 @@ const SSOLoginScreen: React.FC = () => {
     [baseUrl],
   );
 
-  // ── Complete auth using data extracted FROM the WebView ──
   const completeAuthentication = useCallback(
-    async (payload: {
-      user: any;
-      organizations?: any[];
-      token?: string | null;
-    }) => {
+    async (payload: { user: any; organizations?: any[]; token?: string | null; xsrfToken?: string | null }) => {
       setIsExtracting(true);
       try {
-        const { user, organizations, token } = payload;
+        const { user, organizations, token, xsrfToken } = payload;
 
         if (!user || typeof user !== 'object') {
           throw new Error('No user profile data received from browser session.');
         }
 
-        // A bearer token is REQUIRED — the native app uses Axios with
-        // Authorization headers for every API call. Cookie-only sessions
-        // from the WebView cannot be shared with native HTTP clients.
         if (!token || typeof token !== 'string' || token.length === 0) {
           logger.warn('[SSO] No bearer token extracted — cannot proceed');
           throw new Error(
             'Could not extract an access token from the browser session. ' +
-            'Please try signing in with username and password instead.',
+              'Please try signing in with username and password instead.',
           );
         }
 
-        const accessToken = token;
-        setAuthHeader(accessToken);
+        setAuthHeader(token);
         try {
-          await storeTokens(accessToken);
+          await storeTokens(token);
         } catch (storeError: any) {
           logger.warn('[SSO] storeTokens failed:', storeError?.message);
         }
-        logger.log('[SSO] Bearer token stored');
 
         const tokens: AuthTokens = {
-          accessToken,
+          accessToken: token,
           tokenType: 'bearer',
           expiresIn: 3600,
           expiresAt: Date.now() + 3600 * 1000,
         };
 
         const orgs = organizations ?? user.memberOfOrganizations ?? [];
-
         loginPending(user, tokens);
         if (orgs.length > 0) {
           setOrganizations(orgs);
+        }
+        if (isMfaContinuation) {
+          authService.clearPendingMFAChallenge();
         }
 
         logger.log('[SSO] Authentication complete, navigating to org selection');
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Authentication failed:', error?.message);
-        setErrorMessage('Authentication failed. Please try again.');
+        setErrorMessage(error?.message ?? 'Authentication failed. Please try again.');
         setSnackbarVisible(true);
         hasInjectedRef.current = false;
         retryCountRef.current = 0;
         setIsExtracting(false);
       }
     },
-    [loginPending, setOrganizations, router],
+    [isMfaContinuation, loginPending, router, setOrganizations],
   );
 
-  // ── Handle token-only extraction (no user data from WebView) ──
+  const completeSessionOnly = useCallback(
+    async (xsrfToken: string) => {
+      setIsExtracting(true);
+      try {
+        await enableCookieSessionAuth(xsrfToken);
+        const user = await authService.getCurrentUser(undefined, baseUrl);
+        const orgs = user.memberOfOrganizations ?? [];
+        const tokens: AuthTokens = {
+          accessToken: '',
+          tokenType: 'session',
+          expiresIn: 3600,
+          expiresAt: Date.now() + 3600 * 1000,
+        } as AuthTokens;
+
+        loginPending(user, tokens);
+        if (orgs.length > 0) {
+          setOrganizations(orgs);
+        }
+        if (isMfaContinuation) {
+          authService.clearPendingMFAChallenge();
+        }
+
+        logger.log('[SSO] Session-cookie authentication complete');
+        router.replace('/(auth)/select-org');
+      } catch (error: any) {
+        logger.error('[SSO] Session-cookie auth failed:', error?.message);
+        setErrorMessage('Authenticated browser session found, but native session setup failed. Please try again.');
+        setSnackbarVisible(true);
+        hasInjectedRef.current = false;
+        retryCountRef.current = 0;
+        setIsExtracting(false);
+      }
+    },
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations],
+  );
+
   const completeWithTokenOnly = useCallback(
     async (token: string) => {
       setIsExtracting(true);
@@ -258,11 +273,8 @@ const SSOLoginScreen: React.FC = () => {
         setAuthHeader(token);
         await storeTokens(token);
 
-        // We have a bearer token, so native Axios calls will work
-        const authService = require('../../services/authService');
         const user = await authService.getCurrentUser(token, baseUrl);
         const orgs = user.memberOfOrganizations ?? [];
-
         const tokens: AuthTokens = {
           accessToken: token,
           tokenType: 'bearer',
@@ -273,6 +285,9 @@ const SSOLoginScreen: React.FC = () => {
         loginPending(user, tokens);
         if (orgs.length > 0) {
           setOrganizations(orgs);
+        }
+        if (isMfaContinuation) {
+          authService.clearPendingMFAChallenge();
         }
 
         logger.log('[SSO] Token-only authentication complete');
@@ -286,78 +301,131 @@ const SSOLoginScreen: React.FC = () => {
         setIsExtracting(false);
       }
     },
-    [baseUrl, loginPending, setOrganizations, router],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations],
   );
 
-  // ── Pre-fill username when MFA continuation ──
-  // Injects JS to fill the username field on the Anypoint login page
-  // so the user only needs to re-enter their password.
-  const prefillUsername = useCallback(() => {
-    if (!isMfaContinuation || !mfaUsername || hasPrefilled.current) return;
-    hasPrefilled.current = true;
+  const prefillCredentialsAndSubmit = useCallback(() => {
+    if (!isMfaContinuation || !pendingMfaChallenge || hasPrefilledRef.current) return;
+    hasPrefilledRef.current = true;
 
-    const escapedUsername = mfaUsername.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const escapedUsername = pendingMfaChallenge.username
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
+    const escapedPassword = pendingMfaChallenge.password
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
+
     const prefillJS = `
       (function() {
-        try {
-          // Try common Anypoint login form selectors
-          var selectors = [
+        var attempts = 0;
+        function query(selectors) {
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el) return el;
+          }
+          return null;
+        }
+        function setValue(el, value) {
+          if (!el) return false;
+          try {
+            var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSet.call(el, value);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+        function tryFill() {
+          attempts += 1;
+          var username = query([
             'input[name="username"]',
             'input[type="email"]',
             'input#username',
             '#username',
-            'input[autocomplete="username"]',
-          ];
-          for (var i = 0; i < selectors.length; i++) {
-            var el = document.querySelector(selectors[i]);
-            if (el) {
-              var nativeSet = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 'value'
-              ).set;
-              nativeSet.call(el, '${escapedUsername}');
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-              break;
-            }
-          }
-          // Focus the password field
-          var pwSelectors = [
+            'input[autocomplete="username"]'
+          ]);
+          var password = query([
             'input[name="password"]',
             'input[type="password"]',
             'input#password',
-          ];
-          for (var j = 0; j < pwSelectors.length; j++) {
-            var pw = document.querySelector(pwSelectors[j]);
-            if (pw) { pw.focus(); break; }
+            'input[autocomplete="current-password"]'
+          ]);
+          if (!username || !password) {
+            if (attempts < 20) {
+              setTimeout(tryFill, 500);
+            }
+            return;
           }
-        } catch(e) {}
+          setValue(username, '${escapedUsername}');
+          setValue(password, '${escapedPassword}');
+
+          var submit = query([
+            'button[type="submit"]',
+            'input[type="submit"]',
+            'button[name="login"]',
+            'button[data-testid="login-button"]'
+          ]);
+          if (submit && typeof submit.click === 'function') {
+            submit.click();
+            return;
+          }
+          var form = username.form || password.form || document.querySelector('form');
+          if (form && typeof form.submit === 'function') {
+            form.submit();
+          }
+        }
+        tryFill();
       })();
       true;
     `;
-    // Delay to let the login page render
+
     setTimeout(() => {
       webViewRef.current?.injectJavaScript(prefillJS);
-    }, 1500);
-  }, [isMfaContinuation, mfaUsername]);
+    }, 250);
+  }, [isMfaContinuation, pendingMfaChallenge]);
 
-  // ── Handle navigation changes — detect post-login redirect ──
   const handleNavigationStateChange = useCallback(
     (navState: WebViewNavigation) => {
       const { url } = navState;
       if (!url) return;
 
-      // On the login page — pre-fill username if this is an MFA continuation
-      if (
-        url.includes('/accounts/login') &&
-        isMfaContinuation &&
-        !hasPrefilled.current
-      ) {
-        prefillUsername();
+      if (isMfaContinuation) {
+        logger.log('[SSO] Hosted MFA page:', url);
+
+        if (
+          (url.includes('/accounts/login') || url.includes('/login/signin')) &&
+          !url.includes('errorMessage=')
+        ) {
+          prefillCredentialsAndSubmit();
+        }
+
+        if (url.includes('/login/signin?errorMessage=')) {
+          setErrorMessage('MFA verification could not be completed. Please try again.');
+          setSnackbarVisible(true);
+          authService.clearPendingMFAChallenge();
+          return;
+        }
+
+        if (url.includes('/accounts/login/mfa_callback') || isPostLoginUrl(url)) {
+          if (!hasInjectedRef.current) {
+            hasInjectedRef.current = true;
+            retryCountRef.current = 0;
+            setIsExtracting(true);
+            setTimeout(() => {
+              webViewRef.current?.stopLoading();
+              webViewRef.current?.injectJavaScript(INJECTED_JS);
+            }, 250);
+          }
+          return;
+        }
+
+        return;
       }
 
       if (hasInjectedRef.current) return;
 
-      // Let the user complete MFA / verification — do NOT inject extraction JS
       if (
         url.includes('verify.salesforce.com') ||
         url.includes('login.salesforce.com') ||
@@ -372,16 +440,14 @@ const SSOLoginScreen: React.FC = () => {
         logger.log('[SSO] Post-login redirect detected');
         hasInjectedRef.current = true;
         retryCountRef.current = 0;
-        // Give the page a moment to settle, then inject extraction script
         setTimeout(() => {
           webViewRef.current?.injectJavaScript(INJECTED_JS);
         }, 2500);
       }
     },
-    [isPostLoginUrl, isMfaContinuation, prefillUsername],
+    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit],
   );
 
-  // ── Handle messages from injected JavaScript ──
   const handleWebViewMessage = useCallback(
     (event: WebViewMessageEvent) => {
       try {
@@ -390,7 +456,6 @@ const SSOLoginScreen: React.FC = () => {
 
         switch (data.type) {
           case 'auth_complete':
-            // Got user + orgs + optional token from WebView
             completeAuthentication({
               user: data.user,
               organizations: data.organizations,
@@ -399,7 +464,6 @@ const SSOLoginScreen: React.FC = () => {
             break;
 
           case 'token_only':
-            // Got a token but no user data — use native API
             completeWithTokenOnly(data.token);
             break;
 
@@ -413,14 +477,13 @@ const SSOLoginScreen: React.FC = () => {
                   hasInjectedRef.current = true;
                   webViewRef.current?.injectJavaScript(INJECTED_JS);
                 }
-              }, 3000);
+              }, 2000);
             } else {
-              setErrorMessage(
-                'Could not extract session data. Please try signing in again.',
-              );
+              setErrorMessage('Could not extract session data. Please try signing in again.');
               setSnackbarVisible(true);
               hasInjectedRef.current = false;
               retryCountRef.current = 0;
+              setIsExtracting(false);
             }
             break;
 
@@ -431,21 +494,23 @@ const SSOLoginScreen: React.FC = () => {
         logger.error('[SSO] Failed to parse WebView message:', e?.message);
       }
     },
-    [completeAuthentication, completeWithTokenOnly],
+    [completeAuthentication, completeSessionOnly, completeWithTokenOnly],
   );
 
-  // ── Handlers ──
   const handleBack = useCallback(() => {
+    if (isMfaContinuation) {
+      authService.clearPendingMFAChallenge();
+    }
     router.back();
-  }, [router]);
+  }, [isMfaContinuation, router]);
 
   const handleRetry = useCallback(() => {
     setErrorMessage('');
     setSnackbarVisible(false);
     setIsExtracting(false);
     hasInjectedRef.current = false;
+    hasPrefilledRef.current = false;
     retryCountRef.current = 0;
-    // Force WebView to reload by changing the key
     setWebViewKey((k) => k + 1);
   }, []);
 
@@ -453,10 +518,8 @@ const SSOLoginScreen: React.FC = () => {
     setSnackbarVisible(false);
   }, []);
 
-  // ── Render ──
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
-      {/* Header */}
+    <View style={[styles.root, { backgroundColor: theme.colors.background }]}> 
       <Appbar.Header elevated>
         <Appbar.BackAction
           onPress={handleBack}
@@ -467,7 +530,6 @@ const SSOLoginScreen: React.FC = () => {
         />
       </Appbar.Header>
 
-      {/* WebView — fills remaining space */}
       <View style={styles.webViewContainer}>
         <WebView
           key={webViewKey}
@@ -512,7 +574,6 @@ const SSOLoginScreen: React.FC = () => {
           accessibilityLabel="Anypoint Platform sign-in page"
         />
 
-        {/* Extraction overlay */}
         {isExtracting && (
           <View
             style={[
@@ -545,7 +606,6 @@ const SSOLoginScreen: React.FC = () => {
         )}
       </View>
 
-      {/* Error Snackbar */}
       <Snackbar
         visible={snackbarVisible}
         onDismiss={dismissSnackbar}
@@ -562,7 +622,6 @@ const SSOLoginScreen: React.FC = () => {
   );
 };
 
-// ── Styles ──
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -602,3 +661,5 @@ const styles = StyleSheet.create({
 });
 
 export default SSOLoginScreen;
+
+

@@ -30,6 +30,28 @@ export class MFARequiredError extends Error {
   }
 }
 
+export interface PendingMFAChallenge {
+  username: string;
+  password: string;
+  verifyUrl: string;
+  requestToken: string;
+  baseUrl: string;
+}
+
+let pendingMFAChallenge: PendingMFAChallenge | null = null;
+
+export function setPendingMFAChallenge(challenge: PendingMFAChallenge): void {
+  pendingMFAChallenge = challenge;
+}
+
+export function getPendingMFAChallenge(): PendingMFAChallenge | null {
+  return pendingMFAChallenge;
+}
+
+export function clearPendingMFAChallenge(): void {
+  pendingMFAChallenge = null;
+}
+
 /**
  * Authenticate with username and password.
  *
@@ -373,6 +395,7 @@ export async function verifyMFA(
         });
 
         logger.log(`[MFA] ${attempt.label}: status=${resp.status}, keys=${Object.keys(resp.data ?? {}).join(',')}`);
+      logger.log(`[MFA] ${attempt.label}: preview=${typeof resp.data === 'object' ? JSON.stringify(resp.data).slice(0, 600) : String(resp.data).slice(0, 600)}`);
 
         const data = resp.data;
         const accessToken = data?.access_token ?? data?.token ?? data?.accessToken;
@@ -413,6 +436,97 @@ export async function verifyMFA(
  * goes through the Axios interceptor, which can trigger a refresh-loop
  * and leave stale state that causes 403 on the next login.
  */
+export async function completeMFAWithRequestToken(
+  username: string,
+  password: string,
+  requestToken: string,
+  baseUrl?: string,
+): Promise<AuthTokens> {
+  const baseURL = baseUrl ?? getBaseUrl();
+  const freshClient = axios.create();
+
+  const pendingTokens: Array<{ label: string; jwt: string }> = [
+    { label: 'verified', jwt: requestToken },
+  ];
+  const seenTokens = new Set<string>();
+
+  while (pendingTokens.length > 0) {
+    const current = pendingTokens.shift()!;
+    if (!current.jwt || seenTokens.has(current.jwt)) continue;
+    seenTokens.add(current.jwt);
+
+    logger.log(`[MFA] Completing login with ${current.label} request token (length: ${current.jwt.length})`);
+
+    const apAttempts: Array<{ label: string; body: string; ct: string }> = [
+      {
+        label: `ap-${current.label}-form`,
+        body: `request=${encodeURIComponent(current.jwt)}`,
+        ct: 'application/x-www-form-urlencoded',
+      },
+      {
+        label: `ap-${current.label}-full`,
+        body: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&request=${encodeURIComponent(current.jwt)}`,
+        ct: 'application/x-www-form-urlencoded',
+      },
+      {
+        label: `ap-${current.label}-json`,
+        body: JSON.stringify({ request: current.jwt }),
+        ct: 'application/json',
+      },
+    ];
+
+    for (const attempt of apAttempts) {
+      try {
+        const resp = await freshClient.post(`${baseURL}/accounts/login`, attempt.body, {
+          headers: {
+            'Content-Type': attempt.ct,
+            Accept: 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+          timeout: 30000,
+          withCredentials: false,
+          maxRedirects: 5,
+          validateStatus: (s: number) => s < 500,
+        });
+
+        logger.log(`[MFA] ${attempt.label}: status=${resp.status}, keys=${Object.keys(resp.data ?? {}).join(',')}`);
+        logger.log(`[MFA] ${attempt.label}: preview=${typeof resp.data === 'object' ? JSON.stringify(resp.data).slice(0, 600) : String(resp.data).slice(0, 600)}`);
+
+        const data = resp.data;
+        const accessToken = data?.access_token ?? data?.token ?? data?.accessToken;
+        if (accessToken && typeof accessToken === 'string' && accessToken.length > 0) {
+          const tokens: AuthTokens = {
+            accessToken,
+            refreshToken: data?.refresh_token ?? data?.refreshToken,
+            tokenType: data?.token_type ?? 'bearer',
+            expiresIn: data?.expires_in ?? 3600,
+            expiresAt: Date.now() + (data?.expires_in ?? 3600) * 1000,
+          };
+          await storeTokens(tokens.accessToken, tokens.refreshToken);
+          setAuthHeader(tokens.accessToken);
+          return tokens;
+        }
+
+        if (data?.url && data?.body?.request) {
+          const nextRequest = String(data.body.request);
+          logger.warn(`[MFA] ${attempt.label}: got another MFA challenge`);
+          logger.warn(`[MFA] ${attempt.label}: challenge url=${data.url}`);
+          logger.warn(`[MFA] ${attempt.label}: challenge body preview=${JSON.stringify(data.body).slice(0, 400)}`);
+          logger.warn(`[MFA] ${attempt.label}: next request length=${nextRequest.length}, same_as_input=${nextRequest === current.jwt}`);
+          if (!seenTokens.has(nextRequest)) {
+            pendingTokens.push({ label: `${current.label}-next`, jwt: nextRequest });
+          }
+          break;
+        }
+      } catch (err: any) {
+        logger.warn(`[MFA] ${attempt.label}: ${err?.response?.status ?? err?.message}`);
+        if (!err?.response?.status) break;
+      }
+    }
+  }
+
+  throw new Error('MFA verification succeeded, but Anypoint did not return an access token.');
+}
 export async function logout(): Promise<void> {
   await resetApiState();
 }
@@ -522,3 +636,7 @@ export async function getBusinessGroups(
   );
   return data;
 }
+
+
+
+

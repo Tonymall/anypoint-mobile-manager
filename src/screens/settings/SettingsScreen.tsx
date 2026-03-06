@@ -408,7 +408,7 @@ const SettingsScreen: React.FC = () => {
           iconColor={anypointColors.mulePurple}
           iconBg={anypointColors.mulePurple + '14'}
           title="Admin Panel"
-          subtitle="Users, Teams, Connected Apps, Secrets"
+          subtitle="Users, Connected Apps, Secrets"
           onPress={() => router.push('/(main)/admin' as any)}
           showChevron
         />
@@ -637,3 +637,4 @@ const createStyles = (theme: MD3Theme) =>
   });
 
 export default SettingsScreen;
+

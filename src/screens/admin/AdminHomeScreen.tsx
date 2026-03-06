@@ -38,14 +38,8 @@ const ADMIN_FEATURES: AdminFeature[] = [
     iconColor: anypointColors.primary,
     route: '/(main)/admin/users',
   },
-  {
-    id: 'teams',
-    title: 'Teams',
-    subtitle: 'Create and manage team structures',
-    icon: 'account-multiple',
-    iconColor: anypointColors.secondary,
-    route: '/(main)/admin/teams',
-  },
+  // Teams hidden until the tenant-specific GET endpoint is validated.
+  // Current tenant returns HTTP 405 for GET /accounts/api/organizations/{orgId}/teams.
   {
     id: 'connected-apps',
     title: 'Connected Apps',
@@ -215,3 +209,5 @@ const createStyles = (theme: MD3Theme) =>
   });
 
 export default AdminHomeScreen;
+
+

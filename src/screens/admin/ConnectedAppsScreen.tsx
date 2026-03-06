@@ -1,5 +1,5 @@
 // ============================================================
-// Connected Apps Screen — Read-only list of registered apps
+// Connected Apps Screen � Read-only list of registered apps
 // 2026 Modern Dark-First Design
 // ============================================================
 
@@ -27,11 +27,11 @@ import { formatRelativeTime } from '../../utils/statusHelpers';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 
-// ── Types ──
+// -- Types --
 interface ConnectedApp {
-  id: string;
-  name: string;
-  clientId: string;
+  id?: string;
+  name?: string;
+  clientId?: string;
   grantTypes: string[];
   redirectUris: string[];
   scopes: string[];
@@ -39,14 +39,14 @@ interface ConnectedApp {
   createdAt: string;
 }
 
-// ── Mask client ID ──
-const maskClientId = (clientId: string): string => {
+// -- Mask client ID --
+const maskClientId = (clientId?: string): string => {
   if (!clientId) return '---';
   if (clientId.length <= 8) return clientId;
   return `${clientId.substring(0, 8)}...`;
 };
 
-// ── Connected App Card Component ──
+// -- Connected App Card Component --
 const AppCard = React.memo<{
   app: ConnectedApp;
   theme: MD3Theme;
@@ -89,7 +89,7 @@ const AppCard = React.memo<{
             }}
             numberOfLines={1}
           >
-            {app.name}
+            {app.name?.trim() ? app.name : (maskClientId(app.clientId) !== '---' ? maskClientId(app.clientId) : 'Connected App')}
           </Text>
           <Text
             style={{
@@ -135,7 +135,7 @@ const AppCard = React.memo<{
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
           {app.grantTypes.map((grant, grantIndex) => (
             <View
-              key={`${grant}-${grantIndex}`}
+              key={`${app.id ?? app.clientId ?? app.name ?? 'connected-app'}-${grant}-${grantIndex}`}
               style={{
                 paddingHorizontal: 8,
                 paddingVertical: 3,
@@ -193,7 +193,7 @@ const AppCard = React.memo<{
 });
 AppCard.displayName = 'AppCard';
 
-// ── Main Screen ──
+// -- Main Screen --
 const ConnectedAppsScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
@@ -238,6 +238,12 @@ const ConnectedAppsScreen: React.FC = () => {
     [styles, theme],
   );
 
+  const keyExtractor = useCallback(
+    (item: ConnectedApp, index: number) =>
+      String(item.id ?? item.clientId ?? ((item.name ?? 'connected-app') + '-' + index)),
+    [],
+  );
+
   if (isLoading) return <LoadingState message="Loading connected apps..." />;
   if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
 
@@ -266,7 +272,7 @@ const ConnectedAppsScreen: React.FC = () => {
 
       <FlatList
         data={appsList}
-        keyExtractor={(item) => item.id}
+        keyExtractor={keyExtractor}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmpty}
@@ -310,3 +316,5 @@ const createStyles = (theme: MD3Theme) =>
   });
 
 export default ConnectedAppsScreen;
+
+

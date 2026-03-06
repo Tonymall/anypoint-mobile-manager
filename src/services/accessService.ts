@@ -164,11 +164,59 @@ export async function getConnectedApps(
     includeUsage?: boolean;
   },
 ): Promise<PaginatedResponse<ConnectedApp>> {
-  const { data } = await api.get<PaginatedResponse<ConnectedApp>>(
+  const { data } = await api.get<any>(
     `${ACCOUNTS_BASE}/connectedApplications`,
     { params: { limit: 100, offset: 0, includeUsage: true, ...params } },
   );
-  return data;
+
+  const rawItems = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.connectedApplications)
+        ? data.connectedApplications
+        : [];
+
+  const normalized = rawItems.map((raw: any) => ({
+    id: String(raw?.id ?? raw?.clientId ?? raw?.client_id ?? raw?.name ?? raw?.appName ?? ''),
+    name:
+      raw?.name ??
+      raw?.displayName ??
+      raw?.clientName ??
+      raw?.client_name ??
+      raw?.label ??
+      raw?.appName ??
+      raw?.applicationName ??
+      raw?.client?.name ??
+      raw?.client?.displayName ??
+      raw?.client?.client_name ??
+      raw?.client?.clientId ??
+      raw?.client?.client_id ??
+      'Connected App',
+    clientId: String(raw?.clientId ?? raw?.client_id ?? raw?.client?.clientId ?? raw?.client?.client_id ?? ''),
+    grantTypes: Array.isArray(raw?.grantTypes) ? raw.grantTypes : Array.isArray(raw?.grant_types) ? raw.grant_types : [],
+    redirectUris: Array.isArray(raw?.redirectUris) ? raw.redirectUris : Array.isArray(raw?.redirect_uris) ? raw.redirect_uris : Array.isArray(raw?.redirectUri) ? raw.redirectUri : [],
+    scopes: Array.isArray(raw?.scopes) ? raw.scopes : Array.isArray(raw?.scope) ? raw.scope : [],
+    enabled: raw?.enabled !== undefined ? Boolean(raw.enabled) : raw?.status ? raw.status === 'ENABLED' : true,
+    createdAt: raw?.createdAt ?? raw?.created_at ?? raw?.createdDate ?? '',
+  })) as ConnectedApp[];
+
+  if (Array.isArray(data)) {
+    return {
+      data: normalized,
+      total: normalized.length,
+      offset: params?.offset ?? 0,
+      limit: params?.limit ?? normalized.length,
+    };
+  }
+
+  return {
+    ...(data ?? {}),
+    data: normalized,
+    total: data?.total ?? normalized.length,
+    offset: data?.offset ?? params?.offset ?? 0,
+    limit: data?.limit ?? params?.limit ?? normalized.length,
+  };
 }
 
 // ---------- Environments ----------
@@ -231,3 +279,5 @@ export async function getPermissions(
   );
   return data;
 }
+
+

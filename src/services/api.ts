@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Anypoint Mobile Platform - Base Axios API Client
 // ============================================================
 // Configured with a request interceptor for auth token injection.
@@ -24,42 +24,31 @@ import type { ControlPlaneRegionId } from '../types';
 const TOKEN_KEY = 'anypoint_access_token';
 const REFRESH_TOKEN_KEY = 'anypoint_refresh_token';
 const REGION_KEY = 'anypoint_region';
+const SESSION_MODE_KEY = 'anypoint_session_mode';
+const XSRF_TOKEN_KEY = 'anypoint_xsrf_token';
 
-// --- Mutable base URL driven by selected region ---
 let currentBaseUrl: string = getRegionUrl(DEFAULT_REGION_ID);
 
-// --- In-memory token cache (fastest, no async) ---
-// Set by setAuthHeader() during login, cleared by resetApiState().
-// The request interceptor uses this FIRST, then falls back to SecureStore.
 let inMemoryToken: string | null = null;
+let inMemorySessionMode = false;
+let inMemoryXsrfToken: string | null = null;
 
-// Create the base Axios instance
 const api: AxiosInstance = axios.create({
   baseURL: currentBaseUrl,
   timeout: 30000,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
     Accept: 'application/json',
   },
 });
 
-// ---------- Region helpers ----------
-
-/**
- * Switch the control plane region.
- * Updates the base URL used by all subsequent requests and persists the
- * selection so it survives app restarts.
- */
 export async function setRegion(regionId: ControlPlaneRegionId): Promise<void> {
   currentBaseUrl = getRegionUrl(regionId);
   api.defaults.baseURL = currentBaseUrl;
   await SecureStore.setItemAsync(REGION_KEY, regionId);
 }
 
-/**
- * Load the persisted region (if any) and apply it.
- * Call this once on app startup before any API calls.
- */
 export async function restoreRegion(): Promise<ControlPlaneRegionId> {
   const stored = await SecureStore.getItemAsync(REGION_KEY);
   const regionId = (stored as ControlPlaneRegionId) || DEFAULT_REGION_ID;
@@ -68,14 +57,9 @@ export async function restoreRegion(): Promise<ControlPlaneRegionId> {
   return regionId;
 }
 
-/**
- * Get the current base URL.
- */
 export function getBaseUrl(): string {
   return currentBaseUrl;
 }
-
-// ---------- Token helpers ----------
 
 export async function getStoredAccessToken(): Promise<string | null> {
   return SecureStore.getItemAsync(TOKEN_KEY);
@@ -104,42 +88,78 @@ export async function clearTokens(): Promise<void> {
   await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
 }
 
-// ---------- Request Interceptor ----------
-// Attach the access token and ensure baseURL is current.
+export async function storeSessionAuth(xsrfToken?: string): Promise<void> {
+  inMemorySessionMode = true;
+  await SecureStore.setItemAsync(SESSION_MODE_KEY, 'true');
+  if (xsrfToken) {
+    inMemoryXsrfToken = xsrfToken;
+    await SecureStore.setItemAsync(XSRF_TOKEN_KEY, xsrfToken);
+  }
+}
+
+export async function clearSessionAuth(): Promise<void> {
+  inMemorySessionMode = false;
+  inMemoryXsrfToken = null;
+  await SecureStore.deleteItemAsync(SESSION_MODE_KEY);
+  await SecureStore.deleteItemAsync(XSRF_TOKEN_KEY);
+}
+
+export function isSessionAuthEnabled(): boolean {
+  return inMemorySessionMode;
+}
+
+export async function enableCookieSessionAuth(xsrfToken?: string): Promise<void> {
+  inMemoryToken = null;
+  delete api.defaults.headers.common['Authorization'];
+  await storeSessionAuth(xsrfToken);
+  api.defaults.withCredentials = true;
+  if (xsrfToken) {
+    api.defaults.headers.common['X-XSRF-TOKEN'] = xsrfToken;
+  }
+}
 
 api.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
-    // Always use the latest base URL (region may have changed)
     config.baseURL = currentBaseUrl;
+    config.withCredentials = true;
 
-    // Skip auth header for login endpoint
     const isLoginRequest = config.url?.includes('/accounts/login');
     if (isLoginRequest) {
       delete config.headers.Authorization;
       return config;
     }
 
-    // Token injection priority:
-    // 1. In-memory cache (synchronous, set by setAuthHeader during login)
-    // 2. SecureStore (async, persisted across app restarts)
     if (inMemoryToken) {
+      inMemorySessionMode = false;
+      delete config.headers['X-XSRF-TOKEN'];
       config.headers.Authorization = `Bearer ${inMemoryToken}`;
     } else {
       try {
         const token = await getStoredAccessToken();
         if (token) {
+          inMemorySessionMode = false;
+          delete config.headers['X-XSRF-TOKEN'];
           config.headers.Authorization = `Bearer ${token}`;
-          // Cache for next request
           inMemoryToken = token;
         } else {
-          logger.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
+          const storedSessionMode = inMemorySessionMode ? 'true' : await SecureStore.getItemAsync(SESSION_MODE_KEY);
+          if (storedSessionMode === 'true') {
+            inMemorySessionMode = true;
+            delete config.headers.Authorization;
+            const xsrfToken = inMemoryXsrfToken ?? await SecureStore.getItemAsync(XSRF_TOKEN_KEY);
+            if (xsrfToken) {
+              inMemoryXsrfToken = xsrfToken;
+              config.headers['X-XSRF-TOKEN'] = xsrfToken;
+            }
+          } else {
+            logger.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
+          }
         }
       } catch (_) {
         // SecureStore read failed — proceed without token
       }
     }
 
-    // Log CloudHub requests with full header state for 403 debugging
     const url = config.url ?? '';
     if (url.includes('/cloudhub/') || url.includes('/amc/')) {
       const hasAuth = !!config.headers.Authorization;
@@ -153,15 +173,9 @@ api.interceptors.request.use(
   (error: AxiosError) => Promise.reject(error),
 );
 
-// ---------- Response Interceptor ----------
-// Simple error logging — NO automatic refresh or token clearing.
-// The Anypoint login API does NOT provide refresh tokens, so any
-// 401-refresh logic only causes harmful cascades.
-
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    // Log failed requests for debugging (visible in Expo DevTools / Metro)
     if (error.response) {
       const { status } = error.response;
       const url = error.config?.url ?? 'unknown';
@@ -177,15 +191,11 @@ api.interceptors.response.use(
   },
 );
 
-// ---------- Convenience helpers ----------
-
-/**
- * Set the Authorization header directly on the api instance.
- * Called after login to make the token immediately available in memory
- * without relying on SecureStore read timing.
- */
 export function setAuthHeader(token: string): void {
+  inMemorySessionMode = false;
+  inMemoryXsrfToken = null;
   inMemoryToken = token;
+  delete api.defaults.headers.common['X-XSRF-TOKEN'];
   api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 }
 
@@ -197,30 +207,21 @@ export function setEnvironmentHeader(envId: string): void {
   api.defaults.headers.common['X-ANYPNT-ENV-ID'] = envId;
 }
 
-/**
- * Clear all custom headers (org, env) from the Axios defaults.
- * Call this during logout to prevent stale headers on re-login.
- */
 export function clearHeaders(): void {
   delete api.defaults.headers.common['X-ANYPNT-ORG-ID'];
   delete api.defaults.headers.common['X-ANYPNT-ENV-ID'];
 }
 
-/**
- * Full reset of API client state.
- * Clears tokens from SecureStore AND in-memory cache, removes ALL
- * custom headers (including Authorization).
- * Call this during logout AND before login to guarantee a clean slate.
- */
 export async function resetApiState(): Promise<void> {
-  // 1. Clear tokens from SecureStore
   await clearTokens();
+  await clearSessionAuth();
 
-  // 2. Clear in-memory token cache
   inMemoryToken = null;
+  inMemorySessionMode = false;
+  inMemoryXsrfToken = null;
 
-  // 3. Clear ALL custom headers — including Authorization
   delete api.defaults.headers.common['Authorization'];
+  delete api.defaults.headers.common['X-XSRF-TOKEN'];
   delete api.defaults.headers.common['X-ANYPNT-ORG-ID'];
   delete api.defaults.headers.common['X-ANYPNT-ENV-ID'];
 }

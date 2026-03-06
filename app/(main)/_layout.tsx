@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+﻿import React, { useEffect } from 'react';
 import {
   View,
   TouchableOpacity,
@@ -25,10 +25,11 @@ import {
   setOrganizationHeader,
   setEnvironmentHeader,
   getStoredAccessToken,
+  isSessionAuthEnabled,
 } from '../../src/services/api';
 import logger from '../../src/utils/logger';
 
-// ── Tab definitions (order matters — matches Tabs.Screen order) ──
+// â”€â”€ Tab definitions (order matters â€” matches Tabs.Screen order) â”€â”€
 const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: string }> = {
   index: { title: 'Dashboard', icon: 'view-dashboard-outline', iconFocused: 'view-dashboard' },
   runtime: { title: 'Runtime', icon: 'application-cog-outline', iconFocused: 'application-cog' },
@@ -38,7 +39,7 @@ const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: str
   settings: { title: 'Settings', icon: 'cog-outline', iconFocused: 'cog' },
 };
 
-// ── Custom Animated Tab Bar — 2026 Minimal Design ──
+// â”€â”€ Custom Animated Tab Bar â€” 2026 Minimal Design â”€â”€
 function AnimatedTabBar({ state, _descriptors, navigation }: any) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -182,7 +183,7 @@ export default function MainLayout() {
         const storedToken = await getStoredAccessToken();
         if (storedToken) {
           setAuthHeader(storedToken);
-        } else {
+        } else if (!isSessionAuthEnabled()) {
           logger.warn('[MainLayout] No token available to set auth header!');
         }
       }
@@ -213,11 +214,11 @@ export default function MainLayout() {
       <Tabs.Screen name="alerts" options={{ title: 'Alerts' }} />
       <Tabs.Screen name="monitoring" options={{ title: 'Monitoring' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
-      {/* Workers: hidden from tab bar — only accessible via router.push */}
+      {/* Workers: hidden from tab bar â€” only accessible via router.push */}
       <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
-      {/* Admin: hidden from tab bar — accessible from Settings screen */}
+      {/* Admin: hidden from tab bar â€” accessible from Settings screen */}
       <Tabs.Screen name="admin" options={{ href: null, title: 'Admin' }} />
-      {/* Terms: hidden from tab bar — accessible from Settings screen */}
+      {/* Terms: hidden from tab bar â€” accessible from Settings screen */}
       <Tabs.Screen name="terms" options={{ href: null, title: 'Terms' }} />
     </Tabs>
   );
@@ -271,3 +272,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 });
+

@@ -9,7 +9,6 @@ import {
   StyleSheet,
   View,
   KeyboardAvoidingView,
-  ScrollView,
   Platform,
   Pressable,
   useWindowDimensions,
@@ -105,6 +104,8 @@ const LoginScreen: React.FC = () => {
     setIsLoadingStore(true);
     setErrorMessage('');
 
+    const regionUrl = getRegionUrl(selectedRegion);
+
     try {
       logger.log('[Login] Starting login flow...');
       await resetApiState();
@@ -112,7 +113,6 @@ const LoginScreen: React.FC = () => {
       logger.log('[Login] API state reset complete');
 
       await setRegion(selectedRegion);
-      const regionUrl = getRegionUrl(selectedRegion);
       logger.log('[Login] Region set to:', selectedRegion, regionUrl);
 
       const tokens: AuthTokens = await authService.login(
@@ -161,6 +161,13 @@ const LoginScreen: React.FC = () => {
       // ── MFA Required — continue login in hosted WebView ──
       if (error instanceof authService.MFARequiredError) {
         logger.log('[Login] MFA required — opening hosted WebView for Salesforce verification');
+        authService.setPendingMFAChallenge({
+          username: username.trim(),
+          password,
+          verifyUrl: error.verifyUrl,
+          requestToken: error.requestToken,
+          baseUrl: regionUrl,
+        });
         router.push({
           pathname: '/(auth)/sso' as any,
           params: { mfaUsername: username.trim() },
@@ -183,6 +190,13 @@ const LoginScreen: React.FC = () => {
       const responseData = error?.response?.data;
       if (responseData?.url?.includes('verify.salesforce.com') && responseData?.body?.request) {
         logger.log('[Login] MFA detected from error response — opening hosted WebView');
+        authService.setPendingMFAChallenge({
+          username: username.trim(),
+          password,
+          verifyUrl: responseData.url,
+          requestToken: responseData.body.request,
+          baseUrl: regionUrl,
+        });
         router.push({
           pathname: '/(auth)/sso' as any,
           params: { mfaUsername: username.trim() },
@@ -224,18 +238,15 @@ const LoginScreen: React.FC = () => {
       {/* Animated gradient orbs background */}
       <AnimatedBackground />
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
+      <View
+        style={[
+          styles.contentContainer,
           {
             paddingTop: insets.top + (isTabletLandscape ? 24 : isLandscape ? 16 : 0),
             paddingBottom: insets.bottom + 24,
             paddingHorizontal: horizontalPadding,
           },
         ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        bounces={false}
       >
         <View
           style={[
@@ -491,7 +502,7 @@ const LoginScreen: React.FC = () => {
             </View>
           </View>
         </View>
-      </ScrollView>
+      </View>
 
       {/* Loading Overlay */}
       {isLoading && (
@@ -528,8 +539,8 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
-  scrollContent: {
-    flexGrow: 1,
+  contentContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -689,3 +700,8 @@ const styles = StyleSheet.create({
 });
 
 export default LoginScreen;
+
+
+
+
+
