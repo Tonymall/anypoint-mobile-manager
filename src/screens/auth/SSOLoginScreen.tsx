@@ -54,11 +54,18 @@ const INJECTED_JS = `
         if (!token && data.access_token) token = data.access_token;
         if (!token && user.properties && user.properties.cs_token) token = user.properties.cs_token;
 
+        var xsrfToken = null;
+        try {
+          var xsrfMatch = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/);
+          if (xsrfMatch) xsrfToken = decodeURIComponent(xsrfMatch[1]);
+        } catch (xsrfErr) {}
+
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'auth_complete',
           user: user,
           organizations: orgs,
           token: token,
+          xsrfToken: xsrfToken,
         }));
         return;
       }
@@ -83,6 +90,20 @@ const INJECTED_JS = `
       }
     } catch (e) {}
 
+    try {
+      var xsrfOnly = null;
+      var xsrfOnlyMatch = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/);
+      if (xsrfOnlyMatch) xsrfOnly = decodeURIComponent(xsrfOnlyMatch[1]);
+      if (xsrfOnly) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'session_only',
+          xsrfToken: xsrfOnly,
+          url: window.location.href,
+        }));
+        return;
+      }
+    } catch (sessionErr) {}
+
     window.ReactNativeWebView.postMessage(JSON.stringify({
       type: 'extraction_failed',
       cookies: document.cookie ? 'present' : 'empty',
@@ -91,6 +112,97 @@ const INJECTED_JS = `
   true;
 `;
 
+const SILENT_AUTH_JS = `
+  (function() {
+    if (window.__muleopsSilentAuthInstalled) return true;
+    window.__muleopsSilentAuthInstalled = true;
+
+    function post(type, payload) {
+      try {
+        window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ type: type }, payload || {})));
+      } catch (e) {}
+    }
+
+    function parseHash(hash) {
+      var out = {};
+      if (!hash) return out;
+      var raw = hash.charAt(0) === '#' ? hash.slice(1) : hash;
+      raw.split('&').forEach(function(part) {
+        var idx = part.indexOf('=');
+        if (idx === -1) return;
+        var key = decodeURIComponent(part.slice(0, idx));
+        var value = decodeURIComponent(part.slice(idx + 1));
+        out[key] = value;
+      });
+      return out;
+    }
+
+    window.addEventListener('message', function(event) {
+      try {
+        var data = event && event.data;
+        if (!data || data.type !== 'authorization_response' || typeof data.response !== 'string') {
+          return;
+        }
+        var parsed = parseHash(data.response);
+        if (parsed.access_token) {
+          post('spa_token', {
+            token: parsed.access_token,
+            expiresIn: parsed.expires_in,
+            tokenType: parsed.token_type || 'bearer'
+          });
+        }
+      } catch (e) {
+        post('silent_auth_error', { message: String((e && e.message) || e) });
+      }
+    }, false);
+
+    try {
+      var iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.src = '__BASE_URL__/accounts/oauth2/authorize?client_id=anypoint_spa&response_type=token&redirect_uri=' + encodeURIComponent('__BASE_URL__/shared/silentAuthCallback.html');
+      document.body.appendChild(iframe);
+      post('silent_auth_started', { url: iframe.src });
+      function tryReadIframeToken() {
+        try {
+          if (!iframe.contentWindow || !iframe.contentWindow.location) return false;
+          var hash = iframe.contentWindow.location.hash || '';
+          var href = iframe.contentWindow.location.href || '';
+          if (!hash && href.indexOf('#') !== -1) {
+            hash = href.slice(href.indexOf('#'));
+          }
+          var parsed = parseHash(hash);
+          if (parsed.access_token) {
+            post('spa_token', {
+              token: parsed.access_token,
+              expiresIn: parsed.expires_in,
+              tokenType: parsed.token_type || 'bearer'
+            });
+            return true;
+          }
+        } catch (e) {}
+        return false;
+      }
+
+      var tries = 0;
+      var poll = setInterval(function() {
+        tries += 1;
+        if (tryReadIframeToken() || tries >= 30) {
+          clearInterval(poll);
+        }
+      }, 300);
+
+      iframe.addEventListener('load', function() {
+        tryReadIframeToken();
+      });
+    } catch (e) {
+      post('silent_auth_error', { message: String((e && e.message) || e) });
+    }
+
+    return true;
+  })();
+  true;
+`;
 const POST_LOGIN_PATHS = [
   '/home/',
   '/home',
@@ -126,6 +238,7 @@ const SSOLoginScreen: React.FC = () => {
   const retryCountRef = useRef(0);
   const baseUrl = getBaseUrl();
   const loginUrl = `${baseUrl}/login/signin`;
+  const silentAuthJs = SILENT_AUTH_JS.replace(/__BASE_URL__/g, baseUrl);
 
   const isPostLoginUrl = useCallback(
     (url: string): boolean => {
@@ -186,6 +299,30 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (!token || typeof token !== 'string' || token.length === 0) {
+          if (xsrfToken) {
+            logger.log('[SSO] No bearer token, falling back to session-cookie auth');
+            await enableCookieSessionAuth(xsrfToken);
+            const sessionUser = await authService.getCurrentUser(undefined, baseUrl);
+            const sessionOrgs = organizations ?? sessionUser.memberOfOrganizations ?? [];
+            const sessionTokens: AuthTokens = {
+              accessToken: '',
+              tokenType: 'session',
+              expiresIn: 3600,
+              expiresAt: Date.now() + 3600 * 1000,
+            } as AuthTokens;
+
+            loginPending(sessionUser, sessionTokens);
+            if (sessionOrgs.length > 0) {
+              setOrganizations(sessionOrgs);
+            }
+            if (isMfaContinuation) {
+              authService.clearPendingMFAChallenge();
+            }
+            logger.log('[SSO] Session-cookie fallback complete, navigating to org selection');
+            router.replace('/(auth)/select-org');
+            return;
+          }
+
           logger.warn('[SSO] No bearer token extracted — cannot proceed');
           throw new Error(
             'Could not extract an access token from the browser session. ' +
@@ -227,7 +364,7 @@ const SSOLoginScreen: React.FC = () => {
         setIsExtracting(false);
       }
     },
-    [isMfaContinuation, loginPending, router, setOrganizations],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, silentAuthJs],
   );
 
   const completeSessionOnly = useCallback(
@@ -263,7 +400,7 @@ const SSOLoginScreen: React.FC = () => {
         setIsExtracting(false);
       }
     },
-    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, silentAuthJs],
   );
 
   const completeWithTokenOnly = useCallback(
@@ -301,7 +438,7 @@ const SSOLoginScreen: React.FC = () => {
         setIsExtracting(false);
       }
     },
-    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, silentAuthJs],
   );
 
   const prefillCredentialsAndSubmit = useCallback(() => {
@@ -371,9 +508,18 @@ const SSOLoginScreen: React.FC = () => {
             submit.click();
             return;
           }
+          var enterEvent = new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'Enter',
+            code: 'Enter'
+          });
+          password.dispatchEvent(enterEvent);
+
           var form = username.form || password.form || document.querySelector('form');
-          if (form && typeof form.submit === 'function') {
-            form.submit();
+          if (form) {
+            var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+            form.dispatchEvent(submitEvent);
           }
         }
         tryFill();
@@ -414,9 +560,11 @@ const SSOLoginScreen: React.FC = () => {
             retryCountRef.current = 0;
             setIsExtracting(true);
             setTimeout(() => {
-              webViewRef.current?.stopLoading();
-              webViewRef.current?.injectJavaScript(INJECTED_JS);
+              webViewRef.current?.injectJavaScript(silentAuthJs);
             }, 250);
+            setTimeout(() => {
+              webViewRef.current?.injectJavaScript(INJECTED_JS);
+            }, 3500);
           }
           return;
         }
@@ -445,7 +593,7 @@ const SSOLoginScreen: React.FC = () => {
         }, 2500);
       }
     },
-    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit],
+    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, silentAuthJs],
   );
 
   const handleWebViewMessage = useCallback(
@@ -465,6 +613,23 @@ const SSOLoginScreen: React.FC = () => {
 
           case 'token_only':
             completeWithTokenOnly(data.token);
+            break;
+
+          case 'spa_token':
+            logger.log('[SSO] anypoint_spa token captured from silent auth iframe');
+            completeWithTokenOnly(data.token);
+            break;
+
+          case 'silent_auth_started':
+            logger.log('[SSO] Silent auth iframe started:', data.url);
+            break;
+
+          case 'silent_auth_error':
+            logger.warn('[SSO] Silent auth iframe error:', data.message);
+            break;
+
+          case 'session_only':
+            completeSessionOnly(data.xsrfToken);
             break;
 
           case 'extraction_failed':
@@ -661,5 +826,16 @@ const styles = StyleSheet.create({
 });
 
 export default SSOLoginScreen;
+
+
+
+
+
+
+
+
+
+
+
 
 
