@@ -11,7 +11,6 @@ import {
   TouchableRipple,
   Appbar,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -21,6 +20,7 @@ import { setEnvironmentHeader, setOrganizationHeader } from '../../services/api'
 import type { Environment } from '../../types';
 import { hapticLight } from '../../utils/haptics';
 import { anypointColors } from '../../theme';
+import logger from '../../utils/logger';
 
 const EnvSelectScreen: React.FC = () => {
   const theme = useTheme();
@@ -39,19 +39,19 @@ const EnvSelectScreen: React.FC = () => {
   const handleSelect = useCallback(
     (env: Environment) => {
       hapticLight();
-      console.log('[EnvSelect] Selected env:', env.name, env.id);
+      logger.log('[EnvSelect] Selected env:', env.name, env.id);
       switchEnvironment(env);
       setEnvironmentHeader(env.id);
       if (currentOrganization?.id) {
         setOrganizationHeader(currentOrganization.id);
       }
-      console.log('[EnvSelect] Headers set — Org:', currentOrganization?.id, 'Env:', env.id);
+      logger.log('[EnvSelect] Headers set — Org:', currentOrganization?.id, 'Env:', env.id);
 
       if (fromSettings === '1' && isAuthenticated) {
         router.replace('/(main)/settings' as any);
       } else {
         completeLogin();
-        console.log('[EnvSelect] completeLogin called, navigating to main');
+        logger.log('[EnvSelect] completeLogin called, navigating to main');
         router.replace('/(main)' as any);
       }
     },

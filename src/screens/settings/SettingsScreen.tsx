@@ -14,8 +14,8 @@ import {
   RadioButton,
   Portal,
   Dialog,
+  type MD3Theme,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -31,6 +31,9 @@ import { anypointColors } from '../../theme';
 import { requestPermissions } from '../../services/notificationService';
 import { useNotificationStore } from '../../stores/notificationStore';
 import logger from '../../utils/logger';
+import Constants from 'expo-constants';
+
+const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
 // ── Reusable Setting Row ──
 const SettingRow: React.FC<{
@@ -389,6 +392,25 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
+      {/* ── Administration Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          ADMINISTRATION
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="shield-crown-outline"
+          iconColor={anypointColors.mulePurple}
+          iconBg={anypointColors.mulePurple + '14'}
+          title="Admin Panel"
+          subtitle="Users, Teams, Connected Apps, Secrets"
+          onPress={() => router.push('/(main)/admin' as any)}
+          showChevron
+        />
+      </View>
+
       {/* ── About Section ── */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: theme.colors.onSurfaceVariant }]} />
@@ -401,7 +423,7 @@ const SettingsScreen: React.FC = () => {
           icon="information-outline"
           iconColor={theme.colors.onSurfaceVariant}
           title="Version"
-          subtitle="1.0.0"
+          subtitle={APP_VERSION}
         />
       </View>
 

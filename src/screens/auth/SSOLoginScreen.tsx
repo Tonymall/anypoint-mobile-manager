@@ -2,49 +2,79 @@
 // Anypoint Mobile Platform - SSO / Browser Login Screen
 // WebView-based authentication flow supporting MFA, SSO,
 // and standard username/password login via the Anypoint web UI.
+//
+// The WebView handles all cookie-based session management.
+// User profile + org list are extracted INSIDE the WebView
+// to avoid native Axios calls that can't access WebView cookies.
 // ============================================================
 
 import React, { useState, useCallback, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
   Text,
-  Button,
   useTheme,
   Appbar,
   ActivityIndicator,
   Snackbar,
 } from 'react-native-paper';
-import { WebView } from 'react-native-webview';
-import type { WebViewNavigation, WebViewMessageEvent } from 'react-native-webview';
+import { WebView, type WebViewNavigation, type WebViewMessageEvent } from 'react-native-webview';
 import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
 import { getBaseUrl, setAuthHeader, storeTokens } from '../../services/api';
-import * as authService from '../../services/authService';
 import type { AuthTokens } from '../../types';
+import logger from '../../utils/logger';
 
 // ── JavaScript injected after the user completes web-based login ──
-// Tries multiple strategies to extract the access token / user session.
+// Extracts EVERYTHING from within the WebView cookie context:
+//   1. Bearer token (from cookies or API response)
+//   2. User profile (from /accounts/api/me)
+//   3. Organization list (embedded in user profile)
+//
+// This avoids native Axios calls that can't access WebView cookies.
 const INJECTED_JS = `
   (function() {
     try {
-      // Method 1: Fetch user data from the accounts API using session cookies
+      // Step 1: Fetch full user profile using session cookies
       var xhr = new XMLHttpRequest();
       xhr.open('GET', '/accounts/api/me', false);
       xhr.withCredentials = true;
       xhr.send();
+
       if (xhr.status === 200) {
         var data = JSON.parse(xhr.responseText);
+        var user = data.user || data;
+        var orgs = user.memberOfOrganizations || [];
+
+        // Step 2: Try to extract a bearer token from cookies
+        var token = null;
+        try {
+          var cookies = document.cookie.split(';');
+          for (var i = 0; i < cookies.length; i++) {
+            var c = cookies[i].trim();
+            if (c.startsWith('access_token=') || c.startsWith('_access_token=')) {
+              token = c.split('=')[1];
+              break;
+            }
+          }
+        } catch(cookieErr) {}
+
+        // Also check if the /me response itself contained a token
+        if (!token && data.access_token) token = data.access_token;
+        if (!token && user.properties && user.properties.cs_token) token = user.properties.cs_token;
+
         window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'auth_success',
-          user: data.user || data,
+          type: 'auth_complete',
+          user: user,
+          organizations: orgs,
+          token: token,
         }));
         return;
       }
     } catch(e) {}
 
+    // Fallback: try cookie-only token extraction
     try {
-      // Method 2: Look for access_token in cookies
       var cookies = document.cookie.split(';');
       var token = null;
       for (var i = 0; i < cookies.length; i++) {
@@ -56,24 +86,8 @@ const INJECTED_JS = `
       }
       if (token) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'token_found',
+          type: 'token_only',
           token: token,
-        }));
-        return;
-      }
-    } catch(e) {}
-
-    try {
-      // Method 3: Try the profile API endpoint
-      var xhr2 = new XMLHttpRequest();
-      xhr2.open('GET', '/accounts/api/profile', false);
-      xhr2.withCredentials = true;
-      xhr2.send();
-      if (xhr2.status === 200) {
-        var profileData = JSON.parse(xhr2.responseText);
-        window.ReactNativeWebView.postMessage(JSON.stringify({
-          type: 'profile_found',
-          profile: profileData,
         }));
         return;
       }
@@ -82,7 +96,6 @@ const INJECTED_JS = `
     window.ReactNativeWebView.postMessage(JSON.stringify({
       type: 'extraction_failed',
       cookies: document.cookie ? 'present' : 'empty',
-      url: window.location.href,
     }));
   })();
   true;
@@ -112,7 +125,6 @@ const SSOLoginScreen: React.FC = () => {
   // ── Auth store ──
   const loginPending = useAuthStore((state) => state.loginPending);
   const setOrganizations = useAuthStore((state) => state.setOrganizations);
-  const selectedRegion = useAuthStore((state) => state.selectedRegion);
 
   // ── State ──
   const [isExtracting, setIsExtracting] = useState(false);
@@ -121,6 +133,7 @@ const SSOLoginScreen: React.FC = () => {
   const [webViewKey, setWebViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
+  const retryCountRef = useRef(0);
   const baseUrl = getBaseUrl();
   const loginUrl = `${baseUrl}/accounts/login`;
 
@@ -152,7 +165,6 @@ const SSOLoginScreen: React.FC = () => {
           return true;
         }
         // Also detect any path that is NOT the login page on the same domain
-        // (e.g. when user is redirected to /accounts#/ or /)
         if (
           parsed.origin === baseUrl &&
           path !== '/accounts/login' &&
@@ -168,72 +180,102 @@ const SSOLoginScreen: React.FC = () => {
     [baseUrl],
   );
 
-  // ── Complete the native auth flow using an extracted token or user data ──
+  // ── Complete auth using data extracted FROM the WebView ──
   const completeAuthentication = useCallback(
-    async (tokenOrUserData: any) => {
+    async (payload: {
+      user: any;
+      organizations?: any[];
+      token?: string | null;
+    }) => {
       setIsExtracting(true);
       try {
-        let token: string | undefined;
+        const { user, organizations, token } = payload;
 
-        if (typeof tokenOrUserData === 'string') {
-          token = tokenOrUserData;
-        } else if (typeof tokenOrUserData === 'object' && tokenOrUserData !== null) {
-          // Try multiple well-known property paths for the access token
-          token =
-            tokenOrUserData.access_token ??
-            tokenOrUserData.token ??
-            tokenOrUserData.properties?.cs_token ??
-            tokenOrUserData.tokenValue ??
-            tokenOrUserData.session?.access_token ??
-            undefined;
+        if (!user || typeof user !== 'object') {
+          throw new Error('No user profile data received from browser session.');
         }
 
-        console.log('[SSO] Token type:', typeof token, 'length:', token?.length);
-
-        if (token != null && typeof token !== 'string') {
-          // Safety: coerce non-string truthy values to string
-          token = String(token);
+        // A bearer token is REQUIRED — the native app uses Axios with
+        // Authorization headers for every API call. Cookie-only sessions
+        // from the WebView cannot be shared with native HTTP clients.
+        if (!token || typeof token !== 'string' || token.length === 0) {
+          logger.warn('[SSO] No bearer token extracted — cannot proceed');
+          throw new Error(
+            'Could not extract an access token from the browser session. ' +
+            'Please try signing in with username and password instead.',
+          );
         }
 
-        if (token && typeof token === 'string' && token.length > 0) {
-          setAuthHeader(token);
-          try {
-            await storeTokens(token);
-          } catch (storeError: any) {
-            // SecureStore write failed — log but continue (session cookies may suffice)
-            console.warn('[SSO] storeTokens failed, continuing without persist:', storeError?.message);
-          }
-        } else {
-          // Token is missing/empty — session cookies from the WebView may still allow API calls
-          console.warn('[SSO] No token extracted — relying on session cookies for /accounts/api/me');
+        const accessToken = token;
+        setAuthHeader(accessToken);
+        try {
+          await storeTokens(accessToken);
+        } catch (storeError: any) {
+          logger.warn('[SSO] storeTokens failed:', storeError?.message);
         }
+        logger.log('[SSO] Bearer token stored');
 
-        // Fetch user profile using the session/token
-        const user = await authService.getCurrentUser(
-          token,
-          baseUrl,
-        );
-        const orgs = await authService.getOrganizations();
-
-        // Build AuthTokens object
         const tokens: AuthTokens = {
-          accessToken: token ?? '',
+          accessToken,
+          tokenType: 'bearer',
+          expiresIn: 3600,
+          expiresAt: Date.now() + 3600 * 1000,
+        };
+
+        const orgs = organizations ?? user.memberOfOrganizations ?? [];
+
+        loginPending(user, tokens);
+        if (orgs.length > 0) {
+          setOrganizations(orgs);
+        }
+
+        logger.log('[SSO] Authentication complete, navigating to org selection');
+        router.replace('/(auth)/select-org');
+      } catch (error: any) {
+        logger.error('[SSO] Authentication failed:', error?.message);
+        setErrorMessage('Authentication failed. Please try again.');
+        setSnackbarVisible(true);
+        hasInjectedRef.current = false;
+        retryCountRef.current = 0;
+        setIsExtracting(false);
+      }
+    },
+    [loginPending, setOrganizations, router],
+  );
+
+  // ── Handle token-only extraction (no user data from WebView) ──
+  const completeWithTokenOnly = useCallback(
+    async (token: string) => {
+      setIsExtracting(true);
+      try {
+        setAuthHeader(token);
+        await storeTokens(token);
+
+        // We have a bearer token, so native Axios calls will work
+        const authService = require('../../services/authService');
+        const user = await authService.getCurrentUser(token, baseUrl);
+        const orgs = user.memberOfOrganizations ?? [];
+
+        const tokens: AuthTokens = {
+          accessToken: token,
           tokenType: 'bearer',
           expiresIn: 3600,
           expiresAt: Date.now() + 3600 * 1000,
         };
 
         loginPending(user, tokens);
-        setOrganizations(orgs);
+        if (orgs.length > 0) {
+          setOrganizations(orgs);
+        }
 
-        // Navigate to org selection
+        logger.log('[SSO] Token-only authentication complete');
         router.replace('/(auth)/select-org');
       } catch (error: any) {
-        console.error('[SSO] Authentication completion failed:', error?.message);
+        logger.error('[SSO] Token-only auth failed:', error?.message);
         setErrorMessage('Authentication failed. Please try again.');
         setSnackbarVisible(true);
-        // Reset so the user can try again
         hasInjectedRef.current = false;
+        retryCountRef.current = 0;
         setIsExtracting(false);
       }
     },
@@ -253,14 +295,15 @@ const SSOLoginScreen: React.FC = () => {
         url.includes('/verify') ||
         url.includes('/mfa')
       ) {
-        console.log('[SSO] MFA / verification page detected, waiting for user:', url);
+        logger.log('[SSO] MFA/verification page — waiting for user');
         return;
       }
 
       if (isPostLoginUrl(url)) {
-        console.log('[SSO] Post-login URL detected:', url);
+        logger.log('[SSO] Post-login redirect detected');
         hasInjectedRef.current = true;
-        // Give the page a moment to settle (extra time for MFA redirect), then inject extraction script
+        retryCountRef.current = 0;
+        // Give the page a moment to settle, then inject extraction script
         setTimeout(() => {
           webViewRef.current?.injectJavaScript(INJECTED_JS);
         }, 2500);
@@ -274,44 +317,52 @@ const SSOLoginScreen: React.FC = () => {
     (event: WebViewMessageEvent) => {
       try {
         const data = JSON.parse(event.nativeEvent.data);
-        console.log('[SSO] Message received:', data.type);
+        logger.log('[SSO] Message:', data.type);
 
         switch (data.type) {
-          case 'auth_success':
-            // Got user data from /accounts/api/me — session cookies are valid
-            completeAuthentication(data.user);
+          case 'auth_complete':
+            // Got user + orgs + optional token from WebView
+            completeAuthentication({
+              user: data.user,
+              organizations: data.organizations,
+              token: data.token,
+            });
             break;
 
-          case 'token_found':
-            // Got a raw token from cookies
-            completeAuthentication(data.token);
-            break;
-
-          case 'profile_found':
-            // Got profile data — may contain token
-            completeAuthentication(data.profile);
+          case 'token_only':
+            // Got a token but no user data — use native API
+            completeWithTokenOnly(data.token);
             break;
 
           case 'extraction_failed':
-            console.warn('[SSO] Token extraction failed:', data);
-            // Try a second time after a longer delay
-            hasInjectedRef.current = false;
-            setTimeout(() => {
-              if (!hasInjectedRef.current) {
-                hasInjectedRef.current = true;
-                webViewRef.current?.injectJavaScript(INJECTED_JS);
-              }
-            }, 3000);
+            logger.warn('[SSO] Extraction failed, retry #', retryCountRef.current);
+            if (retryCountRef.current < 2) {
+              retryCountRef.current += 1;
+              hasInjectedRef.current = false;
+              setTimeout(() => {
+                if (!hasInjectedRef.current) {
+                  hasInjectedRef.current = true;
+                  webViewRef.current?.injectJavaScript(INJECTED_JS);
+                }
+              }, 3000);
+            } else {
+              setErrorMessage(
+                'Could not extract session data. Please try signing in again.',
+              );
+              setSnackbarVisible(true);
+              hasInjectedRef.current = false;
+              retryCountRef.current = 0;
+            }
             break;
 
           default:
-            console.warn('[SSO] Unknown message type:', data.type);
+            logger.warn('[SSO] Unknown message type:', data.type);
         }
-      } catch (e) {
-        console.error('[SSO] Failed to parse WebView message:', e);
+      } catch (e: any) {
+        logger.error('[SSO] Failed to parse WebView message:', e?.message);
       }
     },
-    [completeAuthentication],
+    [completeAuthentication, completeWithTokenOnly],
   );
 
   // ── Handlers ──
@@ -324,6 +375,7 @@ const SSOLoginScreen: React.FC = () => {
     setSnackbarVisible(false);
     setIsExtracting(false);
     hasInjectedRef.current = false;
+    retryCountRef.current = 0;
     // Force WebView to reload by changing the key
     setWebViewKey((k) => k + 1);
   }, []);

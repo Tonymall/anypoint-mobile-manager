@@ -6,8 +6,7 @@
 
 import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
-import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
+import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator, type MD3Theme } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
@@ -305,7 +304,7 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
       const target = dashStats.target ?? {};
       const resources = target?.deploymentSettings?.resources ?? {};
       const cpuLimit = resources?.cpu?.limit ?? '';
-      const memLimit = resources?.memory?.limit ?? '';
+      const _memLimit = resources?.memory?.limit ?? '';
       // If we found resource configs, set them as "configured" values
       // (these aren't live metrics, but better than nothing)
       if (cpuLimit && metrics.cpuPercent == null) {
@@ -658,7 +657,7 @@ const MonitoringScreen: React.FC = () => {
 
   const {
     data: apisResponse,
-    isLoading: apisLoading,
+    isLoading: _apisLoading,
     refetch: refetchApis,
     isRefetching: apisRefetching,
   } = useManagedAPIs();

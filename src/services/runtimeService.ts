@@ -10,13 +10,11 @@ import type {
   Application,
   AppLogEntry,
   DeploymentRequest,
-  MetricSeries,
-  PaginatedResponse,
 } from '../types';
 
 const CLOUDHUB_BASE = '/cloudhub/api/v2';
 const CLOUDHUB_V1 = '/cloudhub/api';
-const RUNTIME_BASE = '/armui/api/v1';
+const _RUNTIME_BASE = '/armui/api/v1';
 const AMC_BASE = '/amc/application-manager/api/v2';
 const HYBRID_BASE = '/hybrid/api/v1';
 
@@ -108,7 +106,7 @@ function normalizeDeployment(dep: any): Application {
 
   // Extract monitoring from replica statuses if available
   const firstReplica = Array.isArray(replicasArr) ? replicasArr[0] : null;
-  const replicaState = firstReplica?.state ?? firstReplica?.status ?? '';
+  const _replicaState = firstReplica?.state ?? firstReplica?.status ?? '';
 
   return {
     id: dep.id ?? '',
@@ -198,18 +196,18 @@ export async function getApplications(params?: {
   // If ALL endpoints failed, throw a descriptive error so the UI can show it
   // instead of silently showing "No applications found"
   if (ch1Apps.length === 0 && ch2Apps.length === 0 && errors.length > 0) {
-    const orgId = getOrgId();
-    const envId = getEnvId();
+    // Production: sanitized error (no org/env IDs, no base URL)
     const hasToken = !!(api.defaults.headers.common['Authorization']);
-    const debugInfo = [
-      `Token: ${hasToken ? 'present' : 'MISSING'}`,
-      `OrgID: ${orgId ?? 'MISSING'}`,
-      `EnvID: ${envId ?? 'MISSING'}`,
-      `BaseURL: ${api.defaults.baseURL ?? 'NOT SET'}`,
-    ].join(', ');
-    const errMsg = `${errors.join(' | ')}\n[Debug: ${debugInfo}]`;
-    console.error('[getApplications] All endpoints failed:', errMsg);
-    throw new Error(errMsg);
+    logger.error('[getApplications] All endpoints failed:', errors.length, 'errors, token:', hasToken ? 'present' : 'MISSING');
+    // Dev-only: full debug details including org/env context
+    logger.log('[getApplications] Debug:', {
+      orgId: getOrgId() ?? 'MISSING',
+      envId: getEnvId() ?? 'MISSING',
+      baseURL: api.defaults.baseURL ?? 'NOT SET',
+      errors,
+    });
+    const userMsg = errors.map(e => e.replace(/https?:\/\/[^\s]+/g, '[endpoint]')).join(' | ');
+    throw new Error(`Failed to load applications: ${userMsg}`);
   }
 
   // Merge both lists (deduplicate by domain/name)
@@ -1578,7 +1576,7 @@ export function resetSessionFlags(): void {
  * e.g. "https://eu1.anypoint.mulesoft.com" → "eu1"
  *      "https://anypoint.mulesoft.com" → "us" (default region has no prefix)
  */
-function getRegionSlug(): string {
+function _getRegionSlug(): string {
   const baseUrl = api.defaults.baseURL ?? '';
   const match = baseUrl.match(/https?:\/\/(\w+)\.anypoint\.mulesoft\.com/);
   if (match && match[1] !== 'anypoint') return match[1];
@@ -1808,7 +1806,7 @@ function parseInfluxDBResults(data: any): {
 
       // Get the latest non-null value from the series
       let latestVal: number | null = null;
-      let latestTs: number = 0;
+      let _latestTs: number = 0;
 
       for (const row of values) {
         if (!Array.isArray(row)) continue;
@@ -1818,7 +1816,7 @@ function parseInfluxDBResults(data: any): {
           const val = row[ci];
           if (val == null) continue;
           latestVal = val;
-          latestTs = ts;
+          _latestTs = ts;
         }
       }
 

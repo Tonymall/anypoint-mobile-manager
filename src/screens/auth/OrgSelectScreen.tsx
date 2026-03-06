@@ -11,7 +11,6 @@ import {
   TouchableRipple,
   Appbar,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,11 +21,12 @@ import { useOrganizations } from '../../hooks/queries';
 import { setOrganizationHeader, clearHeaders } from '../../services/api';
 import type { Organization } from '../../types';
 import { hapticLight } from '../../utils/haptics';
+import logger from '../../utils/logger';
 
 const OrgSelectScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const _insets = useSafeAreaInsets();
   const { fromSettings } = useLocalSearchParams<{ fromSettings?: string }>();
 
   const switchOrganization = useAuthStore((s) => s.switchOrganization);
@@ -38,12 +38,12 @@ const OrgSelectScreen: React.FC = () => {
   const handleSelect = useCallback(
     (org: Organization) => {
       hapticLight();
-      console.log('[OrgSelect] Selected org:', org.name, org.id);
+      logger.log('[OrgSelect] Selected org:', org.name, org.id);
       queryClient.clear();
       clearHeaders();
       switchOrganization(org);
       setOrganizationHeader(org.id);
-      console.log('[OrgSelect] Org header set, navigating to select-env');
+      logger.log('[OrgSelect] Org header set, navigating to select-env');
       router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: fromSettings ?? '' } });
     },
     [switchOrganization, router, fromSettings, queryClient],
@@ -65,7 +65,7 @@ const OrgSelectScreen: React.FC = () => {
   }, [router, fromSettings]);
 
   const renderOrg = useCallback(
-    ({ item, index }: { item: Organization; index: number }) => (
+    ({ item }: { item: Organization }) => (
       <TouchableRipple
         onPress={() => handleSelect(item)}
         borderless

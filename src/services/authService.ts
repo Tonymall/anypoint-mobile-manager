@@ -3,7 +3,7 @@
 // ============================================================
 
 import axios from 'axios';
-import api, { storeTokens, clearTokens, clearHeaders, resetApiState, getBaseUrl, setAuthHeader } from './api';
+import api, { storeTokens, resetApiState, getBaseUrl, setAuthHeader } from './api';
 import logger from '../utils/logger';
 import type {
   AuthTokens,
@@ -98,6 +98,41 @@ export async function login(
   // This ensures subsequent calls (e.g. getCurrentUser) don't depend on
   // SecureStore read timing — the token is available in memory right away.
   setAuthHeader(tokens.accessToken);
+
+  return tokens;
+}
+
+/**
+ * Authenticate using Connected Apps (OAuth2 client_credentials flow).
+ *
+ * Uses a fresh axios instance (no shared cookies/headers) and posts
+ * client_id + client_secret as form-urlencoded to the OAuth2 token endpoint.
+ */
+export async function loginWithConnectedApp(
+  clientId: string,
+  clientSecret: string,
+  baseUrl: string,
+): Promise<AuthTokens> {
+  const freshClient = axios.create();
+  const { data } = await freshClient.post(
+    `${baseUrl}/accounts/api/v2/oauth2/token`,
+    new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'client_credentials',
+    }).toString(),
+    {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 15000,
+    },
+  );
+
+  const tokens: AuthTokens = {
+    accessToken: data.access_token,
+    tokenType: data.token_type ?? 'bearer',
+    expiresIn: data.expires_in ?? 3600,
+    expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,
+  };
 
   return tokens;
 }

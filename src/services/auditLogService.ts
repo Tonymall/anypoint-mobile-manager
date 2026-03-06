@@ -5,6 +5,7 @@
 // ============================================================
 
 import api from './api';
+import logger from '../utils/logger';
 import type { AuditLogEntry } from '../types';
 
 export interface AuditLogQueryParams {
@@ -82,7 +83,7 @@ export async function queryAuditLogs(
   } catch (err: any) {
     const status = err?.response?.status;
     if (status === 401) throw err; // token expired, don't retry
-    console.warn(`[AuditLogs] Primary endpoint failed: ${status} ${err?.response?.data?.message ?? err?.message ?? ''}`);
+    logger.warn(`[AuditLogs] Primary endpoint failed: ${status} ${err?.response?.data?.message ?? err?.message ?? ''}`);
   }
 
   // --- Fallback endpoints ---

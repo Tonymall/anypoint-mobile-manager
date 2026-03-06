@@ -5,9 +5,8 @@
 // ============================================================
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, ScrollView, StyleSheet, RefreshControl, Dimensions, Platform, useWindowDimensions } from 'react-native';
-import { Appbar, Text, Card, Chip, useTheme, ProgressBar, Divider } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
+import { View, ScrollView, StyleSheet, RefreshControl, Dimensions, useWindowDimensions } from 'react-native';
+import { Appbar, Text, Card, Chip, useTheme, ProgressBar, Divider, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useApplication, useAppMetrics, useDashboardStats } from '../../hooks/queries';

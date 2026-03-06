@@ -13,14 +13,13 @@ import {
   RefreshControl,
   useWindowDimensions,
   Pressable,
-  Platform,
 } from 'react-native';
 import {
   Text,
   useTheme,
   ProgressBar,
+  type MD3Theme,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,7 +30,6 @@ import { anypointColors } from '../../theme';
 import { useApplications, useManagedAPIs } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
-import LoadingState from '../../components/common/LoadingState';
 
 // ── Glassmorphic Stat Card ──
 
@@ -197,7 +195,7 @@ const DashboardScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const { isLandscape, isTablet, isPhoneLandscape, isTabletLandscape, columns } = useResponsiveLayout();
+  const { isLandscape, isPhoneLandscape } = useResponsiveLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef<ScrollView>(null);
   const user = useAuthStore((s) => s.user);

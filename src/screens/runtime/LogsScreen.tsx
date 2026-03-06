@@ -18,9 +18,8 @@ import {
 } from 'react-native';
 import {
   Appbar, Text, Chip, Searchbar, useTheme, ActivityIndicator, Switch,
-  Surface, Button, IconButton,
+  Button, IconButton, type MD3Theme,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -30,6 +29,7 @@ import { areLogEndpointsAvailable } from '../../services/runtimeService';
 import type { AuditLogEntry } from '../../types';
 import type { AuditLogQueryParams } from '../../services/auditLogService';
 import LoadingState from '../../components/common/LoadingState';
+import logger from '../../utils/logger';
 
 // ---------------------------------------------------------------------------
 // Date-range presets (ordered from smallest to largest)
@@ -345,7 +345,7 @@ const LogsScreen: React.FC = () => {
 
   // ── Debug: log domain on mount ──
   useEffect(() => {
-    console.log(`[LogsScreen] Mounted with domain="${domain}"`);
+    logger.log(`[LogsScreen] Mounted with domain="${domain}"`);
   }, [domain]);
 
   // State
@@ -408,10 +408,10 @@ const LogsScreen: React.FC = () => {
   // ── Debug: log when data changes ──
   useEffect(() => {
     const count = appLogs?.length ?? 0;
-    console.log(`[LogsScreen] appLogs updated: ${count} entries, isFetched=${appLogsFetched}, error=${appLogsError?.message ?? 'none'}`);
+    logger.log(`[LogsScreen] appLogs updated: ${count} entries, isFetched=${appLogsFetched}, error=${appLogsError?.message ?? 'none'}`);
     if (count > 0 && appLogs?.[0]) {
-      console.log('[LogsScreen] First entry keys:', Object.keys(appLogs[0]).join(', '));
-      console.log('[LogsScreen] First entry sample:', JSON.stringify(appLogs[0]).slice(0, 300));
+      logger.log('[LogsScreen] First entry keys:', Object.keys(appLogs[0]).join(', '));
+      logger.log('[LogsScreen] First entry sample:', JSON.stringify(appLogs[0]).slice(0, 300));
     }
     if (count > 0) {
       setLastUpdated(new Date()); // eslint-disable-line react-hooks/set-state-in-effect -- syncs timestamp from query data
@@ -438,7 +438,7 @@ const LogsScreen: React.FC = () => {
     isRefetching: auditRefetching,
     refetch: refetchAudit,
     error: auditError,
-    isFetched: auditFetched,
+    isFetched: _auditFetched,
   } = useAuditLogs(auditParams);
 
   // Filtered data — safely convert everything to string before toLowerCase
@@ -519,6 +519,7 @@ const LogsScreen: React.FC = () => {
     if (autoScroll && tab === 'app' && filteredAppLogs.length > 0) {
       flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- scroll trigger only needs dataUpdatedAt, autoScroll, tab; filteredAppLogs.length is derived
   }, [dataUpdatedAt, autoScroll, tab]);
 
   // Empty
@@ -561,7 +562,7 @@ const LogsScreen: React.FC = () => {
   }
 
   const totalLogs = tab === 'app' ? (appLogs?.length ?? 0) : (auditResponse?.data?.length ?? 0);
-  const displayedLogs = tab === 'app' ? filteredAppLogs.length : filteredAuditLogs.length;
+  const _displayedLogs = tab === 'app' ? filteredAppLogs.length : filteredAuditLogs.length;
 
   return (
     <View style={styles.container}>

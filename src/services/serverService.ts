@@ -160,6 +160,28 @@ export async function getServerLogs(
   return data;
 }
 
+// ---------- Server Groups (List) ----------
+export async function getServerGroups(
+  _organizationId: string,
+  _environmentId: string,
+): Promise<ServerGroup[]> {
+  const { data } = await api.get<ServerGroup[]>(
+    '/hybrid/api/v1/serverGroups',
+  );
+  return data;
+}
+
+// ---------- Clusters (List) ----------
+export async function getClusters(
+  _organizationId: string,
+  _environmentId: string,
+): Promise<Cluster[]> {
+  const { data } = await api.get<Cluster[]>(
+    '/hybrid/api/v1/clusters',
+  );
+  return data;
+}
+
 // ---------- Runtime Fabric ----------
 
 /**

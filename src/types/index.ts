@@ -693,6 +693,65 @@ export interface B2BTransaction {
   errorMessage?: string;
 }
 
+// --- Design Center ---
+export interface DesignCenterProject {
+  id: string;
+  name: string;
+  classifier: string;
+  createdDate: string;
+  lastModifiedDate: string;
+  organizationId: string;
+  ownerId: string;
+  ownerName: string;
+}
+
+// --- Secret Manager ---
+export interface SecretGroup {
+  id: string;
+  name: string;
+  downloadable: boolean;
+  createdAt: string;
+}
+
+export interface Keystore {
+  id: string;
+  name: string;
+  type: string;
+  algorithm: string;
+  expirationDate: string;
+}
+
+export interface Certificate {
+  id: string;
+  name: string;
+  type: string;
+  issuer: string;
+  subject: string;
+  expirationDate: string;
+}
+
+export interface Truststore {
+  id: string;
+  name: string;
+  type: string;
+  certificates: number;
+  expirationDate: string;
+}
+
+export interface TlsContext {
+  id: string;
+  name: string;
+  target: string;
+  keystore?: string;
+  truststore?: string;
+}
+
+// --- Connected Apps Auth ---
+export interface ConnectedAppCredentials {
+  clientId: string;
+  clientSecret: string;
+}
+
 // --- Control Plane Regions ---
 export type ControlPlaneRegionId = 'us' | 'eu1' | 'ca1' | 'jp1';
 

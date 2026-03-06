@@ -1,5 +1,4 @@
-import { MD3DarkTheme, MD3LightTheme, configureFonts } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
+import { MD3DarkTheme, MD3LightTheme, configureFonts, type MD3Theme } from 'react-native-paper';
 
 // ═══════════════════════════════════════════════════════════════════
 // MuleOps Design System — 2026 Dark-First Theme

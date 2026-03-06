@@ -58,6 +58,7 @@ const Orb: React.FC<{ config: OrbConfig }> = ({ config }) => {
         -1, // infinite
       ),
     );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run-once animation setup; config/opacity/progress are stable Reanimated values
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({

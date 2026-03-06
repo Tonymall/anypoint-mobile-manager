@@ -8,7 +8,6 @@ import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { StyleSheet, View, ScrollView, Pressable } from 'react-native';
 import {
   Text,
-  Button,
   useTheme,
   Appbar,
   Portal,
@@ -16,8 +15,8 @@ import {
   TextInput,
   IconButton,
   ActivityIndicator,
+  type MD3Theme,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { statusColors, anypointColors } from '../../theme';
@@ -30,13 +29,12 @@ import {
 } from '../../hooks/queries';
 import {
   getAppName,
-  getAppId,
   getMuleVersion,
   getWorkerInfo,
   getDeploymentTarget,
 } from '../../utils/appHelpers';
 import * as runtimeService from '../../services/runtimeService';
-import { getStatusColor, getStatusLabel, isTransitional, TRANSITIONAL_STATUSES } from '../../utils/statusHelpers';
+import { getStatusColor, getStatusLabel, isTransitional } from '../../utils/statusHelpers';
 import { hapticSuccess, hapticError } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
@@ -252,6 +250,7 @@ const ApplicationDetailScreen: React.FC = () => {
         return () => clearTimeout(timer);
       }
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run when status or phase changes, not the full app object
   }, [app?.status, mutationPhase]);
 
   useEffect(() => {
@@ -357,7 +356,7 @@ const ApplicationDetailScreen: React.FC = () => {
     router.push({ pathname: '/(main)/runtime/schedulers' as any, params: { domain: domain as string } });
   }, [router, domain]);
 
-  const properties = (app?.properties ?? {}) as Record<string, string>;
+  const properties = useMemo(() => (app?.properties ?? {}) as Record<string, string>, [app?.properties]);
   const hasProperties = Object.keys(properties).length > 0;
 
   const startEditing = useCallback(() => { setEditedProperties({ ...properties }); setEditingProps(true); }, [properties]);

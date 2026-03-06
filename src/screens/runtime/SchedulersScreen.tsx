@@ -4,8 +4,7 @@
 
 import React, { useMemo, useCallback } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl, Platform } from 'react-native';
-import { Appbar, Text, Switch, Card, useTheme, Snackbar, IconButton } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
+import { Appbar, Text, Switch, Card, useTheme, Snackbar, IconButton, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSchedulers, useUpdateScheduler, useRunScheduler } from '../../hooks/queries';
@@ -27,7 +26,7 @@ interface ScheduleItemProps {
 }
 
 const ScheduleItem = React.memo<ScheduleItemProps>(
-  ({ schedule, domain, theme, onToggle, onRun, isUpdating }) => {
+  ({ schedule, domain: _domain, theme, onToggle, onRun, isUpdating }) => {
     const cronOrFrequency = schedule.cronExpression
       ? `Cron: ${schedule.cronExpression}`
       : schedule.frequency

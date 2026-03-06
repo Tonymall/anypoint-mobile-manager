@@ -14,7 +14,6 @@ import {
   ListRenderItemInfo,
   useWindowDimensions,
   Pressable,
-  Platform,
 } from 'react-native';
 import {
   Searchbar,
@@ -25,16 +24,15 @@ import {
   Modal,
   RadioButton,
   Button,
+  type MD3Theme,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import type { Application, AppStatus } from '../../types';
 import { anypointColors } from '../../theme';
 import { useApplications } from '../../hooks/queries';
-import { getAppName, getAppId, getMuleVersion, getLastUpdateTime, getWorkerInfo, getDeploymentTarget } from '../../utils/appHelpers';
+import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { getStatusColor, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import LoadingState from '../../components/common/LoadingState';
@@ -169,7 +167,6 @@ const CONTENT_MAX_WIDTH = 768;
 const ApplicationsListScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { columns } = useResponsiveLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -182,7 +179,7 @@ const ApplicationsListScreen: React.FC = () => {
 
   const { data: applications, isLoading, error, refetch, isRefetching } = useApplications();
 
-  const appsList = applications ?? [];
+  const appsList = useMemo(() => applications ?? [], [applications]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -255,7 +252,7 @@ const ApplicationsListScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* ── Header ── */}
-      <View style={[styles.topBar, { paddingTop: insets.top + 12 }, isWide && { paddingHorizontal: sidePadding + 16 }]}>
+      <View style={[styles.topBar, { paddingTop: 12 }, isWide && { paddingHorizontal: sidePadding + 16 }]}>
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 }}>
           <View style={styles.sectionAccent} />
           <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.onSurface, flex: 1, letterSpacing: -0.3 }}>

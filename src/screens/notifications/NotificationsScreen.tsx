@@ -13,10 +13,8 @@ import {
   Pressable,
   RefreshControl,
 } from 'react-native';
-import { Text, useTheme } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
+import { Text, useTheme, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useNotificationStore } from '../../stores/notificationStore';
 import { anypointColors } from '../../theme';
@@ -180,7 +178,6 @@ const EmptyState: React.FC<{ theme: MD3Theme }> = ({ theme }) => (
 // ── Main Screen ──
 const NotificationsScreen: React.FC = () => {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
   const dynamicStyles = useMemo(() => createDynamicStyles(theme), [theme]);
 
   const notifications = useNotificationStore((s) => s.notifications);
@@ -228,7 +225,7 @@ const NotificationsScreen: React.FC = () => {
   const keyExtractor = useCallback((item: AppNotification) => item.id, []);
 
   return (
-    <View style={[dynamicStyles.container, { paddingTop: insets.top }]}>
+    <View style={[dynamicStyles.container, { paddingTop: 0 }]}>
       {/* Header */}
       <View style={dynamicStyles.header}>
         <View style={styles.headerLeft}>

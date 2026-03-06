@@ -5,8 +5,7 @@
 
 import React, { useMemo } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl } from 'react-native';
-import { Appbar, Text, Card, useTheme, ProgressBar, Icon } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
+import { Appbar, Text, Card, useTheme, ProgressBar, Icon, type MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useApplications } from '../../hooks/queries';
 import { anypointColors } from '../../theme';
@@ -56,7 +55,7 @@ const WorkersScreen: React.FC = () => {
     isRefetching,
   } = useApplications();
 
-  const appsList = applications ?? [];
+  const appsList = useMemo(() => applications ?? [], [applications]);
 
   /** Build sorted worker items and summary stats */
   const { workerItems, totalWorkers, totalVCores, totalAppsWithWorkers } = useMemo(() => {

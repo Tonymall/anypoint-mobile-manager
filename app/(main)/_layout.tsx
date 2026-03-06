@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import {
   View,
   TouchableOpacity,
-  Platform,
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
@@ -27,19 +26,20 @@ import {
   setEnvironmentHeader,
   getStoredAccessToken,
 } from '../../src/services/api';
+import logger from '../../src/utils/logger';
 
 // ── Tab definitions (order matters — matches Tabs.Screen order) ──
 const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: string }> = {
   index: { title: 'Dashboard', icon: 'view-dashboard-outline', iconFocused: 'view-dashboard' },
   runtime: { title: 'Runtime', icon: 'application-cog-outline', iconFocused: 'application-cog' },
   apis: { title: 'APIs', icon: 'api' },
-  notifications: { title: 'Alerts', icon: 'bell-outline', iconFocused: 'bell' },
+  alerts: { title: 'Alerts', icon: 'bell-outline', iconFocused: 'bell' },
   monitoring: { title: 'Monitor', icon: 'chart-line-variant', iconFocused: 'chart-line' },
   settings: { title: 'Settings', icon: 'cog-outline', iconFocused: 'cog' },
 };
 
 // ── Custom Animated Tab Bar — 2026 Minimal Design ──
-function AnimatedTabBar({ state, descriptors, navigation }: any) {
+function AnimatedTabBar({ state, _descriptors, navigation }: any) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
@@ -65,6 +65,7 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
       duration: 300,
       easing: Easing.bezier(0.33, 0, 0, 1), // iOS-like spring curve
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- indicatorX is a Reanimated SharedValue (stable ref)
   }, [safeIndex, tabWidth]);
 
   const indicatorStyle = useAnimatedStyle(() => ({
@@ -131,7 +132,7 @@ function AnimatedTabBar({ state, descriptors, navigation }: any) {
               size={isPhoneLandscape ? 20 : 21}
               color={isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant}
             />
-            {route.name === 'notifications' && unreadCount > 0 && (
+            {route.name === 'alerts' && unreadCount > 0 && (
               <View style={{
                 position: 'absolute',
                 top: 6,
@@ -182,7 +183,7 @@ export default function MainLayout() {
         if (storedToken) {
           setAuthHeader(storedToken);
         } else {
-          console.warn('[MainLayout] No token available to set auth header!');
+          logger.warn('[MainLayout] No token available to set auth header!');
         }
       }
       if (currentOrg?.id) setOrganizationHeader(currentOrg.id);
@@ -209,11 +210,13 @@ export default function MainLayout() {
       <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
       <Tabs.Screen name="runtime" options={{ title: 'Runtime' }} />
       <Tabs.Screen name="apis" options={{ title: 'APIs' }} />
-      <Tabs.Screen name="notifications" options={{ title: 'Alerts' }} />
+      <Tabs.Screen name="alerts" options={{ title: 'Alerts' }} />
       <Tabs.Screen name="monitoring" options={{ title: 'Monitoring' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
       {/* Workers: hidden from tab bar — only accessible via router.push */}
       <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
+      {/* Admin: hidden from tab bar — accessible from Settings screen */}
+      <Tabs.Screen name="admin" options={{ href: null, title: 'Admin' }} />
     </Tabs>
   );
 }

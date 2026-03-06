@@ -128,13 +128,13 @@ const LoginScreen: React.FC = () => {
         regionUrl,
       );
 
-      // If login somehow returned without a token (shouldn't happen now
-      // that MFARequiredError is thrown, but kept as safety net)
+      // If login returned without a token AND without throwing MFARequiredError,
+      // we can't show the MFA dialog (no verification context). Fail cleanly.
       if (!tokens.accessToken) {
-        logger.log('[Login] No access_token in login response — MFA required');
-        setMfaCode('');
-        setMfaContext(null);
-        setMfaVisible(true);
+        logger.warn('[Login] No access_token and no MFA context — cannot proceed');
+        setErrorMessage('Authentication returned an unexpected response. Please try again.');
+        hapticError();
+        setSnackbarVisible(true);
         return;
       }
 
@@ -147,12 +147,14 @@ const LoginScreen: React.FC = () => {
           regionUrl,
         );
       } catch (meError: any) {
-        // If getCurrentUser fails with 401, the token is likely a partial/MFA
-        // token that requires verification before it's fully usable.
+        // If getCurrentUser fails with 401, the token is partial/expired.
+        // Without an MFA verification context we can't show the MFA dialog —
+        // fail cleanly and let the user retry the full login flow.
         if (meError?.response?.status === 401) {
-          logger.log('[Login] getCurrentUser 401 — treating as MFA required');
-          setMfaCode('');
-          setMfaVisible(true);
+          logger.warn('[Login] getCurrentUser 401 — token unusable, no MFA context');
+          setErrorMessage('Session token was rejected. Please sign in again.');
+          hapticError();
+          setSnackbarVisible(true);
           return;
         }
         throw meError;
@@ -173,16 +175,15 @@ const LoginScreen: React.FC = () => {
         return;
       }
 
+      // Log sanitized error — no response bodies or full URLs in production
       const status = error?.response?.status;
-      const url = error?.config?.url ?? error?.request?.responseURL ?? 'unknown';
-      const responseBody = error?.response?.data;
-      console.error('[Login] FAILED', {
-        status,
-        url,
-        responseBody: typeof responseBody === 'object'
-          ? JSON.stringify(responseBody).slice(0, 500)
-          : String(responseBody ?? '').slice(0, 500),
-        message: error?.message,
+      logger.error('[Login] FAILED', { status, message: error?.message });
+      // Detailed debug info only in dev
+      logger.log('[Login] Debug:', {
+        url: error?.config?.url,
+        responseBody: typeof error?.response?.data === 'object'
+          ? JSON.stringify(error.response.data).slice(0, 500)
+          : String(error?.response?.data ?? '').slice(0, 500),
       });
 
       // Fallback MFA detection from error responses
@@ -507,6 +508,20 @@ const LoginScreen: React.FC = () => {
                   accessibilityRole="button"
                 >
                   Sign in with SSO
+                </Button>
+
+                {/* Connected App Button */}
+                <Button
+                  mode="text"
+                  onPress={() => router.push('/(auth)/connected-app' as any)}
+                  disabled={isLoading}
+                  icon="connection"
+                  style={styles.ssoButton}
+                  contentStyle={styles.ssoButtonContent}
+                  accessibilityLabel="Sign in with Connected App"
+                  accessibilityRole="button"
+                >
+                  Sign in with Connected App
                 </Button>
 
               </View>

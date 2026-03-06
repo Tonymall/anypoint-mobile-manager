@@ -87,7 +87,18 @@
       "Bash(npx jest --no-cache)",
       "Bash(npx eslint src/ --ext .ts,.tsx --max-warnings 50)",
       "Bash(npx eslint src/ --ext .ts,.tsx --quiet)",
-      "Bash(npm install --save-dev eslint-plugin-react-hooks)"
+      "Bash(npm install --save-dev eslint-plugin-react-hooks)",
+      "Bash(npx eslint src/ --ext .ts,.tsx)",
+      "Bash(npx eslint src/ --ext .ts,.tsx -f compact)",
+      "Bash(npx eslint src/ app/ --ext .ts,.tsx)",
+      "Bash(npx eslint src/ app/ --ext .ts,.tsx --quiet)",
+      "Bash(npx eslint src/ app/ --ext .ts,.tsx -f compact)",
+      "Bash(grep -l \"export.*function use\" /c/Users/xTony/Documents/Projects/anypoint-mobile-manager/src/hooks/queries/*.ts)",
+      "Bash(wc -l \"C:\\\\Users\\\\xTony\\\\Downloads\\\\MuleSoft Catalyst Knowledge Hub & Others.postman_collection.json\")",
+      "Bash(cat \"MuleSoft Catalyst Knowledge Hub & Others.postman_collection.json\")",
+      "Bash(cat \"/c/Users/xTony/Downloads/MuleSoft Catalyst Knowledge Hub & Others.postman_collection.json\")",
+      "Bash(python3:*)",
+      "Bash(npm run lint)"
     ]
   }
 }

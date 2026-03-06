@@ -5,13 +5,22 @@ import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { scheduleLocalNotification } from '../../services/notificationService';
 
+/**
+ * Query key factory — scoped by org + env so tenant switches never
+ * serve stale data from a previous context.
+ */
+function scopePrefix(): readonly string[] {
+  const { currentOrganization, currentEnvironment } = useAuthStore.getState();
+  return ['runtime', currentOrganization?.id ?? '_', currentEnvironment?.id ?? '_'] as const;
+}
+
 export const runtimeKeys = {
-  all: ['runtime'] as const,
-  applications: () => [...runtimeKeys.all, 'applications'] as const,
-  application: (domain: string) => [...runtimeKeys.all, 'application', domain] as const,
-  logs: (domain: string) => [...runtimeKeys.all, 'logs', domain] as const,
-  metrics: (domain: string, metric: string) => [...runtimeKeys.all, 'metrics', domain, metric] as const,
-  schedulers: (domain: string) => [...runtimeKeys.all, 'schedulers', domain] as const,
+  all: () => scopePrefix(),
+  applications: () => [...scopePrefix(), 'applications'] as const,
+  application: (domain: string) => [...scopePrefix(), 'application', domain] as const,
+  logs: (domain: string) => [...scopePrefix(), 'logs', domain] as const,
+  metrics: (domain: string, metric: string) => [...scopePrefix(), 'metrics', domain, metric] as const,
+  schedulers: (domain: string) => [...scopePrefix(), 'schedulers', domain] as const,
 };
 
 // ALL non-final statuses — only truly final states produce a polling notification.
@@ -176,7 +185,7 @@ export function useAppMetrics(domain: string, params: {
  */
 export function useDashboardStats(domain: string, periodMinutes: number = 60) {
   return useQuery({
-    queryKey: [...runtimeKeys.all, 'dashboardStats', domain, periodMinutes],
+    queryKey: [...runtimeKeys.all(), 'dashboardStats', domain, periodMinutes],
     queryFn: () => runtimeService.getDashboardStats(domain, periodMinutes),
     enabled: !!domain,
     refetchInterval: 60_000,

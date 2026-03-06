@@ -8,13 +8,12 @@ import React, { useState, useMemo } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import {
   Searchbar,
-  Chip,
   Text,
   useTheme,
   Icon,
+  type MD3Theme,
 } from 'react-native-paper';
-import type { MD3Theme } from 'react-native-paper';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import type { APIStatus, ManagedAPI } from '../../types';
 import { statusColors, anypointColors } from '../../theme';
 import { useManagedAPIs } from '../../hooks/queries';
@@ -266,7 +265,6 @@ const cardStyles = StyleSheet.create({
 
 const APIListScreen: React.FC = () => {
   const theme = useTheme<MD3Theme>();
-  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -279,7 +277,7 @@ const APIListScreen: React.FC = () => {
     isRefetching,
   } = useManagedAPIs({ query: debouncedSearch || undefined });
 
-  const allApis = apisResponse ?? [];
+  const allApis = useMemo(() => apisResponse ?? [], [apisResponse]);
 
   const filteredAPIs = useMemo(() => {
     if (statusFilter === 'all') return allApis;
@@ -302,7 +300,7 @@ const APIListScreen: React.FC = () => {
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      <View style={[styles.header, { paddingTop: 12 }]}>
         <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, fontWeight: '700', letterSpacing: -0.3 }}>
           API Manager
         </Text>

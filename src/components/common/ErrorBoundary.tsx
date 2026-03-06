@@ -90,8 +90,14 @@ class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[ErrorBoundary] Caught error:', error.message);
-    console.error('[ErrorBoundary] Component stack:', info.componentStack);
+    // Production: log only the error name/message (no stack traces or component trees)
+    // eslint-disable-next-line no-console
+    console.error('[ErrorBoundary]', error.name, error.message);
+    // Full stack in dev only
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.error('[ErrorBoundary] Component stack:', info.componentStack);
+    }
   }
 
   handleReset = () => {

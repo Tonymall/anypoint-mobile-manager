@@ -14,3 +14,5 @@ export { default as SectionHeader } from './SectionHeader';
 export { default as InfoRow } from './InfoRow';
 export { default as EnvironmentSelector } from './EnvironmentSelector';
 export { default as ErrorBoundary } from './ErrorBoundary';
+export { default as SegmentedControl } from './SegmentedControl';
+export type { Segment } from './SegmentedControl';

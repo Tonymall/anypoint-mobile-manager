@@ -5,7 +5,7 @@
 // ============================================================
 
 import React, { useEffect } from 'react';
-import { View, Image, StyleSheet, useWindowDimensions } from 'react-native';
+import { Image, StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -38,6 +38,7 @@ const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
       1500,
       withTiming(1.02, { duration: 600, easing: Easing.out(Easing.ease) }),
     );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run-once splash animation; onFinish/opacity/scale are stable
   }, []);
 
   const animatedStyle = useAnimatedStyle(() => ({
