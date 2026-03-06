@@ -20,14 +20,18 @@ export const deploymentKeys = {
 
 // ---------- Queries ----------
 
-export function useDeploymentHistory(params?: Parameters<typeof deploymentService.getDeploymentHistory>[2]) {
+export function useDeploymentHistory(
+  params?: Parameters<typeof deploymentService.getDeploymentHistory>[2],
+  options?: { enabled?: boolean },
+) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const envId = useAuthStore((s) => s.currentEnvironment?.id);
 
   return useQuery({
     queryKey: deploymentKeys.history(params),
     queryFn: () => deploymentService.getDeploymentHistory(orgId!, envId!, params),
-    enabled: !!orgId && !!envId,
+    enabled: !!orgId && !!envId && (options?.enabled ?? true),
+    retry: false,
   });
 }
 
@@ -39,6 +43,7 @@ export function useDeploymentStatus(id: string) {
     queryKey: deploymentKeys.status(id),
     queryFn: () => deploymentService.getDeploymentStatus(orgId!, envId!, id),
     enabled: !!orgId && !!envId && !!id,
+    retry: false,
   });
 }
 

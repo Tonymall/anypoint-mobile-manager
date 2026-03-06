@@ -22,14 +22,18 @@ export const infraKeys = {
 
 // ---------- Queries ----------
 
-export function useServers(params?: Parameters<typeof serverService.getServers>[2]) {
+export function useServers(
+  params?: Parameters<typeof serverService.getServers>[2],
+  options?: { enabled?: boolean },
+) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const envId = useAuthStore((s) => s.currentEnvironment?.id);
 
   return useQuery({
     queryKey: [...infraKeys.servers(), params],
     queryFn: () => serverService.getServers(orgId!, envId!, params),
-    enabled: !!orgId && !!envId,
+    enabled: !!orgId && !!envId && (options?.enabled ?? true),
+    retry: false,
   });
 }
 
@@ -41,39 +45,46 @@ export function useServer(serverId: number) {
     queryKey: infraKeys.server(serverId),
     queryFn: () => serverService.getServer(orgId!, envId!, serverId),
     enabled: !!orgId && !!envId && !!serverId,
+    retry: false,
   });
 }
 
-export function useServerGroups() {
+export function useServerGroups(options?: { enabled?: boolean }) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const envId = useAuthStore((s) => s.currentEnvironment?.id);
 
   return useQuery({
     queryKey: infraKeys.serverGroups(),
     queryFn: () => serverService.getServerGroups(orgId!, envId!),
-    enabled: !!orgId && !!envId,
+    enabled: !!orgId && !!envId && (options?.enabled ?? true),
+    retry: false,
   });
 }
 
-export function useClusters() {
+export function useClusters(options?: { enabled?: boolean }) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const envId = useAuthStore((s) => s.currentEnvironment?.id);
 
   return useQuery({
     queryKey: infraKeys.clusters(),
     queryFn: () => serverService.getClusters(orgId!, envId!),
-    enabled: !!orgId && !!envId,
+    enabled: !!orgId && !!envId && (options?.enabled ?? true),
+    retry: false,
   });
 }
 
-export function useRTFDeployments() {
+export function useRTFDeployments(
+  params?: Parameters<typeof serverService.getRTFDeployments>[2],
+  options?: { enabled?: boolean },
+) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const envId = useAuthStore((s) => s.currentEnvironment?.id);
 
   return useQuery({
     queryKey: infraKeys.rtfDeployments(),
-    queryFn: () => serverService.getRTFDeployments(orgId!, envId!),
-    enabled: !!orgId && !!envId,
+    queryFn: () => serverService.getRTFDeployments(orgId!, envId!, params),
+    enabled: !!orgId && !!envId && (options?.enabled ?? true),
+    retry: false,
   });
 }
 

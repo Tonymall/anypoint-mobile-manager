@@ -82,7 +82,7 @@ export async function getTeams(
   },
 ): Promise<PaginatedResponse<Team>> {
   const { data } = await api.get<PaginatedResponse<Team>>(
-    `${ACCESS_BASE}/organizations/${organizationId}/teams`,
+    `${ACCOUNTS_BASE}/organizations/${organizationId}/teams`,
     { params },
   );
   return data;
@@ -100,7 +100,7 @@ export async function createTeam(
   },
 ): Promise<Team> {
   const { data } = await api.post<Team>(
-    `${ACCESS_BASE}/organizations/${organizationId}/teams`,
+    `${ACCOUNTS_BASE}/organizations/${organizationId}/teams`,
     team,
   );
   return data;
@@ -157,15 +157,16 @@ export async function getAuditLogs(
  * List all connected (external) applications in the organization.
  */
 export async function getConnectedApps(
-  organizationId: string,
+  _organizationId: string,
   params?: {
     offset?: number;
     limit?: number;
+    includeUsage?: boolean;
   },
 ): Promise<PaginatedResponse<ConnectedApp>> {
   const { data } = await api.get<PaginatedResponse<ConnectedApp>>(
-    `${ACCOUNTS_BASE}/organizations/${organizationId}/connectedApplications`,
-    { params },
+    `${ACCOUNTS_BASE}/connectedApplications`,
+    { params: { limit: 100, offset: 0, includeUsage: true, ...params } },
   );
   return data;
 }
@@ -226,7 +227,7 @@ export async function getPermissions(
   organizationId: string,
 ): Promise<Array<{ resource: string; actions: string[] }>> {
   const { data } = await api.get<Array<{ resource: string; actions: string[] }>>(
-    `${ACCOUNTS_BASE}/organizations/${organizationId}/permissions`,
+    `${ACCOUNTS_BASE}/cs/organizations/${organizationId}/permissions/products`,
   );
   return data;
 }

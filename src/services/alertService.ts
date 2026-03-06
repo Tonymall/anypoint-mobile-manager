@@ -1,5 +1,11 @@
 // ============================================================
 // Anypoint Mobile Platform - Alert Service
+//
+// Org/env context is passed via the X-ANYPNT-ORG-ID and
+// X-ANYPNT-ENV-ID headers (set by api.ts), NOT as URL segments.
+// Endpoint paths match the Postman collection:
+//   /armui/api/v1/alerts
+//   /armui/api/v1/alerts/cloudhub
 // ============================================================
 
 import api from './api';
@@ -20,10 +26,11 @@ const ALERTS_BASE = '/armui/api/v1';
 
 /**
  * List all alerts for the current organization and environment.
+ * Org/env are sent as headers by the shared Axios instance.
  */
 export async function getAlerts(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   params?: {
     status?: AlertStatus;
     severity?: AlertSeverity;
@@ -34,22 +41,23 @@ export async function getAlerts(
   },
 ): Promise<PaginatedResponse<Alert>> {
   const { data } = await api.get<PaginatedResponse<Alert>>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alerts`,
+    `${ALERTS_BASE}/alerts`,
     { params },
   );
   return data;
 }
 
 /**
- * Get details for a specific alert.
+ * Get details for a specific CloudHub alert.
+ * Uses the /alerts/cloudhub/{id} path per the Postman collection.
  */
 export async function getAlert(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.get<Alert>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alerts/${alertId}`,
+    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
   );
   return data;
 }
@@ -57,58 +65,63 @@ export async function getAlert(
 // ---------- Alert Actions ----------
 
 /**
- * Acknowledge an active alert.
+ * Acknowledge an active CloudHub alert.
  */
 export async function acknowledgeAlert(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.patch<Alert>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alerts/${alertId}`,
+    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
     { status: 'ACKNOWLEDGED' },
   );
   return data;
 }
 
 /**
- * Mark an alert as resolved.
+ * Mark a CloudHub alert as resolved.
  */
 export async function resolveAlert(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.patch<Alert>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alerts/${alertId}`,
+    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
     { status: 'RESOLVED' },
   );
   return data;
 }
 
 /**
- * Dismiss an alert (mark as no longer relevant).
+ * Dismiss a CloudHub alert (mark as no longer relevant).
  */
 export async function dismissAlert(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.patch<Alert>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alerts/${alertId}`,
+    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
     { status: 'DISMISSED' },
   );
   return data;
 }
 
-// ---------- Alert Rules ----------
+// ---------- CloudHub Alert Configurations ----------
 
 /**
- * List all alert rules for the given organization and environment.
+ * List CloudHub alert configurations for the current context.
+ *
+ * This is the CloudHub alerts resource endpoint at /alerts/cloudhub.
+ * Per the Postman collection this returns CloudHub alert objects that
+ * include both the alert state and its configuration (conditions,
+ * recipients, etc.), which the UI presents as "alert rules".
  */
 export async function getAlertRules(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   params?: {
     type?: AlertType;
     enabled?: boolean;
@@ -117,7 +130,7 @@ export async function getAlertRules(
   },
 ): Promise<PaginatedResponse<AlertRule>> {
   const { data } = await api.get<PaginatedResponse<AlertRule>>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alertRules`,
+    `${ALERTS_BASE}/alerts/cloudhub`,
     { params },
   );
   return data;
@@ -127,8 +140,8 @@ export async function getAlertRules(
  * Create a new alert rule.
  */
 export async function createAlertRule(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   rule: {
     name: string;
     type: AlertType;
@@ -141,7 +154,7 @@ export async function createAlertRule(
   },
 ): Promise<AlertRule> {
   const { data } = await api.post<AlertRule>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alertRules`,
+    `${ALERTS_BASE}/alerts/cloudhub`,
     rule,
   );
   return data;
@@ -151,8 +164,8 @@ export async function createAlertRule(
  * Update an existing alert rule.
  */
 export async function updateAlertRule(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   ruleId: string,
   updates: Partial<{
     name: string;
@@ -165,7 +178,7 @@ export async function updateAlertRule(
   }>,
 ): Promise<AlertRule> {
   const { data } = await api.patch<AlertRule>(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alertRules/${ruleId}`,
+    `${ALERTS_BASE}/alerts/cloudhub/${ruleId}`,
     updates,
   );
   return data;
@@ -175,11 +188,11 @@ export async function updateAlertRule(
  * Delete an alert rule.
  */
 export async function deleteAlertRule(
-  organizationId: string,
-  environmentId: string,
+  _organizationId: string,
+  _environmentId: string,
   ruleId: string,
 ): Promise<void> {
   await api.delete(
-    `${ALERTS_BASE}/organizations/${organizationId}/environments/${environmentId}/alertRules/${ruleId}`,
+    `${ALERTS_BASE}/alerts/cloudhub/${ruleId}`,
   );
 }

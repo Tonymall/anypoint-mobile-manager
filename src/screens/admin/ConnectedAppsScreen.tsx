@@ -133,9 +133,9 @@ const AppCard = React.memo<{
       {/* Grant types as chips */}
       {app.grantTypes?.length > 0 && (
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-          {app.grantTypes.map((grant) => (
+          {app.grantTypes.map((grant, grantIndex) => (
             <View
-              key={grant}
+              key={`${grant}-${grantIndex}`}
               style={{
                 paddingHorizontal: 8,
                 paddingVertical: 3,
@@ -247,7 +247,7 @@ const ConnectedAppsScreen: React.FC = () => {
         style={{ backgroundColor: theme.colors.background }}
         statusBarHeight={insets.top}
       >
-        <Appbar.BackAction onPress={() => router.back()} />
+        <Appbar.BackAction onPress={() => router.replace('/(main)/admin' as any)} />
         <Appbar.Content title="Connected Apps" titleStyle={styles.headerTitle} />
         <View
           style={{

@@ -22,6 +22,7 @@ import {
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 import type { DeploymentHistory, DeploymentStatus } from '../../types';
 import { anypointColors } from '../../theme';
@@ -224,9 +225,10 @@ const DeploymentHistoryScreen: React.FC = () => {
   const router = useRouter();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
+  const isFocused = useIsFocused();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
 
-  const { data: deployments, isLoading, error, refetch, isRefetching } = useDeploymentHistory();
+  const { data: deployments, isLoading, error, refetch, isRefetching } = useDeploymentHistory(undefined, { enabled: isFocused });
 
   const deploymentList = useMemo(() => {
     const items = ((deployments as any)?.data ?? []) as DeploymentHistory[];

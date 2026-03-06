@@ -23,8 +23,6 @@ import {
   ActivityIndicator,
   Divider,
   Menu,
-  Portal,
-  Dialog,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -73,12 +71,6 @@ const LoginScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [snackbarVisible, setSnackbarVisible] = useState<boolean>(false);
-
-  // --- MFA State ---
-  const [mfaVisible, setMfaVisible] = useState<boolean>(false);
-  const [mfaCode, setMfaCode] = useState<string>('');
-  const [mfaLoading, setMfaLoading] = useState<boolean>(false);
-  const [mfaContext, setMfaContext] = useState<{ url: string; request: string } | null>(null);
 
   // --- Store ---
   const loginPending = useAuthStore((state) => state.loginPending);
@@ -166,12 +158,13 @@ const LoginScreen: React.FC = () => {
       logger.log('[Login] loginPending called, navigating to select-org');
       router.push('/(auth)/select-org' as any);
     } catch (error: any) {
-      // ── MFA Required — Salesforce Identity Verification ──
+      // ── MFA Required — continue login in hosted WebView ──
       if (error instanceof authService.MFARequiredError) {
-        logger.log('[Login] MFA required — showing verification dialog');
-        setMfaContext({ url: error.verifyUrl, request: error.requestToken });
-        setMfaCode('');
-        setMfaVisible(true);
+        logger.log('[Login] MFA required — opening hosted WebView for Salesforce verification');
+        router.push({
+          pathname: '/(auth)/sso' as any,
+          params: { mfaUsername: username.trim() },
+        });
         return;
       }
 
@@ -186,13 +179,14 @@ const LoginScreen: React.FC = () => {
           : String(error?.response?.data ?? '').slice(0, 500),
       });
 
-      // Fallback MFA detection from error responses
+      // Fallback MFA detection from error responses — continue in hosted WebView
       const responseData = error?.response?.data;
       if (responseData?.url?.includes('verify.salesforce.com') && responseData?.body?.request) {
-        logger.log('[Login] MFA detected from error response body');
-        setMfaContext({ url: responseData.url, request: responseData.body.request });
-        setMfaCode('');
-        setMfaVisible(true);
+        logger.log('[Login] MFA detected from error response — opening hosted WebView');
+        router.push({
+          pathname: '/(auth)/sso' as any,
+          params: { mfaUsername: username.trim() },
+        });
         return;
       }
 
@@ -213,52 +207,6 @@ const LoginScreen: React.FC = () => {
   const handleSSOLogin = useCallback(() => {
     router.push('/(auth)/sso');
   }, [router]);
-
-  const handleMFASubmit = useCallback(async () => {
-    if (!mfaCode.trim()) return;
-
-    setMfaLoading(true);
-    setErrorMessage('');
-
-    try {
-      const regionUrl = getRegionUrl(selectedRegion);
-      const tokens: AuthTokens = await authService.verifyMFA(
-        username.trim(),
-        password,
-        mfaCode.trim(),
-        regionUrl,
-        mfaContext ?? undefined,
-      );
-      logger.log('[Login] MFA verification succeeded');
-
-      const user: User = await authService.getCurrentUser(
-        tokens.accessToken,
-        regionUrl,
-      );
-
-      loginPending(user, tokens);
-      hapticSuccess();
-      setMfaVisible(false);
-      setMfaCode('');
-      setMfaContext(null);
-      router.push('/(auth)/select-org' as any);
-    } catch (error: any) {
-      const message =
-        error?.response?.data?.message ??
-        error?.message ??
-        'Invalid verification code. Please try again.';
-      setErrorMessage(message);
-      hapticError();
-      setSnackbarVisible(true);
-    } finally {
-      setMfaLoading(false);
-    }
-  }, [mfaCode, username, password, selectedRegion, loginPending, router, mfaContext]);
-
-  const handleMFADismiss = useCallback(() => {
-    setMfaVisible(false);
-    setMfaCode('');
-  }, []);
 
   const dismissSnackbar = useCallback(() => {
     setSnackbarVisible(false);
@@ -283,7 +231,6 @@ const LoginScreen: React.FC = () => {
             paddingTop: insets.top + (isTabletLandscape ? 24 : isLandscape ? 16 : 0),
             paddingBottom: insets.bottom + 24,
             paddingHorizontal: horizontalPadding,
-            minHeight: height,
           },
         ]}
         keyboardShouldPersistTaps="handled"
@@ -562,57 +509,6 @@ const LoginScreen: React.FC = () => {
         </View>
       )}
 
-      {/* MFA Verification Dialog */}
-      <Portal>
-        <Dialog
-          visible={mfaVisible}
-          onDismiss={handleMFADismiss}
-          style={[styles.mfaDialog, { backgroundColor: theme.colors.surface }]}
-        >
-          <Dialog.Icon icon="shield-lock-outline" size={40} />
-          <Dialog.Title style={styles.mfaTitle}>
-            Verification Required
-          </Dialog.Title>
-          <Dialog.Content>
-            <Text
-              variant="bodyMedium"
-              style={[styles.mfaDescription, { color: theme.colors.onSurfaceVariant }]}
-            >
-              Enter the verification code from your authenticator app.
-            </Text>
-            <TextInput
-              label="Verification Code"
-              value={mfaCode}
-              onChangeText={setMfaCode}
-              mode="outlined"
-              keyboardType="number-pad"
-              autoFocus
-              maxLength={8}
-              left={<TextInput.Icon icon="key-variant" />}
-              disabled={mfaLoading}
-              style={styles.mfaInput}
-              outlineStyle={styles.inputOutline}
-              returnKeyType="done"
-              onSubmitEditing={handleMFASubmit}
-            />
-          </Dialog.Content>
-          <Dialog.Actions style={styles.mfaActions}>
-            <Button onPress={handleMFADismiss} disabled={mfaLoading}>
-              Cancel
-            </Button>
-            <Button
-              mode="contained"
-              onPress={handleMFASubmit}
-              disabled={!mfaCode.trim() || mfaLoading}
-              loading={mfaLoading}
-              style={styles.mfaSubmitButton}
-            >
-              Verify
-            </Button>
-          </Dialog.Actions>
-        </Dialog>
-      </Portal>
-
       {/* Error Snackbar */}
       <Snackbar
         visible={snackbarVisible}
@@ -779,29 +675,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 32,
     width: '100%',
-  },
-
-  // ── MFA Dialog ──
-  mfaDialog: {
-    borderRadius: 22,
-  },
-  mfaTitle: {
-    textAlign: 'center',
-  },
-  mfaDescription: {
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  mfaInput: {
-    marginBottom: 4,
-  },
-  mfaActions: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  mfaSubmitButton: {
-    borderRadius: 12,
-    paddingHorizontal: 8,
   },
 
   // ── Overlays ──

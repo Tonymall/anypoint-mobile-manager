@@ -20,6 +20,7 @@ import {
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 import { anypointColors } from '../../theme';
 import {
@@ -140,12 +141,13 @@ SummaryCard.displayName = 'SummaryCard';
 const InfrastructureHomeScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const isFocused = useIsFocused();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
-  const serversQuery = useServers();
-  const serverGroupsQuery = useServerGroups();
-  const clustersQuery = useClusters();
-  const rtfQuery = useRTFDeployments();
+  const serversQuery = useServers(undefined, { enabled: isFocused });
+  const serverGroupsQuery = useServerGroups({ enabled: isFocused });
+  const clustersQuery = useClusters({ enabled: isFocused });
+  const rtfQuery = useRTFDeployments(undefined, { enabled: isFocused });
 
   // Show full-screen loading only when ALL queries are still loading (first mount)
   const isFirstLoad =

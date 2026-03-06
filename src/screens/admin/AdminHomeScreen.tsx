@@ -54,14 +54,16 @@ const ADMIN_FEATURES: AdminFeature[] = [
     iconColor: anypointColors.accent,
     route: '/(main)/admin/connected-apps',
   },
-  {
-    id: 'permissions',
-    title: 'Permissions',
-    subtitle: 'Review resource permissions',
-    icon: 'shield-check',
-    iconColor: anypointColors.warning,
-    route: '/(main)/admin/permissions',
-  },
+  // Permissions card hidden until `/accounts/api/cs/.../permissions/products`
+  // response shape is validated and PermissionsScreen is updated to match.
+  // {
+  //   id: 'permissions',
+  //   title: 'Permissions',
+  //   subtitle: 'Review resource permissions',
+  //   icon: 'shield-check',
+  //   iconColor: anypointColors.warning,
+  //   route: '/(main)/admin/permissions',
+  // },
   {
     id: 'business-groups',
     title: 'Business Groups',
@@ -178,7 +180,7 @@ const AdminHomeScreen: React.FC = () => {
         style={{ backgroundColor: theme.colors.background }}
         statusBarHeight={insets.top}
       >
-        <Appbar.BackAction onPress={() => router.back()} />
+        <Appbar.BackAction onPress={() => router.replace('/(main)/settings' as any)} />
         <Appbar.Content title="Administration" titleStyle={styles.headerTitle} />
       </Appbar.Header>
 

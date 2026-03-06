@@ -18,7 +18,7 @@ import {
   Snackbar,
 } from 'react-native-paper';
 import { WebView, type WebViewNavigation, type WebViewMessageEvent } from 'react-native-webview';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
 import { getBaseUrl, setAuthHeader, storeTokens } from '../../services/api';
@@ -121,6 +121,12 @@ const SSOLoginScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const webViewRef = useRef<WebView>(null);
+  const { mfaUsername } = useLocalSearchParams<{ mfaUsername?: string }>();
+
+  // When launched from LoginScreen after MFA detection, mfaUsername
+  // carries the already-entered username so we can pre-fill it in the
+  // Anypoint login form, avoiding a full credential re-entry.
+  const isMfaContinuation = !!mfaUsername;
 
   // ── Auth store ──
   const loginPending = useAuthStore((state) => state.loginPending);
@@ -133,6 +139,7 @@ const SSOLoginScreen: React.FC = () => {
   const [webViewKey, setWebViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
+  const hasPrefilled = useRef(false);
   const retryCountRef = useRef(0);
   const baseUrl = getBaseUrl();
   const loginUrl = `${baseUrl}/accounts/login`;
@@ -282,11 +289,73 @@ const SSOLoginScreen: React.FC = () => {
     [baseUrl, loginPending, setOrganizations, router],
   );
 
+  // ── Pre-fill username when MFA continuation ──
+  // Injects JS to fill the username field on the Anypoint login page
+  // so the user only needs to re-enter their password.
+  const prefillUsername = useCallback(() => {
+    if (!isMfaContinuation || !mfaUsername || hasPrefilled.current) return;
+    hasPrefilled.current = true;
+
+    const escapedUsername = mfaUsername.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const prefillJS = `
+      (function() {
+        try {
+          // Try common Anypoint login form selectors
+          var selectors = [
+            'input[name="username"]',
+            'input[type="email"]',
+            'input#username',
+            '#username',
+            'input[autocomplete="username"]',
+          ];
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el) {
+              var nativeSet = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'value'
+              ).set;
+              nativeSet.call(el, '${escapedUsername}');
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              break;
+            }
+          }
+          // Focus the password field
+          var pwSelectors = [
+            'input[name="password"]',
+            'input[type="password"]',
+            'input#password',
+          ];
+          for (var j = 0; j < pwSelectors.length; j++) {
+            var pw = document.querySelector(pwSelectors[j]);
+            if (pw) { pw.focus(); break; }
+          }
+        } catch(e) {}
+      })();
+      true;
+    `;
+    // Delay to let the login page render
+    setTimeout(() => {
+      webViewRef.current?.injectJavaScript(prefillJS);
+    }, 1500);
+  }, [isMfaContinuation, mfaUsername]);
+
   // ── Handle navigation changes — detect post-login redirect ──
   const handleNavigationStateChange = useCallback(
     (navState: WebViewNavigation) => {
       const { url } = navState;
-      if (!url || hasInjectedRef.current) return;
+      if (!url) return;
+
+      // On the login page — pre-fill username if this is an MFA continuation
+      if (
+        url.includes('/accounts/login') &&
+        isMfaContinuation &&
+        !hasPrefilled.current
+      ) {
+        prefillUsername();
+      }
+
+      if (hasInjectedRef.current) return;
 
       // Let the user complete MFA / verification — do NOT inject extraction JS
       if (
@@ -309,7 +378,7 @@ const SSOLoginScreen: React.FC = () => {
         }, 2500);
       }
     },
-    [isPostLoginUrl],
+    [isPostLoginUrl, isMfaContinuation, prefillUsername],
   );
 
   // ── Handle messages from injected JavaScript ──
@@ -393,7 +462,9 @@ const SSOLoginScreen: React.FC = () => {
           onPress={handleBack}
           accessibilityLabel="Go back to login screen"
         />
-        <Appbar.Content title="Sign in with Browser" />
+        <Appbar.Content
+          title={isMfaContinuation ? 'Verify Identity' : 'Sign in with Browser'}
+        />
       </Appbar.Header>
 
       {/* WebView — fills remaining space */}

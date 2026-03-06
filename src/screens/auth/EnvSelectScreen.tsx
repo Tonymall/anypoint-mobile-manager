@@ -15,6 +15,7 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import { useAuthStore } from '../../stores/authStore';
+import { useLegalStore } from '../../stores/legalStore';
 import { useEnvironments } from '../../hooks/queries';
 import { setEnvironmentHeader, setOrganizationHeader } from '../../services/api';
 import type { Environment } from '../../types';
@@ -31,6 +32,7 @@ const EnvSelectScreen: React.FC = () => {
   const switchEnvironment = useAuthStore((s) => s.switchEnvironment);
   const completeLogin = useAuthStore((s) => s.completeLogin);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const user = useAuthStore((s) => s.user);
 
   const { data: environments, isLoading, error } = useEnvironments(
     currentOrganization?.id,
@@ -50,12 +52,19 @@ const EnvSelectScreen: React.FC = () => {
       if (fromSettings === '1' && isAuthenticated) {
         router.replace('/(main)/settings' as any);
       } else {
-        completeLogin();
-        logger.log('[EnvSelect] completeLogin called, navigating to main');
-        router.replace('/(main)' as any);
+        // Check if user needs to accept Terms & Conditions
+        const userId = user?.id;
+        if (userId && !useLegalStore.getState().hasAcceptedCurrentTerms(userId)) {
+          logger.log('[EnvSelect] Terms not accepted, routing to terms screen');
+          router.push('/(auth)/terms' as any);
+        } else {
+          completeLogin();
+          logger.log('[EnvSelect] completeLogin called, navigating to main');
+          router.replace('/(main)' as any);
+        }
       }
     },
-    [switchEnvironment, completeLogin, router, fromSettings, isAuthenticated, currentOrganization],
+    [switchEnvironment, completeLogin, router, fromSettings, isAuthenticated, currentOrganization, user],
   );
 
   const handleBack = useCallback(() => {

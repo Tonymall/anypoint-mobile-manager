@@ -22,6 +22,10 @@ export default function AuthLayout() {
       />
       <Stack.Screen name="select-org" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="select-env" options={{ animation: 'slide_from_right' }} />
+      <Stack.Screen
+        name="terms"
+        options={{ animation: 'slide_from_right', gestureEnabled: false }}
+      />
     </Stack>
   );
 }

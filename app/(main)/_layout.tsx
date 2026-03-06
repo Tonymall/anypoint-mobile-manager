@@ -217,6 +217,8 @@ export default function MainLayout() {
       <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
       {/* Admin: hidden from tab bar — accessible from Settings screen */}
       <Tabs.Screen name="admin" options={{ href: null, title: 'Admin' }} />
+      {/* Terms: hidden from tab bar — accessible from Settings screen */}
+      <Tabs.Screen name="terms" options={{ href: null, title: 'Terms' }} />
     </Tabs>
   );
 }

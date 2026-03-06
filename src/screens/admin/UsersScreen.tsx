@@ -234,7 +234,7 @@ const UsersScreen: React.FC = () => {
         style={{ backgroundColor: theme.colors.background }}
         statusBarHeight={insets.top}
       >
-        <Appbar.BackAction onPress={() => router.back()} />
+        <Appbar.BackAction onPress={() => router.replace('/(main)/admin' as any)} />
         <Appbar.Content title="Users" titleStyle={styles.headerTitle} />
         <View
           style={{

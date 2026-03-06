@@ -23,6 +23,8 @@ import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuthStore } from '../../stores/authStore';
 import { useAppStore } from '../../stores/appStore';
+import { useLegalStore } from '../../stores/legalStore';
+import { TERMS_VERSION } from '../../constants/legal';
 import * as authService from '../../services/authService';
 import { resetSessionFlags } from '../../services/runtimeService';
 import { getRegionById } from '../../config/regions';
@@ -117,6 +119,7 @@ const SettingsScreen: React.FC = () => {
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const queryClient = useQueryClient();
+  const termsAcceptance = useLegalStore((s) => user ? s.getAcceptance(user.id) : undefined);
 
   const [themeDialogVisible, setThemeDialogVisible] = useState(false);
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
@@ -407,6 +410,29 @@ const SettingsScreen: React.FC = () => {
           title="Admin Panel"
           subtitle="Users, Teams, Connected Apps, Secrets"
           onPress={() => router.push('/(main)/admin' as any)}
+          showChevron
+        />
+      </View>
+
+      {/* ── Legal Section ── */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.tertiary }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          LEGAL
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="file-document-outline"
+          iconColor={theme.colors.tertiary}
+          iconBg={theme.colors.tertiary + '14'}
+          title="Terms & Conditions"
+          subtitle={
+            termsAcceptance
+              ? `Accepted \u00B7 Version ${termsAcceptance.version}`
+              : `Version ${TERMS_VERSION}`
+          }
+          onPress={() => router.push('/(main)/terms' as any)}
           showChevron
         />
       </View>

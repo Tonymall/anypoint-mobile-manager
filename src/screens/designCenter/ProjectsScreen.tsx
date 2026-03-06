@@ -24,7 +24,8 @@ import ErrorState from '../../components/common/ErrorState';
 
 // -- Helpers ----------------------------------------------------------------
 
-const classifierColor = (classifier: string): string => {
+const classifierColor = (classifier?: string | null): string => {
+  if (!classifier) return anypointColors.primaryDark;
   const map: Record<string, string> = {
     raml: anypointColors.primary,
     oas: anypointColors.accent,
@@ -36,7 +37,8 @@ const classifierColor = (classifier: string): string => {
   return map[classifier.toLowerCase()] ?? anypointColors.primaryDark;
 };
 
-const classifierLabel = (classifier: string): string => {
+const classifierLabel = (classifier?: string | null): string => {
+  if (!classifier) return 'Unknown';
   const map: Record<string, string> = {
     raml: 'RAML',
     oas: 'OAS',
@@ -48,7 +50,8 @@ const classifierLabel = (classifier: string): string => {
   return map[classifier.toLowerCase()] ?? classifier.toUpperCase();
 };
 
-const classifierIcon = (classifier: string): string => {
+const classifierIcon = (classifier?: string | null): string => {
+  if (!classifier) return 'file-document-outline';
   const map: Record<string, string> = {
     raml: 'api',
     oas: 'api',

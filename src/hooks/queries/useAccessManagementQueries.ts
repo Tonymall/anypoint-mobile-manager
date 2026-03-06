@@ -44,6 +44,7 @@ export function useTeams(params?: Parameters<typeof accessService.getTeams>[1]) 
     queryKey: accessKeys.teams(params),
     queryFn: () => accessService.getTeams(orgId!, params),
     enabled: !!orgId && !!envId,
+    retry: false,
   });
 }
 

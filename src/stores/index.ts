@@ -13,3 +13,6 @@ export type { RuntimeState, RuntimeActions, RuntimeFilters } from './runtimeStor
 
 export { useAlertStore } from './alertStore';
 export type { AlertState, AlertActions } from './alertStore';
+
+export { useLegalStore } from './legalStore';
+export type { LegalState, LegalActions, TermsAcceptance } from './legalStore';

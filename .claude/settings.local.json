@@ -98,7 +98,8 @@
       "Bash(cat \"MuleSoft Catalyst Knowledge Hub & Others.postman_collection.json\")",
       "Bash(cat \"/c/Users/xTony/Downloads/MuleSoft Catalyst Knowledge Hub & Others.postman_collection.json\")",
       "Bash(python3:*)",
-      "Bash(npm run lint)"
+      "Bash(npm run lint)",
+      "Bash(ls -la \"/c/Users/xTony/Documents/Projects/anypoint-mobile-manager/app/\\(main\\)/\")"
     ]
   }
 }
