@@ -235,7 +235,7 @@ const PlatformAlertsScreen: React.FC = () => {
 
   const { data: alerts, isLoading, error, refetch, isRefetching } = usePlatformAlerts();
 
-  const alertsList = useMemo(() => (alerts as Alert[] | undefined) ?? [], [alerts]);
+  const alertsList = useMemo(() => ((alerts as any)?.data ?? []) as Alert[], [alerts]);
 
   const severityCounts = useMemo(() => {
     const counts: Record<string, number> = {};

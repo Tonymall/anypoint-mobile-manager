@@ -221,7 +221,7 @@ const AlertRulesScreen: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<AlertRule | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<string | null>(null);
 
-  const rulesList = useMemo(() => (rules as AlertRule[] | undefined) ?? [], [rules]);
+  const rulesList = useMemo(() => ((rules as any)?.data ?? []) as AlertRule[], [rules]);
 
   const handleToggle = useCallback(
     (rule: AlertRule, enabled: boolean) => {

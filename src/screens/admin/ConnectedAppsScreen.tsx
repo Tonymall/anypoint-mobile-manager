@@ -14,7 +14,6 @@ import {
 import {
   Appbar,
   Text,
-  Chip,
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';

@@ -39,80 +39,101 @@ const SummaryCard = React.memo<{
   title: string;
   count: number;
   subtitle: string;
-  onPress: () => void;
+  onPress?: () => void;
   theme: MD3Theme;
-}>(({ icon, iconColor, title, count, subtitle, onPress, theme }) => (
-  <Pressable
-    onPress={() => {
-      hapticLight();
-      onPress();
-    }}
-    accessibilityLabel={`${title}: ${count}. ${subtitle}`}
-    accessibilityRole="button"
-    style={({ pressed }) => [
-      {
-        flex: 1,
-        minWidth: 140,
-        borderRadius: 18,
-        backgroundColor: theme.colors.surface,
-        borderWidth: 1,
-        borderColor: theme.colors.outlineVariant,
-        overflow: 'hidden',
-        opacity: pressed ? 0.92 : 1,
-        padding: 16,
-      },
-    ]}
-  >
-    {/* Icon circle */}
-    <View
-      style={{
-        width: 44,
-        height: 44,
-        borderRadius: 14,
-        backgroundColor: iconColor + '14',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 14,
-      }}
-    >
-      <Icon name={icon} size={22} color={iconColor} />
-    </View>
+  hasError?: boolean;
+  disabled?: boolean;
+}>(({ icon, iconColor, title, count, subtitle, onPress, theme, hasError, disabled }) => {
+  const isInteractive = !hasError && !disabled && !!onPress;
+  const dimmed = hasError || disabled;
 
-    {/* Title */}
-    <Text
-      style={{
-        fontSize: 12,
-        fontWeight: '600',
-        color: theme.colors.onSurfaceVariant,
-        letterSpacing: 0.3,
-        marginBottom: 4,
-      }}
-    >
-      {title}
-    </Text>
+  const cardContent = (
+    <>
+      {/* Icon circle */}
+      <View
+        style={{
+          width: 44,
+          height: 44,
+          borderRadius: 14,
+          backgroundColor: (hasError ? anypointColors.error : iconColor) + '14',
+          justifyContent: 'center',
+          alignItems: 'center',
+          marginBottom: 14,
+        }}
+      >
+        <Icon name={hasError ? 'alert-circle-outline' : icon} size={22} color={hasError ? anypointColors.error : iconColor} />
+      </View>
 
-    {/* Count */}
-    <Text
-      style={{
-        fontSize: 28,
-        fontWeight: '700',
-        color: theme.colors.onSurface,
-        letterSpacing: -0.5,
-        marginBottom: 8,
-      }}
-    >
-      {count}
-    </Text>
-
-    {/* Subtitle / CTA */}
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-      <Text style={{ fontSize: 12, fontWeight: '600', color: iconColor }}>
-        {subtitle}
+      {/* Title */}
+      <Text
+        style={{
+          fontSize: 12,
+          fontWeight: '600',
+          color: theme.colors.onSurfaceVariant,
+          letterSpacing: 0.3,
+          marginBottom: 4,
+        }}
+      >
+        {title}
       </Text>
-      <Icon name="chevron-right" size={14} color={iconColor} />
-    </View>
-  </Pressable>
-));
+
+      {/* Count */}
+      <Text
+        style={{
+          fontSize: 28,
+          fontWeight: '700',
+          color: hasError ? anypointColors.error : theme.colors.onSurface,
+          letterSpacing: -0.5,
+          marginBottom: 8,
+        }}
+      >
+        {hasError ? '—' : count}
+      </Text>
+
+      {/* Subtitle / CTA */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Text style={{ fontSize: 12, fontWeight: '600', color: hasError ? anypointColors.error : disabled ? theme.colors.onSurfaceVariant : iconColor }}>
+          {hasError ? 'Failed to load' : subtitle}
+        </Text>
+        {isInteractive && <Icon name="chevron-right" size={14} color={iconColor} />}
+      </View>
+    </>
+  );
+
+  const cardStyle = {
+    flex: 1,
+    minWidth: 140,
+    borderRadius: 18,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: hasError ? anypointColors.error + '40' : theme.colors.outlineVariant,
+    overflow: 'hidden' as const,
+    opacity: dimmed ? 0.6 : 1,
+    padding: 16,
+  };
+
+  if (!isInteractive) {
+    return (
+      <View
+        style={cardStyle}
+        accessibilityLabel={hasError ? `${title}: failed to load` : `${title}: ${count}`}
+      >
+        {cardContent}
+      </View>
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={() => { hapticLight(); onPress!(); }}
+      accessibilityLabel={`${title}: ${count}. ${subtitle}`}
+      accessibilityRole="button"
+      style={({ pressed }) => [cardStyle, pressed && { opacity: 0.92 }]}
+    >
+      {cardContent}
+    </Pressable>
+  );
+});
 SummaryCard.displayName = 'SummaryCard';
 
 // --- Main Screen ---
@@ -126,13 +147,15 @@ const InfrastructureHomeScreen: React.FC = () => {
   const clustersQuery = useClusters();
   const rtfQuery = useRTFDeployments();
 
-  const isLoading =
-    serversQuery.isLoading &&
-    serverGroupsQuery.isLoading &&
-    clustersQuery.isLoading &&
+  // Show full-screen loading only when ALL queries are still loading (first mount)
+  const isFirstLoad =
+    serversQuery.isLoading ||
+    serverGroupsQuery.isLoading ||
+    clustersQuery.isLoading ||
     rtfQuery.isLoading;
 
-  const hasError =
+  // Show full-screen error only when ALL queries failed
+  const allFailed =
     serversQuery.isError &&
     serverGroupsQuery.isError &&
     clustersQuery.isError &&
@@ -151,13 +174,14 @@ const InfrastructureHomeScreen: React.FC = () => {
     rtfQuery.refetch();
   }, [serversQuery, serverGroupsQuery, clustersQuery, rtfQuery]);
 
-  const serverCount = Array.isArray(serversQuery.data) ? serversQuery.data.length : 0;
+  // getServers() and getRTFDeployments() return PaginatedResponse<T>; getClusters() and getServerGroups() return T[]
+  const serverCount = ((serversQuery.data as any)?.data ?? []).length;
   const clusterCount = Array.isArray(clustersQuery.data) ? clustersQuery.data.length : 0;
   const serverGroupCount = Array.isArray(serverGroupsQuery.data) ? serverGroupsQuery.data.length : 0;
-  const rtfCount = Array.isArray(rtfQuery.data) ? rtfQuery.data.length : 0;
+  const rtfCount = ((rtfQuery.data as any)?.data ?? []).length;
 
-  if (isLoading) return <LoadingState message="Loading infrastructure..." />;
-  if (hasError) {
+  if (isFirstLoad) return <LoadingState message="Loading infrastructure..." />;
+  if (allFailed) {
     return (
       <ErrorState
         message="Failed to load infrastructure data."
@@ -200,6 +224,7 @@ const InfrastructureHomeScreen: React.FC = () => {
               subtitle="View Servers"
               onPress={() => router.push('/(main)/runtime/servers' as any)}
               theme={theme}
+              hasError={serversQuery.isError}
             />
             <SummaryCard
               icon="lan"
@@ -209,6 +234,7 @@ const InfrastructureHomeScreen: React.FC = () => {
               subtitle="View Clusters"
               onPress={() => router.push('/(main)/runtime/clusters' as any)}
               theme={theme}
+              hasError={clustersQuery.isError}
             />
           </View>
 
@@ -222,15 +248,17 @@ const InfrastructureHomeScreen: React.FC = () => {
               subtitle="View Groups"
               onPress={() => router.push('/(main)/runtime/clusters' as any)}
               theme={theme}
+              hasError={serverGroupsQuery.isError}
             />
             <SummaryCard
               icon="kubernetes"
               iconColor={anypointColors.mulePurple}
               title="RTF Deployments"
               count={rtfCount}
-              subtitle="View RTF"
-              onPress={() => router.push('/(main)/runtime/clusters' as any)}
+              subtitle="Read-only"
               theme={theme}
+              hasError={rtfQuery.isError}
+              disabled={!rtfQuery.isError}
             />
           </View>
         </View>

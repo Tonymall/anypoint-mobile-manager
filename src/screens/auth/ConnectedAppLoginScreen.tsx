@@ -45,7 +45,7 @@ const ConnectedAppLoginScreen: React.FC = () => {
 
   const selectedRegion = useAuthStore((s) => s.selectedRegion);
   const setSelectedRegion = useAuthStore((s) => s.setSelectedRegion);
-  const loginPending = useAuthStore((s) => s.login);
+  const loginPending = useAuthStore((s) => s.loginPending);
 
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');

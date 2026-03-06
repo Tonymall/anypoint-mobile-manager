@@ -229,7 +229,7 @@ const DeploymentHistoryScreen: React.FC = () => {
   const { data: deployments, isLoading, error, refetch, isRefetching } = useDeploymentHistory();
 
   const deploymentList = useMemo(() => {
-    const items = (deployments ?? []) as DeploymentHistory[];
+    const items = ((deployments as any)?.data ?? []) as DeploymentHistory[];
     if (statusFilter === 'ALL') return items;
     return items.filter((d) => d.status === statusFilter);
   }, [deployments, statusFilter]);
@@ -294,7 +294,7 @@ const DeploymentHistoryScreen: React.FC = () => {
           </Text>
           <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: anypointColors.primary + '12' }}>
             <Text style={{ fontSize: 12, fontWeight: '700', color: anypointColors.primary }}>
-              {(deployments as DeploymentHistory[] | undefined)?.length ?? 0}
+              {((deployments as any)?.data ?? []).length}
             </Text>
           </View>
         </View>
