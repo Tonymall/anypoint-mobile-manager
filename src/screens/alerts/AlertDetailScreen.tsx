@@ -39,11 +39,11 @@ import InfoRow from '../../components/common/InfoRow';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 
 // --- Helpers ---
-const getSeverityColor = (severity: AlertSeverity): string => {
-  return severityColors[severity] ?? anypointColors.info;
+const getSeverityColor = (severity?: AlertSeverity | null): string => {
+  return severity ? (severityColors[severity] ?? anypointColors.info) : anypointColors.info;
 };
 
-const getSeverityIcon = (severity: AlertSeverity): string => {
+const getSeverityIcon = (severity?: AlertSeverity | null): string => {
   switch (severity) {
     case 'CRITICAL': return 'alert-octagon';
     case 'WARNING': return 'alert';
@@ -52,7 +52,7 @@ const getSeverityIcon = (severity: AlertSeverity): string => {
   }
 };
 
-const getStatusColor = (status: AlertStatus): string => {
+const getStatusColor = (status?: AlertStatus | null): string => {
   switch (status) {
     case 'ACTIVE': return anypointColors.error;
     case 'ACKNOWLEDGED': return anypointColors.warning;
@@ -62,7 +62,7 @@ const getStatusColor = (status: AlertStatus): string => {
   }
 };
 
-const getStatusIcon = (status: AlertStatus): string => {
+const getStatusIcon = (status?: AlertStatus | null): string => {
   switch (status) {
     case 'ACTIVE': return 'bell-ring-outline';
     case 'ACKNOWLEDGED': return 'eye-check-outline';
@@ -142,9 +142,11 @@ const AlertDetailScreen: React.FC = () => {
   if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   if (!alert) return <ErrorState message="Alert not found" />;
 
-  const sevColor = getSeverityColor(alert.severity);
-  const statColor = getStatusColor(alert.status);
-  const isActionable = alert.status === 'ACTIVE' || alert.status === 'ACKNOWLEDGED';
+  const severity = alert.severity ?? 'INFO';
+  const status = alert.status ?? 'ACTIVE';
+  const sevColor = getSeverityColor(severity);
+  const statColor = getStatusColor(status);
+  const isActionable = status === 'ACTIVE' || status === 'ACKNOWLEDGED';
   const isMutating =
     acknowledgeMutation.isPending || resolveMutation.isPending || dismissMutation.isPending;
 
@@ -170,9 +172,9 @@ const AlertDetailScreen: React.FC = () => {
               { backgroundColor: sevColor + '18' },
             ]}
           >
-            <Icon name={getSeverityIcon(alert.severity)} size={20} color={sevColor} />
+            <Icon name={getSeverityIcon(severity)} size={20} color={sevColor} />
             <Text style={[styles.severityText, { color: sevColor }]}>
-              {alert.severity}
+              {severity}
             </Text>
           </View>
 
@@ -189,7 +191,7 @@ const AlertDetailScreen: React.FC = () => {
                 height: 8,
                 borderRadius: 4,
                 backgroundColor: statColor,
-                ...(alert.status === 'ACTIVE'
+                ...(status === 'ACTIVE'
                   ? {
                       shadowColor: statColor,
                       shadowOffset: { width: 0, height: 0 },
@@ -200,7 +202,7 @@ const AlertDetailScreen: React.FC = () => {
               }}
             />
             <Text style={[styles.statusText, { color: statColor }]}>
-              {alert.status}
+              {status}
             </Text>
           </View>
         </View>
@@ -257,7 +259,7 @@ const AlertDetailScreen: React.FC = () => {
         {/* ── Action Buttons ── */}
         {isActionable && (
           <View style={styles.actionSection}>
-            {alert.status === 'ACTIVE' && (
+            {status === 'ACTIVE' && (
               <>
                 <Button
                   mode="contained"
@@ -289,7 +291,7 @@ const AlertDetailScreen: React.FC = () => {
                 </Button>
               </>
             )}
-            {alert.status === 'ACKNOWLEDGED' && (
+            {status === 'ACKNOWLEDGED' && (
               <>
                 <Button
                   mode="contained"
@@ -327,9 +329,9 @@ const AlertDetailScreen: React.FC = () => {
         {/* Read-only notice for resolved/dismissed */}
         {!isActionable && (
           <View style={[styles.readOnlyNotice, { backgroundColor: theme.colors.surfaceVariant + '60' }]}>
-            <Icon name={getStatusIcon(alert.status)} size={18} color={statColor} />
+            <Icon name={getStatusIcon(status)} size={18} color={statColor} />
             <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant, marginLeft: 8 }}>
-              This alert has been {alert.status.toLowerCase()}. No further actions available.
+              This alert has been {String(status).toLowerCase()}. No further actions available.
             </Text>
           </View>
         )}

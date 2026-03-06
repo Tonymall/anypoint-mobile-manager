@@ -69,11 +69,12 @@ const FILTER_OPTIONS: { label: string; value: StatusFilter }[] = [
 const TimelineCard = React.memo<{
   item: DeploymentHistory;
   isLast: boolean;
-  onPress: () => void;
+  onPress?: () => void;
   theme: MD3Theme;
 }>(({ item, isLast, onPress, theme }) => {
   const color = getDeploymentStatusColor(item.status);
   const label = getDeploymentStatusLabel(item.status);
+  const isInteractive = !!onPress;
 
   return (
     <View style={{ flexDirection: 'row', marginBottom: 0 }}>
@@ -109,12 +110,14 @@ const TimelineCard = React.memo<{
 
       {/* Right card */}
       <Pressable
+        disabled={!isInteractive}
         onPress={() => {
+          if (!onPress) return;
           hapticLight();
           onPress();
         }}
-        accessibilityLabel={`${item.applicationName} ${label}`}
-        accessibilityRole="button"
+        accessibilityLabel={`${item.applicationName} ${label}${isInteractive ? '' : ', details unavailable'}`}
+        accessibilityRole={isInteractive ? 'button' : undefined}
         style={({ pressed }) => [
           {
             flex: 1,
@@ -125,7 +128,7 @@ const TimelineCard = React.memo<{
             borderWidth: 1,
             borderColor: theme.colors.outlineVariant,
             overflow: 'hidden',
-            opacity: pressed ? 0.92 : 1,
+            opacity: !isInteractive ? 0.72 : pressed ? 0.92 : 1,
           },
         ]}
       >
@@ -237,19 +240,25 @@ const DeploymentHistoryScreen: React.FC = () => {
   }, [deployments, statusFilter]);
 
   const renderItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<DeploymentHistory>) => (
+    ({ item, index }: ListRenderItemInfo<DeploymentHistory>) => {
+      const domain = item.applicationName?.trim();
+      const onPress = domain
+        ? () =>
+            router.push({
+              pathname: '/(main)/runtime/[domain]' as any,
+              params: { domain },
+            })
+        : undefined;
+
+      return (
       <TimelineCard
         item={item}
         isLast={index === deploymentList.length - 1}
-        onPress={() =>
-          router.push({
-            pathname: '/(main)/runtime/deployment-detail' as any,
-            params: { deploymentId: item.id },
-          })
-        }
+        onPress={onPress}
         theme={theme}
       />
-    ),
+      );
+    },
     [theme, router, deploymentList.length],
   );
 

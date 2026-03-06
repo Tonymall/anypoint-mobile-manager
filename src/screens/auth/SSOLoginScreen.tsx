@@ -299,6 +299,15 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (!token || typeof token !== 'string' || token.length === 0) {
+          if (isMfaContinuation) {
+            logger.log('[SSO] No bearer token yet after MFA browser login; waiting for silent auth token');
+            setTimeout(() => {
+              webViewRef.current?.injectJavaScript(silentAuthJs);
+            }, 250);
+            setIsExtracting(false);
+            return;
+          }
+
           if (xsrfToken) {
             logger.log('[SSO] No bearer token, falling back to session-cookie auth');
             await enableCookieSessionAuth(xsrfToken);
@@ -554,7 +563,13 @@ const SSOLoginScreen: React.FC = () => {
           return;
         }
 
-        if (url.includes('/accounts/login/mfa_callback') || isPostLoginUrl(url)) {
+        if (url.includes('/accounts/login/mfa_callback')) {
+          hasInjectedRef.current = false;
+          retryCountRef.current = 0;
+          return;
+        }
+
+        if (isPostLoginUrl(url)) {
           if (!hasInjectedRef.current) {
             hasInjectedRef.current = true;
             retryCountRef.current = 0;
@@ -608,6 +623,7 @@ const SSOLoginScreen: React.FC = () => {
               user: data.user,
               organizations: data.organizations,
               token: data.token,
+              xsrfToken: data.xsrfToken,
             });
             break;
 
@@ -640,6 +656,9 @@ const SSOLoginScreen: React.FC = () => {
               setTimeout(() => {
                 if (!hasInjectedRef.current) {
                   hasInjectedRef.current = true;
+                  if (isMfaContinuation) {
+                    webViewRef.current?.injectJavaScript(silentAuthJs);
+                  }
                   webViewRef.current?.injectJavaScript(INJECTED_JS);
                 }
               }, 2000);
@@ -826,6 +845,8 @@ const styles = StyleSheet.create({
 });
 
 export default SSOLoginScreen;
+
+
 
 
 

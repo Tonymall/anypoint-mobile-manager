@@ -16,10 +16,6 @@ export default function AuthLayout() {
         name="sso"
         options={{ headerShown: true, title: 'Single Sign-On', animation: 'slide_from_bottom' }}
       />
-      <Stack.Screen
-        name="connected-app"
-        options={{ headerShown: false, animation: 'slide_from_right' }}
-      />
       <Stack.Screen name="select-org" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen name="select-env" options={{ animation: 'slide_from_right' }} />
       <Stack.Screen

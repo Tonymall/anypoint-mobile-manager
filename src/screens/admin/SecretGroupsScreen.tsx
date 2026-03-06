@@ -243,7 +243,7 @@ const SecretGroupsScreen: React.FC = () => {
 
       <FlatList
         data={groupsList}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item, index) => `${item.id ?? item.name ?? 'secret-group'}-${index}`}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={renderEmpty}

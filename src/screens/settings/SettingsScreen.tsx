@@ -1,4 +1,4 @@
-// ============================================================
+﻿// ============================================================
 // Settings Screen - App preferences, region, theme, logout
 // 2026 Modern Dark-First Design
 // ============================================================
@@ -37,7 +37,7 @@ import Constants from 'expo-constants';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
-// ── Reusable Setting Row ──
+// â”€â”€ Reusable Setting Row â”€â”€
 const SettingRow: React.FC<{
   icon: string;
   iconColor?: string;
@@ -148,7 +148,7 @@ const SettingsScreen: React.FC = () => {
     } finally {
       queryClient.clear();
       logger.log('[Settings] queryClient cleared');
-      // Clear notifications — they belong to the current account/session.
+      // Clear notifications â€” they belong to the current account/session.
       // Prevents stale notifications from showing on a different account.
       const { clearAll } = require('../../stores/notificationStore').useNotificationStore.getState();
       clearAll();
@@ -194,7 +194,7 @@ const SettingsScreen: React.FC = () => {
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }}
       showsVerticalScrollIndicator={false}
     >
-      {/* ── Profile Card ── */}
+      {/* â”€â”€ Profile Card â”€â”€ */}
       <View style={styles.profileCard}>
         {/* Accent glow at top */}
         <View style={styles.profileAccent} />
@@ -247,7 +247,26 @@ const SettingsScreen: React.FC = () => {
         </View>
       </View>
 
-      {/* ── Organization Section ── */}
+      {/* â”€â”€ Administration Section â”€â”€ */}
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          ADMINISTRATION
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="shield-crown-outline"
+          iconColor={anypointColors.mulePurple}
+          iconBg={anypointColors.mulePurple + '14'}
+          title="Admin Panel"
+          subtitle="Users, Connected Apps, Secrets"
+          onPress={() => router.push('/(main)/admin' as any)}
+          showChevron
+        />
+      </View>
+
+      {/* â”€â”€ Organization Section â”€â”€ */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
         <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
@@ -276,7 +295,7 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
-      {/* ── Connection Section ── */}
+      {/* â”€â”€ Connection Section â”€â”€ */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: theme.colors.secondary }]} />
         <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
@@ -289,7 +308,7 @@ const SettingsScreen: React.FC = () => {
           iconColor={theme.colors.secondary}
           iconBg={theme.colors.secondary + '14'}
           title="Control Plane"
-          subtitle={`${currentRegion.label} — ${currentRegion.notes}`}
+          subtitle={`${currentRegion.label} â€” ${currentRegion.notes}`}
         />
         <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
@@ -300,7 +319,7 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
-      {/* ── Appearance Section ── */}
+      {/* â”€â”€ Appearance Section â”€â”€ */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
         <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
@@ -319,7 +338,7 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
-      {/* ── Notifications Section ── */}
+      {/* â”€â”€ Notifications Section â”€â”€ */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: anypointColors.warning }]} />
         <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
@@ -395,26 +414,7 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
-      {/* ── Administration Section ── */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          ADMINISTRATION
-        </Text>
-      </View>
-      <View style={styles.card}>
-        <SettingRow
-          icon="shield-crown-outline"
-          iconColor={anypointColors.mulePurple}
-          iconBg={anypointColors.mulePurple + '14'}
-          title="Admin Panel"
-          subtitle="Users, Connected Apps, Secrets"
-          onPress={() => router.push('/(main)/admin' as any)}
-          showChevron
-        />
-      </View>
-
-      {/* ── Legal Section ── */}
+      {/* â”€â”€ Legal Section â”€â”€ */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: theme.colors.tertiary }]} />
         <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
@@ -437,7 +437,7 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
-      {/* ── About Section ── */}
+      {/* â”€â”€ About Section â”€â”€ */}
       <View style={styles.sectionHeader}>
         <View style={[styles.sectionAccent, { backgroundColor: theme.colors.onSurfaceVariant }]} />
         <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
@@ -453,7 +453,7 @@ const SettingsScreen: React.FC = () => {
         />
       </View>
 
-      {/* ── Sign Out ── */}
+      {/* â”€â”€ Sign Out â”€â”€ */}
       <Pressable
         onPress={() => setLogoutDialogVisible(true)}
         disabled={loggingOut}
@@ -521,7 +521,7 @@ const createStyles = (theme: MD3Theme) =>
       flex: 1,
       backgroundColor: theme.colors.background,
     },
-    // ── Profile Card ──
+    // â”€â”€ Profile Card â”€â”€
     profileCard: {
       marginHorizontal: 16,
       marginBottom: 8,
@@ -588,7 +588,7 @@ const createStyles = (theme: MD3Theme) =>
       fontWeight: '600',
       letterSpacing: 0.2,
     },
-    // ── Sections ──
+    // â”€â”€ Sections â”€â”€
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -614,7 +614,7 @@ const createStyles = (theme: MD3Theme) =>
       height: StyleSheet.hairlineWidth,
       marginLeft: 66,
     },
-    // ── Logout ──
+    // â”€â”€ Logout â”€â”€
     logoutBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -630,11 +630,12 @@ const createStyles = (theme: MD3Theme) =>
       fontSize: 15,
       fontWeight: '600',
     },
-    // ── Dialog ──
+    // â”€â”€ Dialog â”€â”€
     dialog: {
       borderRadius: 24,
     },
   });
 
 export default SettingsScreen;
+
 

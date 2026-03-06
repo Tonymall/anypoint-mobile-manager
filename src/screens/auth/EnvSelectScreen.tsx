@@ -3,12 +3,11 @@
 // ============================================================
 
 import React, { useCallback } from 'react';
-import { StyleSheet, View, FlatList } from 'react-native';
+import { StyleSheet, View, FlatList, Pressable } from 'react-native';
 import {
   Text,
   useTheme,
   ActivityIndicator,
-  TouchableRipple,
   Appbar,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -93,14 +92,19 @@ const EnvSelectScreen: React.FC = () => {
       const envColor = getEnvColor(item);
 
       return (
-        <TouchableRipple
+        <Pressable
           onPress={() => handleSelect(item)}
-          borderless
-          style={[styles.envCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}
-          rippleColor={theme.colors.primaryContainer}
           accessibilityLabel={`Environment: ${item.name}, ${item.isProduction ? 'production' : item.type ?? 'sandbox'}`}
           accessibilityRole="button"
           accessibilityHint="Double tap to select"
+          style={({ pressed }) => [
+            styles.envCard,
+            {
+              backgroundColor: pressed ? theme.colors.primaryContainer : theme.colors.surface,
+              borderColor: pressed ? theme.colors.primary : theme.colors.outlineVariant,
+              opacity: pressed ? 0.96 : 1,
+            },
+          ]}
         >
           <View style={styles.envRow}>
             <View
@@ -149,7 +153,7 @@ const EnvSelectScreen: React.FC = () => {
               <Icon name="chevron-right" size={18} color={theme.colors.onSurfaceVariant} />
             </View>
           </View>
-        </TouchableRipple>
+        </Pressable>
       );
     },
     [handleSelect, theme],

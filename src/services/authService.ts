@@ -136,18 +136,48 @@ export async function loginWithConnectedApp(
   baseUrl: string,
 ): Promise<AuthTokens> {
   const freshClient = axios.create();
-  const { data } = await freshClient.post(
-    `${baseUrl}/accounts/api/v2/oauth2/token`,
-    new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: 'client_credentials',
-    }).toString(),
-    {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      timeout: 15000,
+  const body =
+    `client_id=${encodeURIComponent(clientId)}` +
+    `&client_secret=${encodeURIComponent(clientSecret)}` +
+    `&grant_type=client_credentials`;
+
+  const requestConfig = {
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Accept: 'application/json',
     },
-  );
+    timeout: 45000,
+    withCredentials: false,
+  };
+
+  let data: any;
+  try {
+    const response = await freshClient.post(
+      `${baseUrl}/accounts/api/v2/oauth2/token`,
+      body,
+      requestConfig,
+    );
+    data = response.data;
+  } catch (error: any) {
+    const isTimeout =
+      error?.code === 'ECONNABORTED' ||
+      String(error?.message ?? '').toLowerCase().includes('timeout');
+
+    if (!isTimeout) {
+      throw error;
+    }
+
+    logger.warn('[ConnectedApp] Token request timed out, retrying once');
+    const retryResponse = await freshClient.post(
+      `${baseUrl}/accounts/api/v2/oauth2/token`,
+      body,
+      {
+        ...requestConfig,
+        timeout: 60000,
+      },
+    );
+    data = retryResponse.data;
+  }
 
   const tokens: AuthTokens = {
     accessToken: data.access_token,

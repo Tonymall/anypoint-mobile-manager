@@ -27,6 +27,7 @@ import {
   useStopApp,
   useRestartApp,
 } from '../../hooks/queries';
+import { useRuntimeTransitionStore } from '../../stores/runtimeTransitionStore';
 import {
   getAppName,
   getMuleVersion,
@@ -217,6 +218,7 @@ const ApplicationDetailScreen: React.FC = () => {
   const router = useRouter();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const { domain } = useLocalSearchParams<{ domain: string }>();
+  const transition = useRuntimeTransitionStore((s) => (domain ? s.transitions[String(domain)] : undefined));
 
   const [pollInterval, setPollInterval] = useState<number | false>(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -263,6 +265,12 @@ const ApplicationDetailScreen: React.FC = () => {
     return () => clearTimeout(timer);
   }, [pollInterval]);
 
+  useEffect(() => {
+    if (transition && !pollInterval) {
+      setPollInterval(3000);
+    }
+  }, [transition, pollInterval]);
+
   const startMutation = useStartApp();
   const stopMutation = useStopApp();
   const restartMutation = useRestartApp();
@@ -279,9 +287,9 @@ const ApplicationDetailScreen: React.FC = () => {
   const statusColor = useMemo(() => getStatusColor(status), [status]);
   const statusLabel = useMemo(() => getStatusLabel(status), [status]);
 
-  const effectiveLabel = pendingAction || statusLabel;
-  const effectiveColor = pendingAction ? statusColors.deploying : statusColor;
-  const showSpinner = !!pendingAction || isTransitional(status);
+  const effectiveLabel = pendingAction || transition?.label || statusLabel;
+  const effectiveColor = (pendingAction || transition) ? statusColors.deploying : statusColor;
+  const showSpinner = !!pendingAction || !!transition || isTransitional(status);
   const workerInfo = useMemo(() => getWorkerInfo(app), [app]);
 
   const workerStats = useMemo(() => {

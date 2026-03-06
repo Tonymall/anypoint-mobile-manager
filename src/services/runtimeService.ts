@@ -28,6 +28,164 @@ function getEnvId(): string | undefined {
   return api.defaults.headers.common['X-ANYPNT-ENV-ID'] as string | undefined;
 }
 
+function escapeAmqlLiteral(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function buildAmqlBaseFilterSets(orgId: string, envId: string): string[][] {
+  return [
+    [
+      `"sub_org.id" = '${escapeAmqlLiteral(orgId)}'`,
+      `"env.id" = '${escapeAmqlLiteral(envId)}'`,
+    ],
+  ];
+}
+
+function buildAmqlScopeClauses(
+  orgId: string,
+  envId: string,
+  app: { platformId?: string; name?: string; domain?: string },
+): string[] {
+  const baseSets = buildAmqlBaseFilterSets(orgId, envId);
+  const clauses = baseSets.flatMap((base) => [
+    app.platformId ? [...base, `"app.id" = '${escapeAmqlLiteral(app.platformId)}'`].join(' AND ') : null,
+    app.name ? [...base, `"app.name" = '${escapeAmqlLiteral(app.name)}'`].join(' AND ') : null,
+    app.domain && app.domain !== app.name ? [...base, `"app.name" = '${escapeAmqlLiteral(app.domain)}'`].join(' AND ') : null,
+  ]).filter((value): value is string => Boolean(value));
+
+  return clauses.length > 0 ? Array.from(new Set(clauses)) : baseSets.map((base) => base.join(' AND '));
+}
+
+function buildDescriptorAwareScopeClauses(
+  orgId: string,
+  envId: string,
+  app: { platformId?: string; name?: string; domain?: string },
+  descriptorDimensions: string[],
+): string[] {
+  const baseSets = buildAmqlBaseFilterSets(orgId, envId);
+  const dimensions = new Set(descriptorDimensions ?? []);
+  const appIdentifiers = Array.from(new Set([
+    app.platformId,
+    app.domain,
+    app.name,
+  ].filter((value): value is string => Boolean(value))));
+  const appNames = Array.from(new Set([
+    app.name,
+    app.domain,
+  ].filter((value): value is string => Boolean(value))));
+
+  const dimensionCandidates: Array<{ names: string[]; values: string[] }> = [
+    {
+      names: ['app.id', 'application.id', 'entity.id', 'resource.id', 'service.id', 'asset.id'],
+      values: appIdentifiers,
+    },
+    {
+      names: ['app.name', 'application.name', 'application.display_name', 'entity.name', 'entity.display_name', 'resource.name', 'resource.display_name', 'service.name', 'asset.name'],
+      values: appNames,
+    },
+  ];
+
+  const clauses: string[] = [];
+
+  for (const candidate of dimensionCandidates) {
+    const supportedNames = candidate.names.filter((name) => dimensions.has(name));
+    if (supportedNames.length === 0 || candidate.values.length === 0) continue;
+
+    for (const base of baseSets) {
+      for (const dimensionName of supportedNames) {
+        for (const value of candidate.values) {
+          clauses.push([...base, `"${dimensionName}" = '${escapeAmqlLiteral(value)}'`].join(' AND '));
+        }
+      }
+    }
+  }
+
+  return clauses.length > 0
+    ? Array.from(new Set(clauses))
+    : baseSets.map((base) => base.join(' AND '));
+}
+
+function buildAmqlQuery(
+  metricName: string,
+  selectClause: string,
+  whereClause: string,
+  startMs: number,
+  endMs: number,
+  timeseriesInterval?: string,
+): string {
+  const needsTimestamp = Boolean(timeseriesInterval) && !/\btimestamp\b/i.test(selectClause);
+  const effectiveSelect = needsTimestamp ? `timestamp, ${selectClause}` : selectClause;
+  const timeseries = timeseriesInterval ? ` TIMESERIES ${timeseriesInterval}` : '';
+  return `SELECT ${effectiveSelect} FROM "${metricName}" WHERE timestamp BETWEEN ${startMs} AND ${endMs} AND ${whereClause}${timeseries}`;
+}
+
+function isObservabilityDataPresent(payload: any): boolean {
+  if (!payload) return false;
+  if (Array.isArray(payload?.data)) return payload.data.length > 0;
+  return Array.isArray(payload) ? payload.length > 0 : false;
+}
+
+function metricTypeNameOf(entry: any): string | null {
+  if (typeof entry === 'string') return entry;
+  if (!entry || typeof entry !== 'object') return null;
+  return entry.name ?? entry.id ?? entry.metricType ?? entry.metric_type ?? null;
+}
+
+function pickMetricType(
+  metricTypes: string[],
+  exactCandidates: string[],
+  containsPatterns: RegExp[] = [],
+): string | null {
+  for (const candidate of exactCandidates) {
+    const exactMatch = metricTypes.find((metricType) => metricType === candidate);
+    if (exactMatch) return exactMatch;
+  }
+
+  for (const pattern of containsPatterns) {
+    const partialMatch = metricTypes.find((metricType) => pattern.test(metricType));
+    if (partialMatch) return partialMatch;
+  }
+
+  return null;
+}
+
+function descriptorNamesOf(entries: any): string[] {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (typeof entry === 'string') return entry;
+      if (!entry || typeof entry !== 'object') return null;
+      return entry.name ?? entry.id ?? entry.key ?? entry.field ?? entry.fieldName ?? null;
+    })
+    .filter((value): value is string => Boolean(value));
+}
+
+async function describeObservabilityMetricType(
+  metricType: string,
+): Promise<{ dimensions: string[]; measurements: string[] }> {
+  const cached = _observabilityMetricDescribeCache.get(metricType);
+  if (cached) return cached;
+
+  const { data } = await api.get(`/observability/api/v1/metric_types/${encodeURIComponent(metricType)}:describe`);
+  const descriptor = {
+    dimensions: descriptorNamesOf(data?.dimensions ?? data?.tags ?? data?.labels),
+    measurements: descriptorNamesOf(data?.measurements ?? data?.fields ?? data?.aggregations),
+  };
+  _observabilityMetricDescribeCache.set(metricType, descriptor);
+  return descriptor;
+}
+
+function pickMeasurement(
+  measurements: string[],
+  patterns: RegExp[],
+): string | null {
+  for (const pattern of patterns) {
+    const match = measurements.find((measurement) => pattern.test(measurement));
+    if (match) return match;
+  }
+  return null;
+}
+
 /** Build the AMC base path for the current org/env (CloudHub 2.0) */
 function amcDeploymentsPath(): string | null {
   const orgId = getOrgId();
@@ -1517,6 +1675,11 @@ let _statsDiscoveryPromise: Promise<void> | null = null;
 let _influxDatasourceId: number | null = null;
 let _influxDbName: string | null = null;
 let _influxAvailable: boolean | null = null; // null = not checked yet
+let _legacyJvmApiAvailable = false;
+let _legacyMetricsApiAvailable = false;
+let _observabilityMetricTypesPromise: Promise<string[]> | null = null;
+let _observabilityMetricTypesCache: string[] | null = null;
+const _observabilityMetricDescribeCache = new Map<string, { dimensions: string[]; measurements: string[] }>();
 
 /**
  * ── AMC specs-based log retrieval cache ──
@@ -1561,12 +1724,39 @@ export function resetSessionFlags(): void {
   _influxDatasourceId = null;
   _influxDbName = null;
   _influxAvailable = null;
+  _legacyJvmApiAvailable = false;
+  _legacyMetricsApiAvailable = false;
+  _observabilityMetricTypesPromise = null;
+  _observabilityMetricTypesCache = null;
+  _observabilityMetricDescribeCache.clear();
   _cachedAmcDeploymentId = null;
   _cachedAmcSpecId = null;
   _cachedAmcDomain = null;
   _cachedCh1DeploymentId = null;
   _cachedCh1Domain = null;
   logger.log('[runtimeService] Session flags reset');
+}
+
+async function getObservabilityMetricTypes(): Promise<string[]> {
+  if (_observabilityMetricTypesCache) return _observabilityMetricTypesCache;
+  if (!_observabilityMetricTypesPromise) {
+    _observabilityMetricTypesPromise = api
+      .get('/observability/api/v1/metric_types')
+      .then(({ data }) => {
+        const metricTypes = Array.isArray(data)
+          ? data.map(metricTypeNameOf).filter((value): value is string => Boolean(value))
+          : [];
+        _observabilityMetricTypesCache = metricTypes;
+        logger.log(`[Monitoring] metric_types cached: ${metricTypes.slice(0, 20).join(', ')}`);
+        return metricTypes;
+      })
+      .catch((error: any) => {
+        _observabilityMetricTypesPromise = null;
+        throw error;
+      });
+  }
+
+  return _observabilityMetricTypesPromise;
 }
 
 // ---------- InfluxDB Monitoring Helpers ----------
@@ -1712,11 +1902,18 @@ async function queryInfluxDB(query: string): Promise<any> {
 function buildInfluxWhere(
   orgId: string,
   envId: string,
-  appFullDomain: string,
+  appIdentifiers: string[],
   startMs: number,
   endMs: number,
 ): string {
-  return `("org_id" = '${orgId}' AND "env_id" = '${envId}' AND "app_id" = '${appFullDomain}') AND time >= ${startMs}ms and time <= ${endMs}ms`;
+  const identifiers = Array.from(new Set(appIdentifiers.filter(Boolean)));
+  const appClauses = identifiers.map((identifier) => `"app_id" = '${identifier}'`);
+
+  if (appClauses.length === 0) {
+    return `("org_id" = '${orgId}' AND "env_id" = '${envId}') AND time >= ${startMs}ms and time <= ${endMs}ms`;
+  }
+
+  return `("org_id" = '${orgId}' AND "env_id" = '${envId}' AND (${appClauses.join(' OR ')})) AND time >= ${startMs}ms and time <= ${endMs}ms`;
 }
 
 /**
@@ -1783,14 +1980,18 @@ function parseInfluxDBResults(data: any): {
       const name = (s.name ?? '').toLowerCase();
 
       // Classify the measurement
-      const isCpu = name === 'worker' && columns.some((c: string) => c.includes('cpu'));
-      const isMemory = name === 'worker' && columns.some((c: string) => c.includes('memory'));
+      const isCpu = (name === 'worker' && columns.some((c: string) => c.includes('cpu')))
+        || (name === 'jvm.cpu.operatingsystem' && columns.some((c: string) => c === 'mean' || c.includes('cpu')));
+      const isMemory = (name === 'worker' && columns.some((c: string) => c.includes('memory')))
+        || (name === 'jvm.cpu.operatingsystem' && columns.some((c: string) => c.includes('total_physical_memory_size')));
       const isThread = name.includes('threading');
-      const isHeap = name.includes('jvm.memory') && columns.some((c: string) => c.includes('heap_used'));
-      const isHeapCommitted = name.includes('jvm.memory') && columns.some((c: string) => c.includes('heap_committed'));
+      const isHeap = name.includes('jvm.memory') && columns.some((c: string) => c.includes('heap_used') || c.includes('heap_total'));
+      const isHeapCommitted = name.includes('jvm.memory') && columns.some((c: string) => c.includes('heap_committed') || c.includes('heap_total'));
       const isGC = name.includes('garbagecollector');
       const isClasses = name.includes('classloading');
       const isAppStats = name === 'app_stats';
+      const isAppInboundMetric = name === 'app_inbound_metric';
+      const isAppOutboundMetric = name === 'app_outbound_metric';
       // HTTP inbound / outbound metrics (Anypoint Monitoring flow-level)
       const isHttpInbound = (name === 'http_inbound' || name === 'inbound')
         || (name === 'http' && (s.tags?.flow_type === 'inbound' || s.tags?.type === 'inbound' || columns.some((c: string) => c.includes('inbound'))));
@@ -1854,7 +2055,11 @@ function parseInfluxDBResults(data: any): {
       } else if (isThread && latestVal != null) {
         extra.threadCount = latestVal;
       } else if (isHeap && latestVal != null) {
-        extra.heapUsed = latestVal;
+        if (columns.some((c: string) => c.includes('heap_total'))) {
+          extra.heapCommitted = latestVal;
+        } else {
+          extra.heapUsed = latestVal;
+        }
       } else if (isHeapCommitted && latestVal != null) {
         extra.heapCommitted = latestVal;
       } else if (isGC && latestVal != null) {
@@ -1873,6 +2078,53 @@ function parseInfluxDBResults(data: any): {
           }
         }
         extra.messageCount = totalMessages;
+        const responseTimeCol = columns.findIndex((c: string) => c.toLowerCase().includes('responsetime'));
+        const errorCountCol = columns.findIndex((c: string) => c.toLowerCase().includes('errorcount'));
+        let responseTimeTotal = 0;
+        let responseTimeSamples = 0;
+        let errorTotal = 0;
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          if (responseTimeCol >= 0 && row[responseTimeCol] != null) {
+            responseTimeTotal += row[responseTimeCol];
+            responseTimeSamples++;
+          }
+          if (errorCountCol >= 0 && row[errorCountCol] != null) {
+            errorTotal += row[errorCountCol];
+          }
+        }
+        if (responseTimeSamples > 0 && extra.inboundAvgResponseTime == null) {
+          extra.inboundAvgResponseTime = Math.round(responseTimeTotal / responseTimeSamples);
+        }
+        if (errorTotal > 0 && extra.inboundErrorCount == null) {
+          extra.inboundErrorCount = errorTotal;
+        }
+      } else if (isAppInboundMetric) {
+        const rtCol = columns.findIndex((c: string) => c.includes('response_time.avg') || c.includes('responseTime') || c === 'mean');
+        const countCol = columns.findIndex((c: string) => c.includes('avg_request_count'));
+        let totalCount = 0;
+        let totalRt = 0;
+        let rtSamples = 0;
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          if (rtCol >= 0 && row[rtCol] != null) { totalRt += row[rtCol]; rtSamples++; }
+          if (countCol >= 0 && row[countCol] != null) totalCount += row[countCol];
+        }
+        if (rtSamples > 0) extra.inboundAvgResponseTime = Math.round(totalRt / rtSamples);
+        if (totalCount > 0) extra.inboundRequestCount = totalCount;
+      } else if (isAppOutboundMetric) {
+        const rtCol = columns.findIndex((c: string) => c.includes('response_time.avg') || c.includes('responseTime') || c === 'mean');
+        const countCol = columns.findIndex((c: string) => c.includes('avg_request_count'));
+        let totalCount = 0;
+        let totalRt = 0;
+        let rtSamples = 0;
+        for (const row of values) {
+          if (!Array.isArray(row)) continue;
+          if (rtCol >= 0 && row[rtCol] != null) { totalRt += row[rtCol]; rtSamples++; }
+          if (countCol >= 0 && row[countCol] != null) totalCount += row[countCol];
+        }
+        if (rtSamples > 0) extra.outboundAvgResponseTime = Math.round(totalRt / rtSamples);
+        if (totalCount > 0) extra.outboundRequestCount = totalCount;
       } else if (isHttpInbound || (isHttp && extra.inboundRequestCount == null)) {
         // Extract inbound HTTP metrics (response time, request count, errors)
         const rtCol = columns.findIndex((c: string) => c.includes('response_time') || c === 'mean');
@@ -1957,47 +2209,60 @@ async function getInfluxDBMonitoringData(
     return null;
   }
 
-  // Build the app_id value — use fullDomain if available, otherwise construct it
-  const appId = fullDomain || domain;
+  const appIds = Array.from(
+    new Set(
+      [
+        fullDomain,
+        domain,
+        fullDomain ? fullDomain.split('.')[0] : null,
+      ].filter((value): value is string => !!value),
+    ),
+  );
 
   const now = Date.now();
   const startMs = now - periodMinutes * 60 * 1000;
-  const where = buildInfluxWhere(org, env, appId, startMs, now);
   const groupBy = periodMinutes <= 60 ? '1m' : '5m';
+  const timeZone = 'Europe/Athens';
+  const querySets = [
+    fullDomain
+      ? {
+          label: 'fullDomain',
+          ids: [fullDomain],
+        }
+      : null,
+    {
+      label: 'fallback',
+      ids: appIds,
+    },
+  ].filter((querySet): querySet is { label: string; ids: string[] } => Boolean(querySet));
 
-  // ── Multi-statement query: CPU + Memory + Threads + Message Count ──
-  // These match the REAL queries observed from Anypoint Monitoring web UI
-  const queries = [
-    // CPU usage (worker-level)
-    `SELECT mean("cpu_usage") FROM "worker" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Memory usage (worker-level)
-    `SELECT mean("memory_usage") FROM "worker" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Thread count (JVM)
-    `SELECT mean("thread_count") FROM "jvm.threading" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Message count (app stats / throughput)
-    `SELECT sum("messageCount") FROM "app_stats" WHERE ${where} GROUP BY time(${groupBy}), "app_id" fill(0)`,
-    // Heap memory
-    `SELECT mean("heap_used") FROM "jvm.memory" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    `SELECT mean("heap_committed") FROM "jvm.memory" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // GC collections
-    `SELECT mean("gc_marksweep_collection_count") FROM "jvm.garbagecollector.marksweepcompact" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Classes loaded
-    `SELECT mean("loaded_class_count") FROM "jvm.classloading" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Inbound HTTP metrics (response time + request count)
-    `SELECT mean("response_time") AS "response_time", count("response_time") AS "count" FROM "http_inbound" WHERE ${where} GROUP BY time(${groupBy}) fill(null)`,
-    // Outbound HTTP metrics
-    `SELECT mean("response_time") AS "response_time", count("response_time") AS "count" FROM "http_outbound" WHERE ${where} GROUP BY time(${groupBy}) fill(null)`,
-  ];
+  for (const querySet of querySets) {
+    const scopedWhere = buildInfluxWhere(org, env, querySet.ids, startMs, now);
+    const queries = [
+      `SELECT sum("messageCount") FROM "app_stats" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "app_id" fill(0) tz('${timeZone}')`,
+      `SELECT mean("responseTime") FROM "app_stats" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "app_id" fill(none) tz('${timeZone}')`,
+      `SELECT sum("errorCount") FROM "app_stats" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "app_id" fill(0) tz('${timeZone}')`,
+      `SELECT sum("avg_request_count") FROM "app_inbound_metric" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "response_type" fill(0) tz('${timeZone}')`,
+      `SELECT mean("response_time.avg") FROM "app_inbound_metric" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "app_id" fill(none) tz('${timeZone}')`,
+      `SELECT sum("avg_request_count") FROM "app_outbound_metric" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "response_type" fill(0) tz('${timeZone}')`,
+      `SELECT mean("response_time.avg") FROM "app_outbound_metric" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "app_id" fill(none) tz('${timeZone}')`,
+      `SELECT mean("cpu") FROM "jvm.cpu.operatingsystem" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "worker_id" fill(null) tz('${timeZone}')`,
+      `SELECT mean("total_physical_memory_size") FROM "jvm.cpu.operatingsystem" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "worker_id" fill(null) tz('${timeZone}')`,
+      `SELECT mean("heap_used") FROM "jvm.memory" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "worker_id" fill(null) tz('${timeZone}')`,
+      `SELECT max("heap_total") FROM "jvm.memory" WHERE ${scopedWhere} GROUP BY time(${groupBy}) fill(null) tz('${timeZone}')`,
+      `SELECT mean("thread_count") FROM "jvm.threading" WHERE ${scopedWhere} GROUP BY time(${groupBy}), "worker_id" fill(null) tz('${timeZone}')`,
+    ];
 
-  try {
-    const combinedQ = queries.join(';');
-    logger.log(`[Monitoring] InfluxDB query for ${domain} (appId=${appId}): ${queries.length} statements, period=${periodMinutes}m`);
-    const result = await queryInfluxDB(combinedQ);
+    try {
+      logger.log(
+        `[Monitoring] InfluxDB query for ${domain} (${querySet.label}, appIds=${querySet.ids.join(', ')}): ${queries.length} statements, period=${periodMinutes}m`,
+      );
+      const result = await queryInfluxDB(queries.join(';'));
+      if (!result?.results) {
+        continue;
+      }
 
-    if (result?.results) {
       logger.log(`[Monitoring] InfluxDB returned ${result.results.length} result sets for ${domain}`);
-
-      // Parse multi-statement results into a monitoring-friendly format
       const parsed = parseInfluxDBResults(result);
       const hasInfluxData = parsed && (
         parsed.cpuPercent != null
@@ -2006,11 +2271,17 @@ async function getInfluxDBMonitoringData(
         || parsed.extraMetrics.messageCount != null
         || parsed.extraMetrics.threadCount != null
         || parsed.extraMetrics.heapUsed != null
+        || parsed.extraMetrics.heapCommitted != null
         || parsed.extraMetrics.inboundRequestCount != null
         || parsed.extraMetrics.outboundRequestCount != null
+        || parsed.extraMetrics.inboundAvgResponseTime != null
+        || parsed.extraMetrics.outboundAvgResponseTime != null
       );
+
       if (hasInfluxData) {
-        logger.log(`[Monitoring] InfluxDB SUCCESS for ${domain}: CPU=${parsed!.cpuPercent?.toFixed(1)}%, Mem=${parsed!.memoryPercent?.toFixed(1)}%, MsgCount=${parsed!.extraMetrics.messageCount}`);
+        logger.log(
+          `[Monitoring] InfluxDB SUCCESS for ${domain}: CPU=${parsed!.cpuPercent?.toFixed(1)}%, Mem=${parsed!.memoryPercent?.toFixed(1)}%, MsgCount=${parsed!.extraMetrics.messageCount}`,
+        );
         return {
           _source: 'influxdb',
           workerStatistics: [{
@@ -2023,44 +2294,18 @@ async function getInfluxDBMonitoringData(
           _extraMetrics: parsed!.extraMetrics,
         };
       }
-    }
-  } catch (err: any) {
-    logger.log(`[Monitoring] InfluxDB multi-query failed for ${domain}: ${err?.response?.status ?? err?.message}`);
-  }
 
-  // ── Fallback: try alternative measurement names (some orgs use different schemas) ──
-  const fallbackPatterns = [
-    // Pattern A: worker_metric instead of worker
-    `SELECT mean("cpu") FROM "worker_metric" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null);SELECT mean("memory_usage") FROM "worker_metric" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Pattern B: worker_statistic
-    `SELECT mean("cpu_usage") FROM "worker_statistic" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null);SELECT mean("memory_usage") FROM "worker_statistic" WHERE ${where} GROUP BY time(${groupBy}), "worker_id" fill(null)`,
-    // Pattern C: using "app" tag instead of "app_id"
-    `SELECT mean("cpu") FROM "worker_metric" WHERE ("org_id" = '${org}' AND "env_id" = '${env}' AND "app" = '${domain}') AND time >= ${startMs}ms and time <= ${now}ms GROUP BY time(${groupBy}) fill(null);SELECT mean("memory_usage") FROM "worker_metric" WHERE ("org_id" = '${org}' AND "env_id" = '${env}' AND "app" = '${domain}') AND time >= ${startMs}ms and time <= ${now}ms GROUP BY time(${groupBy}) fill(null)`,
-  ];
-
-  for (const q of fallbackPatterns) {
-    try {
-      const result = await queryInfluxDB(q);
-      const parsed = parseInfluxDBResults(result);
-      if (parsed && (parsed.cpuPercent != null || parsed.memoryPercent != null)) {
-        logger.log(`[Monitoring] InfluxDB FALLBACK succeeded for ${domain}: CPU=${parsed.cpuPercent?.toFixed(1)}%`);
-        return {
-          _source: 'influxdb',
-          workerStatistics: [{
-            statistics: {
-              ...(parsed.cpuPercent != null ? { cpu: { [now]: parsed.cpuPercent } } : {}),
-              ...(parsed.memoryPercent != null ? { memoryPercentageUsed: { [now]: parsed.memoryPercent } } : {}),
-            },
-          }],
-          _timeSeries: parsed.timeSeries,
-        };
-      }
-    } catch (_) {
-      continue;
+      logger.log(
+        `[Monitoring] InfluxDB returned no usable data for ${domain} using ${querySet.label} ids`,
+      );
+    } catch (err: any) {
+      logger.log(
+        `[Monitoring] InfluxDB query failed for ${domain} using ${querySet.label}: ${err?.response?.status ?? err?.message}`,
+      );
     }
   }
 
-  logger.log(`[Monitoring] InfluxDB queries returned no data for ${domain} (appId=${appId})`);
+  logger.log(`[Monitoring] InfluxDB queries returned no data for ${domain} (appIds=${appIds.join(', ')})`);
   return null;
 }
 
@@ -2103,6 +2348,8 @@ export async function getDashboardStats(
   // Use retreiveStatistics=true to request worker statistics alongside the detail.
   // The response includes workerStatuses with host/status info.
   let _appFullDomain: string | undefined;
+  let _appPlatformId: string | undefined;
+  let _appName: string | undefined;
   try {
     const { data: appDetail } = await api.get(`${CLOUDHUB_BASE}/applications/${domain}`, {
       params: { retreiveStatistics: true },
@@ -2110,6 +2357,8 @@ export async function getDashboardStats(
     if (appDetail) {
       // Cache the fullDomain for InfluxDB queries
       _appFullDomain = appDetail.fullDomain;
+      _appPlatformId = appDetail.fullDomain ?? appDetail.id;
+      _appName = appDetail.name ?? appDetail.domain ?? domain;
 
       const ws = appDetail.workerStatuses ?? appDetail.workers?.statuses;
       // Check if workerStatuses has actual statistics (not just host/status info)
@@ -2133,6 +2382,17 @@ export async function getDashboardStats(
   } catch (_) {
     // App detail fetch failed, try other sources
   }
+
+  const amqlScopeClauses = orgId && envId
+    ? buildAmqlScopeClauses(orgId, envId, {
+        platformId: _appPlatformId,
+        name: _appName ?? domain,
+        domain,
+      })
+    : [];
+  const amqlDiscoveryClause = orgId && envId
+    ? buildAmqlBaseFilterSets(orgId, envId).map((filters) => filters.join(' AND '))
+    : [];
 
   // ── CONSOLIDATED DISCOVERY GATE ──
   // When multiple getDashboardStats calls fire in parallel (via useQueries),
@@ -2173,16 +2433,29 @@ export async function getDashboardStats(
         // ── Test monitoring/observability endpoints ──
         logger.log('[getDashboardStats] Discovery gate: testing monitoring APIs...');
         if (orgId && envId) {
-          // First: discover available metric types (diagnostic)
+          let discoveredMetricTypes: string[] = [];
           try {
-            const { data: metricTypes } = await api.get('/observability/api/v1/metric_types');
-            const typeNames = Array.isArray(metricTypes) ? metricTypes.map((t: any) => t.name ?? t.id ?? t).slice(0, 15) : [];
-            logger.log(`[getDashboardStats] Available metric types: [${typeNames.join(', ')}]`);
+            discoveredMetricTypes = await getObservabilityMetricTypes();
+            logger.log(`[getDashboardStats] Available metric types: [${discoveredMetricTypes.slice(0, 15).join(', ')}]`);
           } catch (err: any) {
             logger.log(`[getDashboardStats] metric_types discovery failed: ${err?.response?.status ?? err?.message}`);
           }
 
+          const discoveryInboundMetric = pickMetricType(
+            discoveredMetricTypes,
+            ['mulesoft.app.request', 'mulesoft.app.inbound'],
+            [/mulesoft\.app\.(?:inbound|request)$/i],
+          );
+          const discoveryMessageMetric = pickMetricType(
+            discoveredMetricTypes,
+            ['mulesoft.app.message'],
+            [/mulesoft\.app\.message/i],
+          );
+
           let monFound = false;
+          if (discoveredMetricTypes.length > 0) {
+            monFound = true;
+          }
           const monTests: Array<() => Promise<any>> = [
             async () => {
               if (!_archiveAvailable) throw new Error('Archive disabled');
@@ -2200,20 +2473,37 @@ export async function getDashboardStats(
                 throw err;
               }
             },
-            // Observability Metrics API — use correct AMQL metric types
-            () => api.post('/observability/api/v1/metrics:search', {
-              query: `SELECT timestamp, count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES PT1H`,
-            }),
-            // Alternative: try mulesoft.app.message for message counts
-            () => api.post('/observability/api/v1/metrics:search', {
-              query: `SELECT sum(total_count) FROM "mulesoft.app.message" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now}`,
-            }),
           ];
+
+          if (discoveryInboundMetric && amqlDiscoveryClause.length > 0) {
+            monTests.push(() => api.post('/observability/api/v1/metrics:search', {
+              query: buildAmqlQuery(
+                discoveryInboundMetric,
+                'COUNT(requests) AS requestCount',
+                amqlDiscoveryClause[0],
+                startMs,
+                now,
+                'PT1H',
+              ),
+            }));
+          }
+
+          if (discoveryMessageMetric && amqlDiscoveryClause.length > 0) {
+            monTests.push(() => api.post('/observability/api/v1/metrics:search', {
+              query: buildAmqlQuery(
+                discoveryMessageMetric,
+                'SUM("total_count") AS totalCount',
+                amqlDiscoveryClause[0],
+                startMs,
+                now,
+              ),
+            }));
+          }
 
           for (const attempt of monTests) {
             try {
               const { data } = await attempt();
-              if (data) { monFound = true; break; }
+              if (isObservabilityDataPresent(data) || data) { monFound = true; break; }
             } catch (err: any) {
               const s = err?.response?.status;
               logger.log(`[getDashboardStats] Monitoring API test failed: status=${s}`);
@@ -2305,12 +2595,6 @@ export async function getDashboardStats(
         },
       },
       // Observability Metrics API — inbound request metrics (correct AMQL)
-      {
-        label: 'observability-inbound',
-        fn: () => api.post('/observability/api/v1/metrics:search', {
-          query: `SELECT timestamp, avg(response_time), count(requests) FROM "mulesoft.app.inbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now} TIMESERIES ${amqlInterval}`,
-        }),
-      },
     ];
 
     for (const attempt of monAttempts) {
@@ -2329,25 +2613,65 @@ export async function getDashboardStats(
       }
     }
 
-    // Additional AMQL queries for message/error counts
-    const amqlFallbacks: Array<{ label: string; fn: () => Promise<any> }> = [
-      {
-        label: 'observability-messages',
-        fn: () => api.post('/observability/api/v1/metrics:search', {
-          query: `SELECT sum(total_count), sum(error_count) FROM "mulesoft.app.message" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now}`,
-        }),
-      },
-      {
-        label: 'observability-outbound',
-        fn: () => api.post('/observability/api/v1/metrics:search', {
-          query: `SELECT avg(response_time), count(requests) FROM "mulesoft.app.outbound" WHERE "sub_org.id" = '${orgId}' AND "env.id" = '${envId}' AND timestamp BETWEEN ${startMs} AND ${now}`,
-        }),
-      },
-    ];
+    let metricTypes: string[] = [];
+    try {
+      metricTypes = await getObservabilityMetricTypes();
+    } catch (err: any) {
+      logger.log(`[getDashboardStats] observability metric_types unavailable: ${err?.response?.status ?? err?.message}`);
+    }
 
-    // Collect all observability data into one combined result
+    const inboundMetricType = pickMetricType(
+      metricTypes,
+      ['mulesoft.app.request', 'mulesoft.app.inbound'],
+      [/mulesoft\.app\.(?:inbound|request)$/i],
+    );
+    const outboundMetricType = pickMetricType(
+      metricTypes,
+      ['mulesoft.app.outbound.request', 'mulesoft.app.outbound'],
+      [/mulesoft\.app\.outbound(?:\.request)?$/i],
+    );
+    const messageMetricType = pickMetricType(
+      metricTypes,
+      ['mulesoft.app.message'],
+      [/mulesoft\.app\.message/i],
+    );
+    const jvmMetricType = pickMetricType(
+      metricTypes,
+      ['mulesoft.flex.system.metric', 'mulesoft.app.jvm', 'mulesoft.entity'],
+      [/mulesoft\.flex\.system\.metric/i, /mulesoft\.app\.jvm/i, /jvm/i, /entity/i],
+    );
+    const workerMetricType = pickMetricType(
+      metricTypes,
+      ['mulesoft.flex.system.metric', 'mulesoft.app.worker', 'mulesoft.worker', 'mulesoft.entity'],
+      [/mulesoft\.flex\.system\.metric/i, /worker/i, /entity/i],
+    );
+
+    const runObservabilityQuery = async (
+      metricType: string,
+      selectClause: string,
+      whereClauses: string[],
+    ): Promise<any | null> => {
+      let lastError: any = null;
+      for (const whereClause of whereClauses) {
+        try {
+          const { data } = await api.post('/observability/api/v1/metrics:search', {
+            query: buildAmqlQuery(metricType, selectClause, whereClause, startMs, now, amqlInterval),
+          });
+          if (isObservabilityDataPresent(data)) return data;
+          logger.log(`[getDashboardStats] observability query returned no rows for metric=${metricType} where=${whereClause}`);
+        } catch (err: any) {
+          lastError = err;
+        }
+      }
+      if (lastError) throw lastError;
+      return null;
+    };
+
     const observabilityResult: any = {
       _source: 'observability',
+      _timeSeries: [] as Array<Record<string, number>>,
+      _extraMetrics: {} as Record<string, number>,
+      _jvmMetrics: {} as Record<string, number>,
       _appMetrics: {
         inboundRequestCount: null as number | null,
         inboundAvgResponseTime: null as number | null,
@@ -2358,36 +2682,287 @@ export async function getDashboardStats(
       },
     };
     let hasAnyObservabilityData = false;
+    const timeSeriesMap = new Map<number, Record<string, number>>();
 
-    for (const attempt of amqlFallbacks) {
+    const getTimeSeriesPoint = (timestamp: number): Record<string, number> => {
+      const existing = timeSeriesMap.get(timestamp);
+      if (existing) return existing;
+      const created: Record<string, number> = { timestamp };
+      timeSeriesMap.set(timestamp, created);
+      return created;
+    };
+
+    const appMetricAttempts: Array<{
+      label: string;
+      metricType: string | null;
+      selectClause: string;
+    }> = [
+      {
+        label: 'observability-inbound',
+        metricType: inboundMetricType,
+        selectClause: 'timestamp, COUNT(requests) AS requestCount, AVG("response_time") AS avgResponseTime',
+      },
+      {
+        label: 'observability-messages',
+        metricType: messageMetricType,
+        selectClause: 'timestamp, SUM("total_count") AS totalCount, SUM("error_count") AS errorCount',
+      },
+      {
+        label: 'observability-outbound',
+        metricType: outboundMetricType,
+        selectClause: 'timestamp, COUNT(requests) AS requestCount, AVG("response_time") AS avgResponseTime',
+      },
+    ];
+
+    logger.log(
+      `[getDashboardStats] Observability candidates for ${domain}: inbound=${inboundMetricType ?? 'none'}, outbound=${outboundMetricType ?? 'none'}, messages=${messageMetricType ?? 'none'}, jvm=${jvmMetricType ?? 'none'}, worker=${workerMetricType ?? 'none'}, scopeClauses=${amqlScopeClauses.length}`,
+    );
+
+    for (const attempt of appMetricAttempts) {
+      if (!attempt.metricType || amqlScopeClauses.length === 0) continue;
       try {
-        const { data } = await attempt.fn();
+        const data = await runObservabilityQuery(attempt.metricType, attempt.selectClause, amqlScopeClauses);
         if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
           hasAnyObservabilityData = true;
           for (const row of data.data) {
-            // AMQL response: { "COUNT(requests)": N, "AVG(response_time)": N, ... }
-            const keys = Object.keys(row);
-            for (const key of keys) {
-              const val = row[key];
-              if (val == null) continue;
-              const lk = key.toLowerCase();
-              if (lk.includes('count') && lk.includes('request')) {
-                if (attempt.label.includes('outbound')) {
-                  observabilityResult._appMetrics.outboundRequestCount = (observabilityResult._appMetrics.outboundRequestCount ?? 0) + Number(val);
-                } else {
-                  observabilityResult._appMetrics.inboundRequestCount = (observabilityResult._appMetrics.inboundRequestCount ?? 0) + Number(val);
-                }
-              } else if (lk.includes('response_time') || lk.includes('avg')) {
-                if (attempt.label.includes('outbound')) {
-                  observabilityResult._appMetrics.outboundAvgResponseTime = Number(val);
-                } else {
-                  observabilityResult._appMetrics.inboundAvgResponseTime = Number(val);
-                }
-              } else if (lk.includes('total_count')) {
-                observabilityResult._appMetrics.messageCount = (observabilityResult._appMetrics.messageCount ?? 0) + Number(val);
-              } else if (lk.includes('error_count')) {
-                observabilityResult._appMetrics.errorCount = (observabilityResult._appMetrics.errorCount ?? 0) + Number(val);
+            const timestamp = Number(
+              row.timestamp ??
+              row.TIMESTAMP ??
+              row.time ??
+              row.ts ??
+              row.window_start ??
+              0,
+            );
+            const point = timestamp > 0 ? getTimeSeriesPoint(timestamp) : null;
+            const requestCount = Number(row.requestCount ?? row.REQUESTCOUNT ?? row['COUNT(requests)'] ?? NaN);
+            const avgResponseTime = Number(row.avgResponseTime ?? row.AVGRESPONSETIME ?? row['AVG(response_time)'] ?? NaN);
+            const totalCount = Number(row.totalCount ?? row.TOTALCOUNT ?? row['SUM(total_count)'] ?? NaN);
+            const errorCount = Number(row.errorCount ?? row.ERRORCOUNT ?? row['SUM(error_count)'] ?? NaN);
+
+            if (Number.isFinite(requestCount)) {
+              if (attempt.label.includes('outbound')) {
+                observabilityResult._appMetrics.outboundRequestCount = (observabilityResult._appMetrics.outboundRequestCount ?? 0) + requestCount;
+                if (point) point.outboundRequests = requestCount;
+              } else {
+                observabilityResult._appMetrics.inboundRequestCount = (observabilityResult._appMetrics.inboundRequestCount ?? 0) + requestCount;
+                if (point) point.inboundRequests = requestCount;
               }
+            }
+
+            if (Number.isFinite(avgResponseTime)) {
+              if (attempt.label.includes('outbound')) {
+                observabilityResult._appMetrics.outboundAvgResponseTime = avgResponseTime;
+                if (point) point.outboundResponseTime = avgResponseTime;
+              } else {
+                observabilityResult._appMetrics.inboundAvgResponseTime = avgResponseTime;
+                if (point) point.inboundResponseTime = avgResponseTime;
+              }
+            }
+
+            if (Number.isFinite(totalCount)) {
+              observabilityResult._appMetrics.messageCount = (observabilityResult._appMetrics.messageCount ?? 0) + totalCount;
+              if (point) point.messageCount = totalCount;
+            }
+
+            if (Number.isFinite(errorCount)) {
+              observabilityResult._appMetrics.errorCount = (observabilityResult._appMetrics.errorCount ?? 0) + errorCount;
+              if (point) point.inboundErrors = errorCount;
+            }
+          }
+        }
+      } catch (err: any) {
+        logger.log(`[getDashboardStats] ${attempt.label} failed: ${err?.response?.status ?? err?.message}`);
+      }
+    }
+
+    const observabilityInfraAttempts: Array<{
+      label: string;
+      metricType: string | null;
+      selectClause: string | null;
+      whereClauses: string[];
+    }> = [];
+
+    if (workerMetricType && amqlScopeClauses.length > 0) {
+      try {
+        const workerDescriptor = await describeObservabilityMetricType(workerMetricType);
+        logger.log(
+          `[getDashboardStats] worker metric descriptor for ${domain}: ${workerMetricType} -> [${workerDescriptor.measurements.slice(0, 20).join(', ')}]`,
+        );
+        logger.log(
+          `[getDashboardStats] worker metric descriptor dims for ${domain}: ${workerMetricType} -> [${workerDescriptor.dimensions.slice(0, 20).join(', ')}]`,
+        );
+        const workerScopeClauses = buildDescriptorAwareScopeClauses(
+          orgId,
+          envId,
+          {
+            platformId: _appPlatformId,
+            name: _appName ?? domain,
+            domain,
+          },
+          workerDescriptor.dimensions,
+        );
+        const workerCpuMeasurement = pickMeasurement(workerDescriptor.measurements, [
+          /process.*cpu/i,
+          /system.*cpu/i,
+          /cpu.*(?:usage|load|percent|pct)/i,
+          /^cpu$/i,
+        ]);
+        const workerMemoryPercentMeasurement = pickMeasurement(workerDescriptor.measurements, [
+          /memory.*(?:usage|percent|pct)/i,
+          /memory.*used.*percent/i,
+        ]);
+        const workerMemoryUsedMeasurement = pickMeasurement(workerDescriptor.measurements, [
+          /heap.*used/i,
+          /physical.*memory.*used/i,
+          /used.*memory/i,
+          /memory.*(?:used|usage)/i,
+        ]);
+        const workerMemoryTotalMeasurement = pickMeasurement(workerDescriptor.measurements, [
+          /heap.*(?:total|max|committed)/i,
+          /physical.*memory.*(?:total|size)/i,
+          /memory.*(?:total|max|limit|committed)/i,
+        ]);
+
+        const workerSelects = ['timestamp'];
+        if (workerCpuMeasurement) workerSelects.push(`AVG("${workerCpuMeasurement}") AS cpuPercent`);
+        if (workerMemoryPercentMeasurement) workerSelects.push(`AVG("${workerMemoryPercentMeasurement}") AS memoryPercent`);
+        if (workerMemoryUsedMeasurement) workerSelects.push(`AVG("${workerMemoryUsedMeasurement}") AS memoryUsed`);
+        if (workerMemoryTotalMeasurement) workerSelects.push(`AVG("${workerMemoryTotalMeasurement}") AS memoryTotal`);
+        if (workerSelects.length > 1) {
+          observabilityInfraAttempts.push({
+            label: 'observability-worker',
+            metricType: workerMetricType,
+            selectClause: workerSelects.join(', '),
+            whereClauses: workerScopeClauses,
+          });
+        }
+      } catch (err: any) {
+        logger.log(`[getDashboardStats] worker metric describe failed: ${err?.response?.status ?? err?.message}`);
+      }
+    }
+
+    if (jvmMetricType && amqlScopeClauses.length > 0) {
+      try {
+        const jvmDescriptor = await describeObservabilityMetricType(jvmMetricType);
+        logger.log(
+          `[getDashboardStats] jvm metric descriptor for ${domain}: ${jvmMetricType} -> [${jvmDescriptor.measurements.slice(0, 20).join(', ')}]`,
+        );
+        logger.log(
+          `[getDashboardStats] jvm metric descriptor dims for ${domain}: ${jvmMetricType} -> [${jvmDescriptor.dimensions.slice(0, 20).join(', ')}]`,
+        );
+        const jvmScopeClauses = buildDescriptorAwareScopeClauses(
+          orgId,
+          envId,
+          {
+            platformId: _appPlatformId,
+            name: _appName ?? domain,
+            domain,
+          },
+          jvmDescriptor.dimensions,
+        );
+        const jvmCpuMeasurement = pickMeasurement(jvmDescriptor.measurements, [
+          /process.*cpu/i,
+          /system.*cpu/i,
+          /cpu.*(?:usage|load|percent|pct)/i,
+          /^cpu$/i,
+        ]);
+        const heapUsedMeasurement = pickMeasurement(jvmDescriptor.measurements, [/heap.*used/i]);
+        const heapCommittedMeasurement = pickMeasurement(jvmDescriptor.measurements, [/heap.*(?:committed|max|total)/i]);
+        const nonHeapUsedMeasurement = pickMeasurement(jvmDescriptor.measurements, [/non.*heap.*used/i]);
+        const threadCountMeasurement = pickMeasurement(jvmDescriptor.measurements, [/thread.*count/i, /^threads$/i]);
+        const classesLoadedMeasurement = pickMeasurement(jvmDescriptor.measurements, [/classes.*loaded/i]);
+        const gcCollectionsMeasurement = pickMeasurement(jvmDescriptor.measurements, [/garbage.*collection.*count/i, /gc.*count/i, /collections/i]);
+        const gcTimeMeasurement = pickMeasurement(jvmDescriptor.measurements, [/garbage.*collection.*time/i, /gc.*time/i]);
+
+        const jvmSelects = ['timestamp'];
+        if (jvmCpuMeasurement) jvmSelects.push(`AVG("${jvmCpuMeasurement}") AS cpuPercent`);
+        if (heapUsedMeasurement) jvmSelects.push(`AVG("${heapUsedMeasurement}") AS heapUsed`);
+        if (heapCommittedMeasurement) jvmSelects.push(`AVG("${heapCommittedMeasurement}") AS heapCommitted`);
+        if (nonHeapUsedMeasurement) jvmSelects.push(`AVG("${nonHeapUsedMeasurement}") AS nonHeapUsed`);
+        if (threadCountMeasurement) jvmSelects.push(`AVG("${threadCountMeasurement}") AS threadCount`);
+        if (classesLoadedMeasurement) jvmSelects.push(`AVG("${classesLoadedMeasurement}") AS classesLoaded`);
+        if (gcCollectionsMeasurement) jvmSelects.push(`AVG("${gcCollectionsMeasurement}") AS gcCollections`);
+        if (gcTimeMeasurement) jvmSelects.push(`AVG("${gcTimeMeasurement}") AS gcTime`);
+        if (jvmSelects.length > 1) {
+          observabilityInfraAttempts.push({
+            label: 'observability-jvm',
+            metricType: jvmMetricType,
+            selectClause: jvmSelects.join(', '),
+            whereClauses: jvmScopeClauses,
+          });
+        }
+      } catch (err: any) {
+        logger.log(`[getDashboardStats] jvm metric describe failed: ${err?.response?.status ?? err?.message}`);
+      }
+    }
+
+    for (const attempt of observabilityInfraAttempts) {
+      if (!attempt.metricType || !attempt.selectClause || attempt.whereClauses.length === 0) continue;
+      try {
+        const data = await runObservabilityQuery(attempt.metricType, attempt.selectClause, attempt.whereClauses);
+        if (data?.data && Array.isArray(data.data) && data.data.length > 0) {
+          hasAnyObservabilityData = true;
+          for (const row of data.data) {
+            const timestamp = Number(row.timestamp ?? row.TIMESTAMP ?? row.time ?? row.ts ?? 0);
+            const point = timestamp > 0 ? getTimeSeriesPoint(timestamp) : null;
+            const cpuPercent = Number(row.cpuPercent ?? row.CPUPERCENT ?? NaN);
+            const memoryPercent = Number(row.memoryPercent ?? row.MEMORYPERCENT ?? NaN);
+            const memoryUsed = Number(row.memoryUsed ?? row.MEMORYUSED ?? NaN);
+            const memoryTotal = Number(row.memoryTotal ?? row.MEMORYTOTAL ?? NaN);
+            const heapUsed = Number(row.heapUsed ?? row.HEAPUSED ?? NaN);
+            const heapCommitted = Number(row.heapCommitted ?? row.HEAPCOMMITTED ?? NaN);
+            const nonHeapUsed = Number(row.nonHeapUsed ?? row.NONHEAPUSED ?? NaN);
+            const threadCount = Number(row.threadCount ?? row.THREADCOUNT ?? NaN);
+            const classesLoaded = Number(row.classesLoaded ?? row.CLASSESLOADED ?? NaN);
+            const gcCollections = Number(row.gcCollections ?? row.GCCOLLECTIONS ?? NaN);
+            const gcTime = Number(row.gcTime ?? row.GCTIME ?? NaN);
+
+            if (Number.isFinite(cpuPercent)) {
+              observabilityResult._extraMetrics.cpuPercent = cpuPercent;
+              observabilityResult._jvmMetrics.cpuUsage = observabilityResult._jvmMetrics.cpuUsage ?? cpuPercent;
+              if (point) point.cpu = cpuPercent;
+            }
+            if (Number.isFinite(memoryPercent)) {
+              observabilityResult._extraMetrics.memoryPercent = memoryPercent;
+              if (point) point.memory = memoryPercent;
+            }
+            if (Number.isFinite(memoryUsed)) observabilityResult._extraMetrics.memoryUsed = memoryUsed;
+            if (Number.isFinite(memoryTotal)) observabilityResult._extraMetrics.memoryTotal = memoryTotal;
+            if (Number.isFinite(heapUsed)) {
+              observabilityResult._jvmMetrics.heapUsed = heapUsed;
+              if (point) point.heapUsed = heapUsed;
+            }
+            if (Number.isFinite(heapCommitted)) {
+              observabilityResult._jvmMetrics.heapCommitted = heapCommitted;
+              if (point) point.heapCommitted = heapCommitted;
+            }
+            if (Number.isFinite(nonHeapUsed)) observabilityResult._jvmMetrics.nonHeapUsed = nonHeapUsed;
+            if (Number.isFinite(threadCount)) {
+              observabilityResult._jvmMetrics.threadCount = threadCount;
+              if (point) point.threadCount = threadCount;
+            }
+            if (Number.isFinite(classesLoaded)) observabilityResult._jvmMetrics.classesLoaded = classesLoaded;
+            if (Number.isFinite(gcCollections)) observabilityResult._jvmMetrics.gcCollections = gcCollections;
+            if (Number.isFinite(gcTime)) observabilityResult._jvmMetrics.gcTime = gcTime;
+
+            if (
+              !Number.isFinite(memoryPercent) &&
+              Number.isFinite(memoryUsed) &&
+              Number.isFinite(memoryTotal) &&
+              memoryTotal > 0
+            ) {
+              const derivedPercent = Math.round((memoryUsed / memoryTotal) * 100);
+              observabilityResult._extraMetrics.memoryPercent = derivedPercent;
+              if (point) point.memory = derivedPercent;
+            } else if (
+              !Number.isFinite(memoryPercent) &&
+              Number.isFinite(heapUsed) &&
+              Number.isFinite(heapCommitted) &&
+              heapCommitted > 0
+            ) {
+              const derivedPercent = Math.round((heapUsed / heapCommitted) * 100);
+              observabilityResult._extraMetrics.memoryPercent = derivedPercent;
+              if (point) point.memory = derivedPercent;
             }
           }
         }
@@ -2397,13 +2972,16 @@ export async function getDashboardStats(
     }
 
     if (hasAnyObservabilityData) {
+      observabilityResult._timeSeries = Array.from(timeSeriesMap.values()).sort(
+        (a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0),
+      );
       logger.log(`[getDashboardStats] Observability API returned app-level metrics for ${domain}:`, observabilityResult._appMetrics);
       return observabilityResult;
     }
   }
 
   // --- JVM metrics endpoint (direct monitoring API) ---
-  if (orgId && envId) {
+  if (orgId && envId && _legacyJvmApiAvailable) {
     try {
       const jvmData = await monitoringService.getJVMMetrics(orgId, envId, domain);
       if (jvmData && typeof jvmData === 'object' && Object.keys(jvmData).length > 0) {
@@ -2414,12 +2992,15 @@ export async function getDashboardStats(
         };
       }
     } catch (err: any) {
+      if (err?.response?.status === 404 || err?.response?.status === 405) {
+        _legacyJvmApiAvailable = false;
+      }
       logger.log(`[getDashboardStats] JVM endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
     }
   }
 
   // --- Monitoring metrics endpoint (POST metrics API) ---
-  if (orgId && envId) {
+  if (orgId && envId && _legacyMetricsApiAvailable) {
     try {
       const fromIso = new Date(startMs).toISOString();
       const toIso = new Date(now).toISOString();
@@ -2438,6 +3019,9 @@ export async function getDashboardStats(
         };
       }
     } catch (err: any) {
+      if (err?.response?.status === 404 || err?.response?.status === 405) {
+        _legacyMetricsApiAvailable = false;
+      }
       logger.log(`[getDashboardStats] Monitoring metrics endpoint failed for ${domain}: ${err?.response?.status ?? err?.message}`);
     }
   }
@@ -2566,10 +3150,10 @@ export async function getAppMetrics(
       return data;
     } catch (err: any) {
       if (err?.response?.status === 404) {
-        // dashboardStats not available — will be disabled by getDashboardStats
-        return null;
+        dashboardStatsAvailable = false;
+      } else {
+        throw err;
       }
-      throw err;
     }
   }
 
@@ -2583,10 +3167,37 @@ export async function getAppMetrics(
     // not available
   }
 
-  // NOTE: getDashboardStats is NOT called here as a fallback.
-  // The monitoring detail screen calls useDashboardStats() independently,
-  // which handles InfluxDB / monitoring API discovery. Calling it here
-  // would cause redundant API calls and potential race conditions.
+  try {
+    const periodMinutes = Math.max(1, Math.ceil((endMs - startMs) / 60000));
+    const dashboardLike = await getDashboardStats(domain, periodMinutes);
+
+    if (Array.isArray(dashboardLike?._timeSeries)) {
+      if (params.metricName === 'cpu') {
+        const series = dashboardLike._timeSeries
+          .filter((point: any) => point?.timestamp != null && point?.cpu != null)
+          .map((point: any) => ({ timestamp: Number(point.timestamp), value: Number(point.cpu) }));
+        if (series.length > 0) return series;
+      }
+
+      if (params.metricName === 'memory') {
+        const series = dashboardLike._timeSeries
+          .filter((point: any) => point?.timestamp != null && (point?.memory != null || point?.heapUsed != null))
+          .map((point: any) => ({
+            timestamp: Number(point.timestamp),
+            value: Number(point.memory ?? point.heapUsed),
+          }));
+        if (series.length > 0) return series;
+      }
+    }
+
+    const statsSource = dashboardLike?.workerStatistics ?? dashboardLike;
+    for (const fieldName of fieldNames) {
+      const series = extractTimeSeries(statsSource, fieldName);
+      if (series.length > 0) return series;
+    }
+  } catch (_) {
+    // The dashboard query is handled independently in the monitoring screens.
+  }
 
   return null;
 }
@@ -2605,3 +3216,4 @@ export async function updateProperties(
     'Update properties',
   );
 }
+

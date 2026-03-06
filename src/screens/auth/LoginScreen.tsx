@@ -468,20 +468,6 @@ const LoginScreen: React.FC = () => {
                   Sign in with SSO
                 </Button>
 
-                {/* Connected App Button */}
-                <Button
-                  mode="text"
-                  onPress={() => router.push('/(auth)/connected-app' as any)}
-                  disabled={isLoading}
-                  icon="connection"
-                  style={styles.ssoButton}
-                  contentStyle={styles.ssoButtonContent}
-                  accessibilityLabel="Sign in with Connected App"
-                  accessibilityRole="button"
-                >
-                  Sign in with Connected App
-                </Button>
-
               </View>
             </View>
 

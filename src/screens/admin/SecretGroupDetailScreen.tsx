@@ -208,11 +208,12 @@ const SecretGroupDetailScreen: React.FC = () => {
 
   const handleDelete = useCallback(async () => {
     if (!groupId) return;
+    setDeleteDialogVisible(false);
     try {
       await deleteSecretGroup.mutateAsync(groupId);
       router.back();
     } catch {
-      // Error handled by mutation
+      setDeleteDialogVisible(true);
     }
   }, [groupId, deleteSecretGroup, router]);
 

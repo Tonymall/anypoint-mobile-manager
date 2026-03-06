@@ -264,6 +264,24 @@ const InfrastructureHomeScreen: React.FC = () => {
             />
           </View>
         </View>
+
+        <View
+          style={{
+            marginTop: 16,
+            borderRadius: 14,
+            backgroundColor: theme.colors.surface,
+            borderWidth: 1,
+            borderColor: theme.colors.outlineVariant,
+            padding: 14,
+          }}
+        >
+          <Text style={{ color: theme.colors.onSurface, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
+            Infrastructure scope
+          </Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, lineHeight: 18 }}>
+            Servers, server groups, and clusters are hybrid/agent-managed resources. If this environment is CloudHub-only, those sections may stay empty. VPC and VPN views are not implemented in this screen yet.
+          </Text>
+        </View>
       </ScrollView>
     </View>
   );

@@ -35,6 +35,7 @@ import { useApplications } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { getStatusColor, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
+import { useRuntimeTransitionStore } from '../../stores/runtimeTransitionStore';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 
@@ -56,7 +57,10 @@ const AppCard = React.memo<{
   onPress: () => void;
   theme: MD3Theme;
 }>(({ app, onPress, theme }) => {
-  const color = getStatusColor(app.status);
+  const domain = app.domain ?? app.name ?? '';
+  const transition = useRuntimeTransitionStore((s) => s.transitions[domain]);
+  const color = transition ? anypointColors.info : getStatusColor(app.status);
+  const statusLabel = transition?.label ?? getStatusLabel(app.status);
   const appName = getAppName(app);
   const muleVer = getMuleVersion(app);
   const workerInfo = getWorkerInfo(app);
@@ -64,7 +68,7 @@ const AppCard = React.memo<{
   return (
     <Pressable
       onPress={onPress}
-      accessibilityLabel={`${appName}, ${getStatusLabel(app.status)}`}
+      accessibilityLabel={`${appName}, ${statusLabel}`}
       accessibilityRole="button"
       accessibilityHint="Double tap to view details"
       style={({ pressed }) => [
@@ -108,7 +112,7 @@ const AppCard = React.memo<{
               } : {}),
             }} />
             <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 }}>
-              {getStatusLabel(app.status)}
+              {statusLabel}
             </Text>
           </View>
         </View>

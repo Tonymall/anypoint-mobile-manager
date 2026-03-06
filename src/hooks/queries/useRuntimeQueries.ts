@@ -1,9 +1,9 @@
-import { useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as runtimeService from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { scheduleLocalNotification } from '../../services/notificationService';
+import { useRuntimeTransitionStore } from '../../stores/runtimeTransitionStore';
 
 /**
  * Query key factory — scoped by org + env so tenant switches never
@@ -61,6 +61,8 @@ const NOTIFICATION_COOLDOWN_MS = 90_000; // 90 seconds
 // the mutation's "Starting/Stopping" notification always appears FIRST.
 const _mutationGraceMap = new Map<string, number>();
 const MUTATION_GRACE_MS = 5_000; // 5 seconds after mutation fires
+const _previousStatusMap = new Map<string, string>();
+const _lastNotifiedMap = new Map<string, number>();
 
 /** Called by lifecycle mutations to suppress polling notifications briefly */
 function setMutationGrace(domain: string) {
@@ -79,22 +81,22 @@ function isWithinMutationGrace(domain: string): boolean {
 export function useApplications() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const addNotification = useNotificationStore((s) => s.addNotification);
-  const previousAppsRef = useRef<Map<string, string>>(new Map());
-  const lastNotifiedRef = useRef<Map<string, number>>(new Map());
+  const hasActiveTransitions = useRuntimeTransitionStore((s) => Object.keys(s.transitions).length > 0);
 
   return useQuery({
     queryKey: runtimeKeys.applications(),
     queryFn: () => runtimeService.getApplications(),
     enabled: isAuthenticated,
-    refetchInterval: 30_000,
+    refetchInterval: hasActiveTransitions ? 5_000 : 30_000,
     select: (data) => {
       if (Array.isArray(data)) {
         const now = Date.now();
+        const transitionStore = useRuntimeTransitionStore.getState();
 
         for (const app of data) {
           const appName = app.domain ?? app.name ?? '';
           const newStatus = app.status ?? '';
-          const oldStatus = previousAppsRef.current.get(appName);
+          const oldStatus = _previousStatusMap.get(appName);
 
           if (oldStatus && oldStatus !== newStatus) {
             const isNonFinal = NON_FINAL_STATUSES.has(newStatus);
@@ -105,13 +107,11 @@ export function useApplications() {
               // notification should appear first. The next poll cycle (30s later)
               // will pick up the final state.
               if (isWithinMutationGrace(appName)) {
-                // Still track the status change so the next poll sees the right oldStatus
-                previousAppsRef.current.set(appName, newStatus);
                 continue;
               }
 
               // Cooldown: suppress rapid duplicate notifications (STOPPED -> UNDEPLOYED)
-              const lastNotifiedTime = lastNotifiedRef.current.get(appName) ?? 0;
+              const lastNotifiedTime = _lastNotifiedMap.get(appName) ?? 0;
               const withinCooldown = (now - lastNotifiedTime) < NOTIFICATION_COOLDOWN_MS;
 
               if (!withinCooldown) {
@@ -128,12 +128,15 @@ export function useApplications() {
                 });
 
                 scheduleLocalNotification(title, `${appName} — ${title.toLowerCase()}`);
-                lastNotifiedRef.current.set(appName, now);
+                _lastNotifiedMap.set(appName, now);
               }
+              transitionStore.clearTransition(appName);
+            } else {
+              _lastNotifiedMap.delete(appName);
             }
           }
 
-          previousAppsRef.current.set(appName, newStatus);
+          _previousStatusMap.set(appName, newStatus);
         }
       }
       return data;
@@ -149,11 +152,12 @@ export function useApplication(
   domain: string,
   options?: { refetchInterval?: number | false },
 ) {
+  const hasActiveTransition = useRuntimeTransitionStore((s) => !!s.transitions[domain]);
   return useQuery({
     queryKey: runtimeKeys.application(domain),
     queryFn: () => runtimeService.getApplication(domain),
     enabled: !!domain,
-    refetchInterval: options?.refetchInterval,
+    refetchInterval: options?.refetchInterval ?? (hasActiveTransition ? 5_000 : false),
   });
 }
 
@@ -234,12 +238,15 @@ export function useRunScheduler() {
 export function useStartApp() {
   const queryClient = useQueryClient();
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const setTransition = useRuntimeTransitionStore((s) => s.setTransition);
+  const clearTransition = useRuntimeTransitionStore((s) => s.clearTransition);
   return useMutation({
     mutationFn: runtimeService.startApp,
     onSuccess: (data, domain) => {
       // Set grace period BEFORE invalidating queries — ensures polling
       // won't fire "Application Deployed" before "Application Starting"
       setMutationGrace(domain);
+      setTransition(domain, 'starting');
       if (data) {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
@@ -255,6 +262,7 @@ export function useStartApp() {
       scheduleLocalNotification('Application Starting', `${domain} is being started`);
     },
     onError: (error: any, domain: string) => {
+      clearTransition(domain);
       addNotification({
         type: 'lifecycle',
         action: 'start',
@@ -270,10 +278,13 @@ export function useStartApp() {
 export function useStopApp() {
   const queryClient = useQueryClient();
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const setTransition = useRuntimeTransitionStore((s) => s.setTransition);
+  const clearTransition = useRuntimeTransitionStore((s) => s.clearTransition);
   return useMutation({
     mutationFn: runtimeService.stopApp,
     onSuccess: (data, domain) => {
       setMutationGrace(domain);
+      setTransition(domain, 'stopping');
       if (data) {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
@@ -289,6 +300,7 @@ export function useStopApp() {
       scheduleLocalNotification('Application Stopping', `${domain} is being stopped`);
     },
     onError: (error: any, domain: string) => {
+      clearTransition(domain);
       addNotification({
         type: 'lifecycle',
         action: 'stop',
@@ -304,10 +316,13 @@ export function useStopApp() {
 export function useRestartApp() {
   const queryClient = useQueryClient();
   const addNotification = useNotificationStore((s) => s.addNotification);
+  const setTransition = useRuntimeTransitionStore((s) => s.setTransition);
+  const clearTransition = useRuntimeTransitionStore((s) => s.clearTransition);
   return useMutation({
     mutationFn: runtimeService.restartApp,
     onSuccess: (data, domain) => {
       setMutationGrace(domain);
+      setTransition(domain, 'restarting');
       if (data) {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
@@ -323,6 +338,7 @@ export function useRestartApp() {
       scheduleLocalNotification('Application Restarting', `${domain} is being restarted`);
     },
     onError: (error: any, domain: string) => {
+      clearTransition(domain);
       addNotification({
         type: 'lifecycle',
         action: 'restart',

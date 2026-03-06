@@ -10,7 +10,7 @@ import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator, type 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
-import { useApplications, useManagedAPIs, runtimeKeys } from '../../hooks/queries';
+import { useApplications, runtimeKeys } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
 import { isMonitoringUnavailable, resetSessionFlags } from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
@@ -325,10 +325,22 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
   // ── Handle InfluxDB extra metrics (from _extraMetrics field) ──
   if (dashStats?._extraMetrics) {
     const ex = dashStats._extraMetrics;
+    if (ex.cpuPercent != null && metrics.cpuPercent == null) metrics.cpuPercent = Number(ex.cpuPercent);
+    if (ex.memoryPercent != null && metrics.memoryPercent == null) metrics.memoryPercent = Number(ex.memoryPercent);
+    if (ex.memoryUsed != null && metrics.memoryUsedMB == null) {
+      const used = Number(ex.memoryUsed);
+      metrics.memoryUsedMB = used > 10_000 ? used / (1024 * 1024) : used;
+    }
+    if (ex.memoryTotal != null && metrics.memoryTotalMB == null) {
+      const total = Number(ex.memoryTotal);
+      metrics.memoryTotalMB = total > 10_000 ? total / (1024 * 1024) : total;
+    }
     if (ex.threadCount != null && metrics.threadCount == null) metrics.threadCount = Number(ex.threadCount);
     if (ex.heapUsed != null && metrics.heapUsed == null) metrics.heapUsed = Number(ex.heapUsed);
     if (ex.heapCommitted != null && metrics.heapCommitted == null) metrics.heapCommitted = Number(ex.heapCommitted);
     if (ex.gcCollections != null && metrics.gcCollections == null) metrics.gcCollections = Number(ex.gcCollections);
+    if (ex.gcTime != null && metrics.gcTime == null) metrics.gcTime = Number(ex.gcTime);
+    if (ex.nonHeapUsed != null && metrics.nonHeapUsed == null) metrics.nonHeapUsed = Number(ex.nonHeapUsed);
     if (ex.classesLoaded != null && metrics.classesLoaded == null) metrics.classesLoaded = Number(ex.classesLoaded);
     // HTTP metrics from InfluxDB
     if (ex.inboundRequestCount != null && metrics.inboundRequestCount == null) metrics.inboundRequestCount = Number(ex.inboundRequestCount);
@@ -336,6 +348,31 @@ function extractMetrics(detailedApp: any, dashStats: any): MonitoringMetrics {
     if (ex.outboundRequestCount != null && metrics.outboundRequestCount == null) metrics.outboundRequestCount = Number(ex.outboundRequestCount);
     if (ex.outboundAvgResponseTime != null && metrics.outboundAvgResponseTime == null) metrics.outboundAvgResponseTime = Number(ex.outboundAvgResponseTime);
     if (ex.messageCount != null && metrics.messageCount == null) metrics.messageCount = Number(ex.messageCount);
+  }
+
+  // ── Handle normalized time-series from InfluxDB / Observability ──
+  if (Array.isArray(dashStats?._timeSeries) && dashStats._timeSeries.length > 0) {
+    const latestPoint = [...dashStats._timeSeries]
+      .filter((point: any) => point?.timestamp != null)
+      .sort((a: any, b: any) => Number(b.timestamp) - Number(a.timestamp))[0];
+
+    if (latestPoint) {
+      if (metrics.cpuPercent == null && latestPoint.cpu != null) {
+        metrics.cpuPercent = Number(latestPoint.cpu);
+      }
+      if (metrics.memoryPercent == null && latestPoint.memory != null) {
+        metrics.memoryPercent = Number(latestPoint.memory);
+      }
+      if (metrics.heapUsed == null && latestPoint.heapUsed != null) {
+        metrics.heapUsed = Number(latestPoint.heapUsed);
+      }
+      if (metrics.heapCommitted == null && latestPoint.heapCommitted != null) {
+        metrics.heapCommitted = Number(latestPoint.heapCommitted);
+      }
+      if (metrics.threadCount == null && latestPoint.threadCount != null) {
+        metrics.threadCount = Number(latestPoint.threadCount);
+      }
+    }
   }
 
   // ── Handle Observability Metrics API app-level metrics ──
@@ -655,25 +692,16 @@ const MonitoringScreen: React.FC = () => {
     isRefetching: appsRefetching,
   } = useApplications();
 
-  const {
-    data: apisResponse,
-    isLoading: _apisLoading,
-    refetch: refetchApis,
-    isRefetching: apisRefetching,
-  } = useManagedAPIs();
-
-  const isRefreshing = appsRefetching || apisRefetching;
+  const isRefreshing = appsRefetching;
 
   const handleRefresh = useCallback(() => {
     // Reset monitoring discovery flags so it re-tests endpoints on refresh
     resetSessionFlags();
     setMonitoringDown(false);
     refetchApps();
-    refetchApis();
-  }, [refetchApps, refetchApis]);
+  }, [refetchApps]);
 
   const appsList = useMemo(() => applications ?? [], [applications]);
-  const apiList = useMemo(() => apisResponse ?? [], [apisResponse]);
 
   const sortedApps = useMemo(() => {
     if (sortOrder === 'az') return [...appsList].sort((a: any, b: any) => getAppName(a).localeCompare(getAppName(b)));
@@ -774,8 +802,6 @@ const MonitoringScreen: React.FC = () => {
   const totalApps = appsList.length;
   const runningAppsCount = useMemo(() => appsList.filter((a: any) => a?.status === 'STARTED').length, [appsList]);
   const failedApps = useMemo(() => appsList.filter((a: any) => a?.status === 'FAILED').length, [appsList]);
-  const totalAPIs = apiList.length;
-  const activeAPIs = useMemo(() => apiList.filter((api: any) => api?.status === 'active').length, [apiList]);
   const envName = currentEnv?.name ?? 'No environment';
 
   // Check monitoring availability after dashboardStats discovery completes.
@@ -812,8 +838,6 @@ const MonitoringScreen: React.FC = () => {
           subtitle={failedApps > 0 ? `${failedApps} failed` : undefined} />
         <SummaryCard title="Running" value={`${runningAppsCount}/${totalApps}`} icon="check-circle-outline" color={anypointColors.success}
           subtitle={totalApps > 0 ? `${Math.round((runningAppsCount / totalApps) * 100)}% healthy` : undefined} />
-        <SummaryCard title="APIs" value={totalAPIs} icon="api" color={anypointColors.secondary}
-          subtitle={activeAPIs > 0 ? `${activeAPIs} active` : undefined} />
       </View>
 
       {/* Monitoring unavailable banner */}
@@ -838,7 +862,7 @@ const MonitoringScreen: React.FC = () => {
               Live metrics unavailable
             </Text>
             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
-              CPU, memory, and thread monitoring require an Anypoint Monitoring subscription (Titanium or Platinum). Application status, deployment info, and API-level metrics are still shown below. Pull to refresh to retry.
+              This environment currently exposes application traffic metrics, but not live per-app CPU, memory, or JVM telemetry through the available monitoring APIs. Configured worker resources are shown where available.
             </Text>
           </View>
         </View>
@@ -860,7 +884,7 @@ const MonitoringScreen: React.FC = () => {
         </View>
       </View>
     </>
-  ), [styles, insets.top, envName, totalApps, failedApps, runningAppsCount, totalAPIs, activeAPIs, monitoringDown, theme, sortOrder, sortedApps.length]);
+  ), [styles, insets.top, envName, totalApps, failedApps, runningAppsCount, monitoringDown, theme, sortOrder, sortedApps.length]);
 
   const listEmptyComponent = useMemo(() => {
     if (appsLoading) {
