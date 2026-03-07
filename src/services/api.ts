@@ -33,6 +33,34 @@ let inMemoryToken: string | null = null;
 let inMemorySessionMode = false;
 let inMemoryXsrfToken: string | null = null;
 
+function isExpectedDiscoveryFailure(
+  status: number,
+  method: string,
+  url: string,
+): boolean {
+  if (status !== 404 && status !== 405) return false;
+
+  if (
+    method === 'GET' &&
+    (
+      /\/cloudhub\/api\/v2\/applications\/[^/]+\/dashboardStats$/.test(url) ||
+      /\/cloudhub\/api\/applications\/[^/]+\/dashboardStats$/.test(url) ||
+      /\/monitoring\/api\/visualizer\/api\/datasources$/.test(url)
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    method === 'POST' &&
+    /\/monitoring\/archive\/api\/v1\/organizations\/.+\/environments\/.+\/query$/.test(url)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 const api: AxiosInstance = axios.create({
   baseURL: currentBaseUrl,
   timeout: 30000,
@@ -180,6 +208,9 @@ api.interceptors.response.use(
       const { status } = error.response;
       const url = error.config?.url ?? 'unknown';
       const method = (error.config?.method ?? 'GET').toUpperCase();
+      if (isExpectedDiscoveryFailure(status, method, url)) {
+        return Promise.reject(error);
+      }
       logger.warn(
         `[API ${status}] ${method} ${url}`,
         typeof error.response.data === 'object'

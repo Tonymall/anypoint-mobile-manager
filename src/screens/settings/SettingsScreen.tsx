@@ -308,7 +308,7 @@ const SettingsScreen: React.FC = () => {
           iconColor={theme.colors.secondary}
           iconBg={theme.colors.secondary + '14'}
           title="Control Plane"
-          subtitle={`${currentRegion.label} â€” ${currentRegion.notes}`}
+          subtitle={`${currentRegion.label} - ${currentRegion.notes}`}
         />
         <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow

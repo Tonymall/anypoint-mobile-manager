@@ -20,7 +20,8 @@
       "bundleIdentifier": "com.muleops.mobile",
       "buildNumber": "1",
       "infoPlist": {
-        "NSFaceIDUsageDescription": "Use Face ID to securely login to MuleOps"
+        "NSFaceIDUsageDescription": "Use Face ID to securely login to MuleOps",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -32,7 +33,9 @@
       "versionCode": 1,
       "permissions": [
         "USE_BIOMETRIC",
-        "USE_FINGERPRINT"
+        "USE_FINGERPRINT",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "web": {
@@ -53,6 +56,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d66e51ed-3908-4f1e-a8df-64216e724408"
+      }
     }
   }
 }

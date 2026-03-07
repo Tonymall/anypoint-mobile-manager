@@ -7,12 +7,14 @@ import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, Button } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 // ── Fallback UI (functional, uses theme-independent colors) ──
 const ErrorFallback: React.FC<{
   error: Error | null;
   onReset: () => void;
-}> = ({ error, onReset }) => (
+  onReport: () => void;
+}> = ({ error, onReset, onReport }) => (
   <View style={fallbackStyles.container}>
     <View style={fallbackStyles.iconCircle}>
       <Icon name="alert-circle-outline" size={48} color="#EF4444" />
@@ -21,18 +23,28 @@ const ErrorFallback: React.FC<{
     <Text style={fallbackStyles.message}>
       {error?.message ?? 'An unexpected error occurred.'}
     </Text>
-    <Button
-      mode="contained"
-      onPress={onReset}
-      icon="refresh"
-      style={fallbackStyles.button}
-      buttonColor="#00A1E0"
-      textColor="#FFFFFF"
-      accessibilityLabel="Try again to recover from error"
-      accessibilityRole="button"
-    >
-      Try Again
-    </Button>
+    <View style={fallbackStyles.buttonRow}>
+      <Button
+        mode="outlined"
+        onPress={onReport}
+        icon="bug-outline"
+        style={fallbackStyles.secondaryButton}
+      >
+        Report Bug
+      </Button>
+      <Button
+        mode="contained"
+        onPress={onReset}
+        icon="refresh"
+        style={fallbackStyles.button}
+        buttonColor="#00A1E0"
+        textColor="#FFFFFF"
+        accessibilityLabel="Dismiss error and continue"
+        accessibilityRole="button"
+      >
+        Dismiss
+      </Button>
+    </View>
   </View>
 );
 
@@ -71,6 +83,13 @@ const fallbackStyles = StyleSheet.create({
   button: {
     borderRadius: 14,
   },
+  secondaryButton: {
+    borderRadius: 14,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
 });
 
 // ── Error Boundary (class component) ──
@@ -90,6 +109,11 @@ class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
+    useErrorDialogStore.getState().showError({
+      title: 'Unexpected error',
+      message: error.message || 'An unexpected error occurred.',
+      details: __DEV__ ? info.componentStack || undefined : undefined,
+    });
     // Production: log only the error name/message (no stack traces or component trees)
     // eslint-disable-next-line no-console
     console.error('[ErrorBoundary]', error.name, error.message);
@@ -104,12 +128,20 @@ class ErrorBoundary extends React.Component<
     this.setState({ hasError: false, error: null });
   };
 
+  handleReport = () => {
+    useErrorDialogStore.getState().showError({
+      title: 'Unexpected error',
+      message: this.state.error?.message || 'An unexpected error occurred.',
+    });
+  };
+
   render() {
     if (this.state.hasError) {
       return (
         <ErrorFallback
           error={this.state.error}
           onReset={this.handleReset}
+          onReport={this.handleReport}
         />
       );
     }

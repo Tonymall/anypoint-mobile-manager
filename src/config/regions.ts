@@ -9,25 +9,25 @@ export const CONTROL_PLANE_REGIONS: ControlPlaneRegion[] = [
     id: 'us',
     label: 'US',
     url: 'https://anypoint.mulesoft.com',
-    notes: 'Default / US control plane',
+    notes: 'United States',
   },
   {
     id: 'eu1',
     label: 'EU',
     url: 'https://eu1.anypoint.mulesoft.com',
-    notes: 'European data residency (Frankfurt region)',
+    notes: 'Europe',
   },
   {
     id: 'ca1',
     label: 'CA',
     url: 'https://ca1.anypoint.mulesoft.com',
-    notes: 'Canada control plane',
+    notes: 'Canada',
   },
   {
     id: 'jp1',
     label: 'JP',
     url: 'https://jp1.anypoint.mulesoft.com',
-    notes: 'Japan control plane',
+    notes: 'Japan',
   },
 ];
 

@@ -27,6 +27,7 @@ import { useIsFocused } from '@react-navigation/native';
 import type { DeploymentHistory, DeploymentStatus } from '../../types';
 import { anypointColors } from '../../theme';
 import { useDeploymentHistory } from '../../hooks/queries/useDeploymentQueries';
+import { useApplications } from '../../hooks/queries';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
@@ -232,6 +233,11 @@ const DeploymentHistoryScreen: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
 
   const { data: deployments, isLoading, error, refetch, isRefetching } = useDeploymentHistory(undefined, { enabled: isFocused });
+  const { data: applications } = useApplications();
+  const applicationDomains = useMemo(
+    () => new Set(((applications as any[]) ?? []).map((app: any) => String(app.domain ?? app.name ?? '').trim()).filter(Boolean)),
+    [applications],
+  );
 
   const deploymentList = useMemo(() => {
     const items = ((deployments as any)?.data ?? []) as DeploymentHistory[];
@@ -242,7 +248,7 @@ const DeploymentHistoryScreen: React.FC = () => {
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<DeploymentHistory>) => {
       const domain = item.applicationName?.trim();
-      const onPress = domain
+      const onPress = domain && applicationDomains.has(domain)
         ? () =>
             router.push({
               pathname: '/(main)/runtime/[domain]' as any,
@@ -259,7 +265,7 @@ const DeploymentHistoryScreen: React.FC = () => {
       />
       );
     },
-    [theme, router, deploymentList.length],
+    [theme, router, deploymentList.length, applicationDomains],
   );
 
   const renderEmptyState = useCallback(

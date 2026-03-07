@@ -2,26 +2,24 @@
  * Logger Smoke Tests
  *
  * Verifies the production-safe logger:
- * - console.error always logs (even in prod)
+ * - handled errors avoid console.error in dev
  * - In __DEV__, console.log/warn pass through
  */
 
 import logger from '../utils/logger';
 
 describe('Logger utility', () => {
-  const originalError = console.error;
   const originalLog = console.log;
   const originalWarn = console.warn;
 
   afterEach(() => {
-    console.error = originalError;
     console.log = originalLog;
     console.warn = originalWarn;
   });
 
-  it('should always call console.error', () => {
+  it('should route handled errors through console.warn in __DEV__ mode', () => {
     const spy = jest.fn();
-    console.error = spy;
+    console.warn = spy;
     logger.error('test error');
     expect(spy).toHaveBeenCalledWith('test error');
   });

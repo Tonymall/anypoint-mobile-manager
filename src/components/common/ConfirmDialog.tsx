@@ -12,6 +12,9 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   destructive?: boolean;
+  confirmDisabled?: boolean;
+  cancelDisabled?: boolean;
+  confirmLoading?: boolean;
 }
 
 const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
@@ -23,6 +26,9 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onCancel,
   destructive = false,
+  confirmDisabled = false,
+  cancelDisabled = false,
+  confirmLoading = false,
 }) => {
   const theme = useTheme();
 
@@ -34,12 +40,14 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <Text variant="bodyMedium">{message}</Text>
         </Dialog.Content>
         <Dialog.Actions style={styles.actions}>
-          <Button onPress={onCancel} textColor={theme.colors.onSurfaceVariant}>
+          <Button onPress={onCancel} textColor={theme.colors.onSurfaceVariant} disabled={cancelDisabled}>
             {cancelLabel}
           </Button>
           <Button
             onPress={() => { destructive ? hapticWarning() : hapticMedium(); onConfirm(); }}
             mode="contained"
+            disabled={confirmDisabled}
+            loading={confirmLoading}
             buttonColor={
               destructive ? theme.colors.error : theme.colors.primary
             }

@@ -254,7 +254,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   topLineDot: {
-    width: 20,
+    width: '56%',
     height: 2.5,
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,

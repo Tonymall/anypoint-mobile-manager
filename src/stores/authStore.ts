@@ -3,20 +3,21 @@
 // Manages authentication state, tokens, org/env switching
 // ============================================================
 
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
-import type {
-  User,
-  AuthTokens,
-  Organization,
-  Environment,
-  ControlPlaneRegionId,
-} from '../types';
 import { DEFAULT_REGION_ID } from '../config/regions';
+import type {
+  AuthTokens,
+  ControlPlaneRegionId,
+  Environment,
+  Organization,
+  User,
+} from '../types';
+import { useNotificationStore } from './notificationStore';
+import { useRuntimeTransitionStore } from './runtimeTransitionStore';
 
-// --- State ---
 export interface AuthState {
   user: User | null;
   tokens: AuthTokens | null;
@@ -29,7 +30,6 @@ export interface AuthState {
   environments: Environment[];
 }
 
-// --- Actions ---
 export interface AuthActions {
   login: (user: User, tokens: AuthTokens) => void;
   loginPending: (user: User, tokens: AuthTokens) => void;
@@ -46,7 +46,6 @@ export interface AuthActions {
   setIsLoading: (isLoading: boolean) => void;
 }
 
-// --- Initial State ---
 const initialState: AuthState = {
   user: null,
   tokens: null,
@@ -59,26 +58,54 @@ const initialState: AuthState = {
   environments: [],
 };
 
-// --- Store ---
+function resetSessionScopedState(previousUserId?: string | null, nextUserId?: string | null) {
+  if (previousUserId && nextUserId && previousUserId === nextUserId) return;
+  useNotificationStore.getState().clearAll();
+  useRuntimeTransitionStore.getState().clearAllTransitions();
+}
+
+function buildFreshSessionState(
+  user: User,
+  tokens: AuthTokens,
+  isAuthenticated: boolean,
+): Pick<
+  AuthState,
+  | 'user'
+  | 'tokens'
+  | 'isAuthenticated'
+  | 'isLoading'
+  | 'currentOrganization'
+  | 'currentEnvironment'
+  | 'organizations'
+  | 'environments'
+> {
+  return {
+    user,
+    tokens,
+    isAuthenticated,
+    isLoading: false,
+    currentOrganization: null,
+    currentEnvironment: null,
+    organizations: [],
+    environments: [],
+  };
+}
+
 export const useAuthStore = create<AuthState & AuthActions>()(
   persist(
     (set) => ({
       ...initialState,
 
-      login: (user: User, tokens: AuthTokens) =>
-        set({
-          user,
-          tokens,
-          isAuthenticated: true,
-          isLoading: false,
+      login: (user, tokens) =>
+        set((state) => {
+          resetSessionScopedState(state.user?.id, user.id);
+          return buildFreshSessionState(user, tokens, true);
         }),
 
-      loginPending: (user: User, tokens: AuthTokens) =>
-        set({
-          user,
-          tokens,
-          isAuthenticated: false,
-          isLoading: false,
+      loginPending: (user, tokens) =>
+        set((state) => {
+          resetSessionScopedState(state.user?.id, user.id);
+          return buildFreshSessionState(user, tokens, false);
         }),
 
       completeLogin: () =>
@@ -87,60 +114,59 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         }),
 
       logout: () =>
-        set((state) => ({
-          ...initialState,
-          // Keep the user's region selection — resetting to 'us' causes 403
-          // when an EU1 user signs out and tries to sign back in.
-          selectedRegion: state.selectedRegion,
-        })),
+        set((state) => {
+          resetSessionScopedState(state.user?.id, null);
+          return {
+            ...initialState,
+            selectedRegion: state.selectedRegion,
+          };
+        }),
 
-      refreshToken: (tokens: AuthTokens) =>
+      refreshToken: (tokens) =>
         set({
           tokens,
         }),
 
-      setSelectedRegion: (region: ControlPlaneRegionId) =>
+      setSelectedRegion: (region) =>
         set({
           selectedRegion: region,
         }),
 
-      switchOrganization: (organization: Organization) =>
+      switchOrganization: (organization) =>
         set({
           currentOrganization: organization,
-          // Clear environment when switching orgs since environments are org-specific
           currentEnvironment: null,
           environments: [],
         }),
 
-      switchEnvironment: (environment: Environment) =>
+      switchEnvironment: (environment) =>
         set({
           currentEnvironment: environment,
         }),
 
-      loadSession: (user: User, tokens: AuthTokens) =>
-        set({
-          user,
-          tokens,
-          isAuthenticated: true,
-          isLoading: false,
+      loadSession: (user, tokens) =>
+        set((state) => {
+          resetSessionScopedState(state.user?.id, user.id);
+          return buildFreshSessionState(user, tokens, true);
         }),
 
-      setUser: (user: User) =>
-        set({
-          user,
+      setUser: (user) =>
+        set((state) => {
+          resetSessionScopedState(state.user?.id, user.id);
+          return { user };
         }),
 
-      setOrganizations: (organizations: Organization[]) =>
+      setOrganizations: (organizations) =>
         set({
           organizations,
         }),
 
-      setEnvironments: (environments: Environment[]) =>
+      setEnvironments: (environments) =>
         set({
           environments,
         }),
 
-      setIsLoading: (isLoading: boolean) =>
+      setIsLoading: (isLoading) =>
         set({
           isLoading,
         }),
@@ -148,8 +174,6 @@ export const useAuthStore = create<AuthState & AuthActions>()(
     {
       name: 'anypoint-auth-v3',
       storage: createJSONStorage(() => AsyncStorage),
-      // Do NOT persist tokens or isAuthenticated - tokens in SecureStore.
-      // isAuthenticated must always start as false; user must log in each session.
       partialize: (state) => ({
         selectedRegion: state.selectedRegion,
       }),

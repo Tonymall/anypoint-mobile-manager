@@ -30,11 +30,9 @@ import {
   useCertificates,
   useTruststores,
   useTlsContexts,
-  useDeleteSecretGroup,
 } from '../../hooks/queries/useSecretManagerQueries';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
-import ConfirmDialog from '../../components/common/ConfirmDialog';
 
 // ── Mask sensitive values ──
 const maskValue = (value?: string): string => {
@@ -184,7 +182,6 @@ const SecretGroupDetailScreen: React.FC = () => {
   const { data: certificates, isLoading: certsLoading } = useCertificates(groupId ?? '');
   const { data: truststores, isLoading: truststoresLoading } = useTruststores(groupId ?? '');
   const { data: tlsContexts, isLoading: tlsLoading } = useTlsContexts(groupId ?? '');
-  const deleteSecretGroup = useDeleteSecretGroup();
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     keystores: false,
@@ -192,7 +189,6 @@ const SecretGroupDetailScreen: React.FC = () => {
     truststores: false,
     tlsContexts: false,
   });
-  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
 
   const toggleSection = useCallback((section: string) => {
     setExpandedSections((prev) => ({
@@ -205,17 +201,6 @@ const SecretGroupDetailScreen: React.FC = () => {
   const certificatesList = useMemo(() => (certificates as any[]) ?? [], [certificates]);
   const truststoresList = useMemo(() => (truststores as any[]) ?? [], [truststores]);
   const tlsContextsList = useMemo(() => (tlsContexts as any[]) ?? [], [tlsContexts]);
-
-  const handleDelete = useCallback(async () => {
-    if (!groupId) return;
-    setDeleteDialogVisible(false);
-    try {
-      await deleteSecretGroup.mutateAsync(groupId);
-      router.back();
-    } catch {
-      setDeleteDialogVisible(true);
-    }
-  }, [groupId, deleteSecretGroup, router]);
 
   const isLoading = groupLoading || keystoresLoading || certsLoading || truststoresLoading || tlsLoading;
 
@@ -446,43 +431,7 @@ const SecretGroupDetailScreen: React.FC = () => {
             )}
           </CollapsibleSection>
         </View>
-
-        {/* ── Delete Action ── */}
-        <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
-          <Pressable
-            onPress={() => setDeleteDialogVisible(true)}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              paddingVertical: 14,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: theme.colors.error + '40',
-            }}
-            android_ripple={{ color: theme.colors.error + '20' }}
-            accessibilityLabel="Delete secret group"
-            accessibilityRole="button"
-          >
-            <Icon name="delete-outline" size={18} color={theme.colors.error} />
-            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.error }}>
-              Delete Secret Group
-            </Text>
-          </Pressable>
-        </View>
       </ScrollView>
-
-      {/* Delete Confirmation */}
-      <ConfirmDialog
-        visible={deleteDialogVisible}
-        title="Delete Secret Group"
-        message={`Are you sure you want to delete "${groupData?.name ?? 'this group'}"? This action cannot be undone and will remove all associated keystores, certificates, truststores, and TLS contexts.`}
-        confirmLabel="Delete"
-        onConfirm={handleDelete}
-        onCancel={() => setDeleteDialogVisible(false)}
-        destructive
-      />
     </View>
   );
 };

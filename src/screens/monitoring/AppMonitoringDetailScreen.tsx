@@ -277,6 +277,20 @@ function extractNumericValue(val: any, fallback: number = 0): number {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function extractOptionalNumericValue(val: any): number | null {
+  if (val == null) return null;
+  if (typeof val === 'number') return Number.isFinite(val) ? val : null;
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    const keys = Object.keys(val);
+    if (keys.length === 0) return null;
+    const sorted = keys.sort((a, b) => Number(b) - Number(a));
+    const latest = val[sorted[0]];
+    return typeof latest === 'number' && Number.isFinite(latest) ? latest : null;
+  }
+  const num = Number(val);
+  return Number.isFinite(num) ? num : null;
+}
+
 function flattenWorkerStats(raw: any): Record<string, any> {
   if (!raw || typeof raw !== 'object') return {};
   const metricKeys = ['cpu', 'cpuPercentageUsed', 'memoryTotalUsed', 'memoryPercentageUsed', 'memoryTotalMax', 'threadCount'];
@@ -548,6 +562,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
   const hasInfluxData = messageCount != null || influxCpu != null || influxMem != null || influxThreadCount != null;
   const hasAnyMetrics = hasRealCpu || hasRealMem || hasRealThreads || hasInfluxData;
   const hasConfiguredSystemData = !hasRealCpu && !hasRealMem && (configuredCpu != null || configuredMemory != null);
+  const configuredCpuProgress = configuredCpu ? 1 : 0;
+  const configuredMemProgress = configuredMemory ? 1 : 0;
 
   // JVM extra metrics
   const jvmGcCollections = influxData?.extraMetrics?.gcCollections ?? jvmMetrics?.gcCollections ?? null;
@@ -678,9 +694,16 @@ const AppMonitoringDetailScreen: React.FC = () => {
             />
           )}
           {!hasRealCpu && configuredCpu && (
-            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
-              Configured CPU limit: {configuredCpu}
-            </Text>
+            <>
+              <ProgressBar
+                progress={configuredCpuProgress}
+                color={anypointColors.secondary}
+                style={styles.healthBar}
+              />
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
+                Configured CPU limit: {configuredCpu}
+              </Text>
+            </>
           )}
 
           {/* Memory Health */}
@@ -701,9 +724,16 @@ const AppMonitoringDetailScreen: React.FC = () => {
             />
           )}
           {!hasRealMem && configuredMemory && (
-            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
-              Configured memory limit: {configuredMemory}
-            </Text>
+            <>
+              <ProgressBar
+                progress={configuredMemProgress}
+                color={anypointColors.secondary}
+                style={styles.healthBar}
+              />
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
+                Configured memory limit: {configuredMemory}
+              </Text>
+            </>
           )}
 
           {/* Application Status */}
@@ -788,7 +818,7 @@ const AppMonitoringDetailScreen: React.FC = () => {
             {(messageCount != null || hasInboundHttpData) && (
               <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: anypointColors.primary + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
                 <Icon name="database" size={10} color={anypointColors.primary} />
-                <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.primary }}>InfluxDB</Text>
+                <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.primary }}>Monitoring API</Text>
               </View>
             )}
           </View>
@@ -862,7 +892,7 @@ const AppMonitoringDetailScreen: React.FC = () => {
             {hasOutboundData && (
               <View style={{ marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: anypointColors.accent + '15', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 }}>
                 <Icon name="database" size={10} color={anypointColors.accent} />
-                <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.accent }}>InfluxDB</Text>
+                <Text style={{ fontSize: 9, fontWeight: '600', color: anypointColors.accent }}>Monitoring API</Text>
               </View>
             )}
           </View>
@@ -1023,7 +1053,7 @@ const AppMonitoringDetailScreen: React.FC = () => {
             <Icon name="information-outline" size={18} color={anypointColors.warning} />
             <View style={{ flex: 1 }}>
               <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, lineHeight: 18 }}>
-                The current monitoring APIs expose app traffic metrics for this environment, but they do not expose per-app JVM heap, thread, or GC metrics.
+                Live per-app JVM, CPU, and memory metrics are not exposed by the monitoring APIs available on this control plane for this environment.
               </Text>
             </View>
           </Card.Content>
@@ -1081,13 +1111,21 @@ const AppMonitoringDetailScreen: React.FC = () => {
               const fallbackMemUsed = numWorkers === 1 ? (memUsedRaw || null) : null;
               const fallbackMemMax = numWorkers === 1 ? (memTotalRaw || configuredMemoryMB || null) : null;
               const fallbackThreads = numWorkers === 1 ? (influxThreadCount ?? threadCount) : null;
-              const wCpu = extractNumericValue(wStats?.cpuPercentageUsed) ?? extractNumericValue(wStats?.cpu) ?? fallbackCpu;
-              const wMem = extractNumericValue(wStats?.memoryPercentageUsed) ?? fallbackMem;
-              const wMemUsed = extractNumericValue(wStats?.memoryTotalUsed) ?? fallbackMemUsed;
-              const wMemMax = extractNumericValue(wStats?.memoryTotalMax) ?? fallbackMemMax;
-              const wMemUsedMB = wMemUsed > 10_000 ? Math.round(wMemUsed / (1024 * 1024)) : wMemUsed;
-              const wMemMaxMB = wMemMax > 10_000 ? Math.round(wMemMax / (1024 * 1024)) : wMemMax;
-              const wThreads = extractNumericValue(wStats?.threadCount) ?? fallbackThreads;
+              const wCpu = extractOptionalNumericValue(wStats?.cpuPercentageUsed) ?? extractOptionalNumericValue(wStats?.cpu) ?? fallbackCpu;
+              const wMem = extractOptionalNumericValue(wStats?.memoryPercentageUsed) ?? fallbackMem;
+              const wMemUsed = extractOptionalNumericValue(wStats?.memoryTotalUsed) ?? fallbackMemUsed;
+              const wMemMax = extractOptionalNumericValue(wStats?.memoryTotalMax) ?? fallbackMemMax;
+              const wMemUsedMB = wMemUsed == null
+                ? null
+                : wMemUsed > 10_000
+                  ? Math.round(wMemUsed / (1024 * 1024))
+                  : wMemUsed;
+              const wMemMaxMB = wMemMax == null
+                ? null
+                : wMemMax > 10_000
+                  ? Math.round(wMemMax / (1024 * 1024))
+                  : wMemMax;
+              const wThreads = extractOptionalNumericValue(wStats?.threadCount) ?? fallbackThreads;
               const wStatus = worker?.status ?? 'UNKNOWN';
               const wRegion = worker?.deployedRegion ?? worker?.region ?? '';
               const wHost = worker?.host ?? '';
@@ -1143,9 +1181,19 @@ const AppMonitoringDetailScreen: React.FC = () => {
                       />
                     </View>
                   ) : configuredCpu ? (
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>
-                      Configured CPU limit: {configuredCpu}
-                    </Text>
+                    <View style={{ marginBottom: 6 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>CPU</Text>
+                        <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                          {configuredCpu}
+                        </Text>
+                      </View>
+                      <ProgressBar
+                        progress={1}
+                        color={anypointColors.secondary}
+                        style={styles.healthBar}
+                      />
+                    </View>
                   ) : null}
 
                   {hasLiveWorkerMem ? (
@@ -1163,9 +1211,19 @@ const AppMonitoringDetailScreen: React.FC = () => {
                       />
                     </View>
                   ) : configuredMemory ? (
-                    <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 6 }}>
-                      Configured memory limit: {configuredMemory}
-                    </Text>
+                    <View style={{ marginBottom: 6 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>Memory</Text>
+                        <Text variant="labelSmall" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                          {configuredMemory}
+                        </Text>
+                      </View>
+                      <ProgressBar
+                        progress={1}
+                        color={anypointColors.secondary}
+                        style={styles.healthBar}
+                      />
+                    </View>
                   ) : null}
 
                   {wThreads != null && wThreads > 0 && (

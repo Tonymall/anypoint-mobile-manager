@@ -25,6 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QueryProvider } from '../src/providers/QueryProvider';
 import SplashScreen from '../src/components/common/SplashScreen';
 import ErrorBoundary from '../src/components/common/ErrorBoundary';
+import AppErrorDialog from '../src/components/common/AppErrorDialog';
 import { setupNotificationChannel } from '../src/services/notificationService';
 
 // Keep the native splash screen visible while we load
@@ -111,6 +112,7 @@ export default function RootLayout() {
       <QueryProvider>
         <PaperProvider theme={theme}>
           <StatusBar style={isDark ? 'light' : 'dark'} />
+          <AppErrorDialog />
           <ErrorBoundary>
             <View style={{ flex: 1 }}>
               <Slot />

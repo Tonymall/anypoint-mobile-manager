@@ -114,7 +114,7 @@ export function useDeleteSecretGroup() {
     mutationFn: (groupId: string) =>
       secretManagerService.deleteSecretGroup(orgId!, envId!, groupId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: secretKeys.groups() });
+      queryClient.invalidateQueries({ queryKey: secretKeys.all() });
     },
   });
 }

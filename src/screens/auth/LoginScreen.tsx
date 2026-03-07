@@ -17,7 +17,6 @@ import {
   Text,
   TextInput,
   Button,
-  Snackbar,
   useTheme,
   ActivityIndicator,
   Divider,
@@ -37,6 +36,7 @@ import AnimatedBackground from '../../components/common/AnimatedBackground';
 import { hapticSuccess, hapticError } from '../../utils/haptics';
 import Constants from 'expo-constants';
 import logger from '../../utils/logger';
+import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
@@ -68,12 +68,11 @@ const LoginScreen: React.FC = () => {
 
   // --- UI State ---
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [snackbarVisible, setSnackbarVisible] = useState<boolean>(false);
 
   // --- Store ---
   const loginPending = useAuthStore((state) => state.loginPending);
   const setIsLoadingStore = useAuthStore((state) => state.setIsLoading);
+  const showError = useErrorDialogStore((state) => state.showError);
 
   const loginInProgressRef = useRef(false);
 
@@ -89,8 +88,10 @@ const LoginScreen: React.FC = () => {
 
   const handleLogin = useCallback(async () => {
     if (!username.trim() || !password.trim()) {
-      setErrorMessage('Please enter both username and password.');
-      setSnackbarVisible(true);
+      showError({
+        title: 'Missing credentials',
+        message: 'Please enter both username and password.',
+      });
       return;
     }
 
@@ -102,7 +103,6 @@ const LoginScreen: React.FC = () => {
 
     setIsLoading(true);
     setIsLoadingStore(true);
-    setErrorMessage('');
 
     const regionUrl = getRegionUrl(selectedRegion);
 
@@ -124,9 +124,11 @@ const LoginScreen: React.FC = () => {
       // we can't show the MFA dialog (no verification context). Fail cleanly.
       if (!tokens.accessToken) {
         logger.warn('[Login] No access_token and no MFA context — cannot proceed');
-        setErrorMessage('Authentication returned an unexpected response. Please try again.');
+        showError({
+          title: 'Authentication failed',
+          message: 'Authentication returned an unexpected response. Please try again.',
+        });
         hapticError();
-        setSnackbarVisible(true);
         return;
       }
 
@@ -144,9 +146,12 @@ const LoginScreen: React.FC = () => {
         // fail cleanly and let the user retry the full login flow.
         if (meError?.response?.status === 401) {
           logger.warn('[Login] getCurrentUser 401 — token unusable, no MFA context');
-          setErrorMessage('Session token was rejected. Please sign in again.');
+          showError({
+            title: 'Session rejected',
+            message: 'Session token was rejected. Please sign in again.',
+            details: 'HTTP 401 while loading the authenticated profile.',
+          });
           hapticError();
-          setSnackbarVisible(true);
           return;
         }
         throw meError;
@@ -208,23 +213,22 @@ const LoginScreen: React.FC = () => {
         error?.response?.data?.message ??
         error?.message ??
         'Authentication failed. Please check your credentials and try again.';
-      setErrorMessage(message);
+      showError({
+        title: 'Login failed',
+        message,
+        details: status ? `HTTP ${status}` : undefined,
+      });
       hapticError();
-      setSnackbarVisible(true);
     } finally {
       setIsLoading(false);
       setIsLoadingStore(false);
       loginInProgressRef.current = false;
     }
-  }, [username, password, selectedRegion, loginPending, setIsLoadingStore, router]);
+  }, [username, password, selectedRegion, loginPending, setIsLoadingStore, router, showError]);
 
   const handleSSOLogin = useCallback(() => {
     router.push('/(auth)/sso');
   }, [router]);
-
-  const dismissSnackbar = useCallback(() => {
-    setSnackbarVisible(false);
-  }, []);
 
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
   const currentRegion = getRegionById(selectedRegion);
@@ -374,7 +378,7 @@ const LoginScreen: React.FC = () => {
                   {CONTROL_PLANE_REGIONS.map((region) => (
                     <Menu.Item
                       key={region.id}
-                      title={`${region.label} — ${region.notes}`}
+                      title={`${region.label} - ${region.notes}`}
                       leadingIcon={
                         selectedRegion === region.id ? 'check-circle' : 'earth'
                       }
@@ -506,16 +510,6 @@ const LoginScreen: React.FC = () => {
         </View>
       )}
 
-      {/* Error Snackbar */}
-      <Snackbar
-        visible={snackbarVisible}
-        onDismiss={dismissSnackbar}
-        duration={4000}
-        action={{ label: 'Dismiss', onPress: dismissSnackbar }}
-        style={styles.snackbar}
-      >
-        {errorMessage}
-      </Snackbar>
     </KeyboardAvoidingView>
   );
 };
@@ -679,9 +673,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  snackbar: {
-    marginBottom: 16,
   },
 });
 

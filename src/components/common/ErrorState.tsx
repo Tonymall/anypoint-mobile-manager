@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Platform } from 'react-native';
 import { Text, Button, useTheme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 interface ErrorStateProps {
   message: string;
@@ -16,6 +17,7 @@ const ErrorState: React.FC<ErrorStateProps> = ({
 }) => {
   const theme = useTheme();
   const [showDetails, setShowDetails] = useState(false);
+  const showError = useErrorDialogStore((state) => state.showError);
 
   // Split message into summary and debug details (separated by \n[Debug:)
   const debugSplit = message.indexOf('\n[Debug:');
@@ -96,15 +98,48 @@ const ErrorState: React.FC<ErrorStateProps> = ({
       )}
 
       {onRetry && (
+        <View style={styles.buttonRow}>
+          <Button
+            mode="outlined"
+            onPress={() =>
+              showError({
+                title: 'Request failed',
+                message: summary,
+                details: debugInfo ?? statusHint ?? undefined,
+              })
+            }
+            style={styles.button}
+            icon="bug-outline"
+          >
+            Report Bug
+          </Button>
+          <Button
+            mode="contained"
+            onPress={onRetry}
+            style={styles.button}
+            icon="refresh"
+            accessibilityLabel="Retry loading"
+            accessibilityRole="button"
+          >
+            {retryLabel}
+          </Button>
+        </View>
+      )}
+
+      {!onRetry && (
         <Button
-          mode="contained"
-          onPress={onRetry}
+          mode="outlined"
+          onPress={() =>
+            showError({
+              title: 'Request failed',
+              message: summary,
+              details: debugInfo ?? statusHint ?? undefined,
+            })
+          }
           style={styles.button}
-          icon="refresh"
-          accessibilityLabel="Retry loading"
-          accessibilityRole="button"
+          icon="bug-outline"
         >
-          {retryLabel}
+          Report Bug
         </Button>
       )}
     </View>
@@ -149,6 +184,10 @@ const styles = StyleSheet.create({
   },
   button: {
     borderRadius: 20,
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: 12,
   },
 });
 

@@ -657,7 +657,7 @@ const AppHealthCard: React.FC<AppHealthCardProps> = ({ app, metrics, detailLoadi
           <View style={[styles.monitoringSection, { flexDirection: 'row', alignItems: 'flex-start', gap: 6 }]}>
             <Icon source="information-outline" size={13} color={theme.colors.onSurfaceVariant} />
             <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 11, flex: 1, lineHeight: 15 }}>
-              App-level metrics (inbound, outbound, messages) require Anypoint Monitoring with an active InfluxDB datasource or Observability API access.
+              This application is not currently exposing inbound or outbound traffic metrics through the monitoring APIs available on this control plane.
             </Text>
           </View>
         ) : null}

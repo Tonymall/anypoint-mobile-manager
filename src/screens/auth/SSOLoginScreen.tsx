@@ -15,7 +15,6 @@ import {
   useTheme,
   Appbar,
   ActivityIndicator,
-  Snackbar,
 } from 'react-native-paper';
 import { WebView, type WebViewNavigation, type WebViewMessageEvent } from 'react-native-webview';
 import { useRouter } from 'expo-router';
@@ -25,6 +24,7 @@ import { getBaseUrl, setAuthHeader, storeTokens, enableCookieSessionAuth } from 
 import * as authService from '../../services/authService';
 import type { AuthTokens } from '../../types';
 import logger from '../../utils/logger';
+import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 const INJECTED_JS = `
   (function() {
@@ -227,11 +227,10 @@ const SSOLoginScreen: React.FC = () => {
 
   const loginPending = useAuthStore((state) => state.loginPending);
   const setOrganizations = useAuthStore((state) => state.setOrganizations);
+  const showError = useErrorDialogStore((state) => state.showError);
 
   const [isExtracting, setIsExtracting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [snackbarVisible, setSnackbarVisible] = useState(false);
-  const [webViewKey, setWebViewKey] = useState(1);
+  const [webViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
   const hasPrefilledRef = useRef(false);
@@ -366,14 +365,16 @@ const SSOLoginScreen: React.FC = () => {
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Authentication failed:', error?.message);
-        setErrorMessage(error?.message ?? 'Authentication failed. Please try again.');
-        setSnackbarVisible(true);
+        showError({
+          title: 'Browser authentication failed',
+          message: error?.message ?? 'Authentication failed. Please try again.',
+        });
         hasInjectedRef.current = false;
         retryCountRef.current = 0;
         setIsExtracting(false);
       }
     },
-    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, silentAuthJs],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, showError, silentAuthJs],
   );
 
   const completeSessionOnly = useCallback(
@@ -402,14 +403,16 @@ const SSOLoginScreen: React.FC = () => {
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Session-cookie auth failed:', error?.message);
-        setErrorMessage('Authenticated browser session found, but native session setup failed. Please try again.');
-        setSnackbarVisible(true);
+        showError({
+          title: 'Session setup failed',
+          message: 'Authenticated browser session found, but native session setup failed. Please try again.',
+        });
         hasInjectedRef.current = false;
         retryCountRef.current = 0;
         setIsExtracting(false);
       }
     },
-    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, silentAuthJs],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, showError],
   );
 
   const completeWithTokenOnly = useCallback(
@@ -440,14 +443,16 @@ const SSOLoginScreen: React.FC = () => {
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Token-only auth failed:', error?.message);
-        setErrorMessage('Authentication failed. Please try again.');
-        setSnackbarVisible(true);
+        showError({
+          title: 'Authentication failed',
+          message: 'Authentication failed. Please try again.',
+        });
         hasInjectedRef.current = false;
         retryCountRef.current = 0;
         setIsExtracting(false);
       }
     },
-    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, silentAuthJs],
+    [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, showError],
   );
 
   const prefillCredentialsAndSubmit = useCallback(() => {
@@ -557,8 +562,10 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (url.includes('/login/signin?errorMessage=')) {
-          setErrorMessage('MFA verification could not be completed. Please try again.');
-          setSnackbarVisible(true);
+          showError({
+            title: 'MFA verification failed',
+            message: 'MFA verification could not be completed. Please try again.',
+          });
           authService.clearPendingMFAChallenge();
           return;
         }
@@ -608,7 +615,7 @@ const SSOLoginScreen: React.FC = () => {
         }, 2500);
       }
     },
-    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, silentAuthJs],
+    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, showError, silentAuthJs],
   );
 
   const handleWebViewMessage = useCallback(
@@ -663,8 +670,10 @@ const SSOLoginScreen: React.FC = () => {
                 }
               }, 2000);
             } else {
-              setErrorMessage('Could not extract session data. Please try signing in again.');
-              setSnackbarVisible(true);
+              showError({
+                title: 'Session extraction failed',
+                message: 'Could not extract session data. Please try signing in again.',
+              });
               hasInjectedRef.current = false;
               retryCountRef.current = 0;
               setIsExtracting(false);
@@ -678,7 +687,7 @@ const SSOLoginScreen: React.FC = () => {
         logger.error('[SSO] Failed to parse WebView message:', e?.message);
       }
     },
-    [completeAuthentication, completeSessionOnly, completeWithTokenOnly],
+    [completeAuthentication, completeSessionOnly, completeWithTokenOnly, isMfaContinuation, showError, silentAuthJs],
   );
 
   const handleBack = useCallback(() => {
@@ -687,20 +696,6 @@ const SSOLoginScreen: React.FC = () => {
     }
     router.back();
   }, [isMfaContinuation, router]);
-
-  const handleRetry = useCallback(() => {
-    setErrorMessage('');
-    setSnackbarVisible(false);
-    setIsExtracting(false);
-    hasInjectedRef.current = false;
-    hasPrefilledRef.current = false;
-    retryCountRef.current = 0;
-    setWebViewKey((k) => k + 1);
-  }, []);
-
-  const dismissSnackbar = useCallback(() => {
-    setSnackbarVisible(false);
-  }, []);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.colors.background }]}> 
@@ -750,10 +745,10 @@ const SSOLoginScreen: React.FC = () => {
             </View>
           )}
           onError={() => {
-            setErrorMessage(
-              'Failed to load the sign-in page. Please check your internet connection.',
-            );
-            setSnackbarVisible(true);
+            showError({
+              title: 'Failed to load sign-in page',
+              message: 'Failed to load the sign-in page. Please check your internet connection.',
+            });
           }}
           accessibilityLabel="Anypoint Platform sign-in page"
         />
@@ -790,18 +785,6 @@ const SSOLoginScreen: React.FC = () => {
         )}
       </View>
 
-      <Snackbar
-        visible={snackbarVisible}
-        onDismiss={dismissSnackbar}
-        duration={6000}
-        action={{
-          label: 'Retry',
-          onPress: handleRetry,
-        }}
-        style={styles.snackbar}
-      >
-        {errorMessage}
-      </Snackbar>
     </View>
   );
 };
@@ -838,9 +821,6 @@ const styles = StyleSheet.create({
   extractionSubtitle: {
     marginTop: 8,
     textAlign: 'center',
-  },
-  snackbar: {
-    marginBottom: 16,
   },
 });
 
