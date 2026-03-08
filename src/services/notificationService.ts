@@ -63,6 +63,15 @@ async function getNotificationsModule(): Promise<NotificationsModule | null> {
   return notificationsModulePromise;
 }
 
+async function ensureNotificationPermission(
+  Notifications: NotificationsModule,
+): Promise<boolean> {
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  if (existing === 'granted') return true;
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === 'granted';
+}
+
 /**
  * Set up the Android notification channel.
  * On Android 8+ (API 26+), notifications must be assigned to a channel.
@@ -90,10 +99,7 @@ export async function requestPermissions(): Promise<boolean> {
 
   // Ensure Android channel exists before requesting permissions
   await setupNotificationChannel();
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  if (existing === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
+  return ensureNotificationPermission(Notifications);
 }
 
 /**
@@ -110,15 +116,28 @@ export async function scheduleLocalNotification(
   if (!enabled) return '';
   const Notifications = await getNotificationsModule();
   if (!Notifications) return '';
+  const permissionGranted = await ensureNotificationPermission(Notifications);
+  if (!permissionGranted) return '';
+
+  const content: {
+    title: string;
+    body: string;
+    data?: Record<string, unknown>;
+    sound: 'default';
+    channelId?: string;
+  } = {
+    title,
+    body,
+    sound: 'default',
+    ...(Platform.OS === 'android' ? { channelId: 'muleops-default' } : {}),
+  };
+
+  if (data && Object.keys(data).length > 0) {
+    content.data = data;
+  }
 
   return Notifications.scheduleNotificationAsync({
-    content: {
-      title,
-      body,
-      data,
-      sound: 'default',
-      ...(Platform.OS === 'android' ? { channelId: 'muleops-default' } : {}),
-    },
+    content,
     trigger: null, // Immediately
   });
 }

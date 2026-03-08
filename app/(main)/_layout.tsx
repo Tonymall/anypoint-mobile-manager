@@ -39,6 +39,12 @@ const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: str
   settings: { title: 'Settings', icon: 'cog-outline', iconFocused: 'cog' },
 };
 
+const HIDDEN_TAB_PARENTS: Record<string, keyof typeof TAB_ITEMS> = {
+  admin: 'settings',
+  terms: 'settings',
+  workers: 'runtime',
+};
+
 // â”€â”€ Custom Animated Tab Bar â€” 2026 Minimal Design â”€â”€
 function AnimatedTabBar({ state, _descriptors, navigation }: any) {
   const theme = useTheme();
@@ -47,15 +53,21 @@ function AnimatedTabBar({ state, _descriptors, navigation }: any) {
   const isPhoneLandscape = screenWidth > screenHeight && Math.min(screenWidth, screenHeight) < 768;
   const unreadCount = useNotificationStore((s) => s.unreadCount);
 
-  const visibleRoutes = state.routes.filter(
-    (route: any) => TAB_ITEMS[route.name] !== undefined,
+  const visibleRoutes = React.useMemo(
+    () => state.routes.filter((route: any) => TAB_ITEMS[route.name] !== undefined),
+    [state.routes],
   );
   const visibleCount = visibleRoutes.length;
   const tabWidth = screenWidth / visibleCount;
 
   const activeRoute = state.routes[state.index];
-  const activeVisibleIndex = visibleRoutes.findIndex(
-    (route: any) => route.key === activeRoute?.key,
+  const activeTabName = React.useMemo(
+    () => (TAB_ITEMS[activeRoute?.name] ? activeRoute.name : HIDDEN_TAB_PARENTS[activeRoute?.name] ?? 'index'),
+    [activeRoute?.name],
+  );
+  const activeVisibleIndex = React.useMemo(
+    () => visibleRoutes.findIndex((route: any) => route.name === activeTabName),
+    [activeTabName, visibleRoutes],
   );
   const safeIndex = activeVisibleIndex >= 0 ? activeVisibleIndex : 0;
 
@@ -63,7 +75,7 @@ function AnimatedTabBar({ state, _descriptors, navigation }: any) {
 
   useEffect(() => {
     indicatorX.value = withTiming(safeIndex * tabWidth, {
-      duration: 300,
+      duration: 220,
       easing: Easing.bezier(0.33, 0, 0, 1), // iOS-like spring curve
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- indicatorX is a Reanimated SharedValue (stable ref)
@@ -76,6 +88,20 @@ function AnimatedTabBar({ state, _descriptors, navigation }: any) {
 
   const bottomPad = Math.max(insets.bottom, 8);
   const barHeight = isPhoneLandscape ? (40 + bottomPad) : (60 + bottomPad);
+  const indicatorWidth = Math.max(60, Math.min(tabWidth * 0.78, 96));
+  const iconSize = isPhoneLandscape ? 20 : 21;
+
+  const handleTabPress = React.useCallback((route: any, isFocused: boolean) => {
+    requestAnimationFrame(() => hapticLight());
+    const event = navigation.emit({
+      type: 'tabPress',
+      target: route.key,
+      canPreventDefault: true,
+    });
+    if (!isFocused && !event.defaultPrevented) {
+      navigation.jumpTo(route.name);
+    }
+  }, [navigation]);
 
   return (
     <View
@@ -91,11 +117,20 @@ function AnimatedTabBar({ state, _descriptors, navigation }: any) {
     >
       {/* Sliding pill indicator */}
       <Animated.View style={[styles.indicator, indicatorStyle]}>
-        <View style={[styles.indicatorPill, { backgroundColor: theme.colors.primary + '12' }]} />
+        <View
+          style={[
+            styles.indicatorPill,
+            {
+              width: indicatorWidth,
+              backgroundColor: theme.colors.primary + '12',
+              borderColor: theme.colors.primary + '18',
+            },
+          ]}
+        />
       </Animated.View>
       {/* Accent line at top of active tab */}
       <Animated.View style={[styles.topLine, indicatorStyle]}>
-        <View style={[styles.topLineDot, { backgroundColor: theme.colors.primary }]} />
+        <View style={[styles.topLineDot, { width: indicatorWidth - 18, backgroundColor: theme.colors.primary }]} />
       </Animated.View>
 
       {/* Tab buttons */}
@@ -106,22 +141,10 @@ function AnimatedTabBar({ state, _descriptors, navigation }: any) {
           ? (tabDef?.iconFocused ?? tabDef?.icon ?? 'circle')
           : (tabDef?.icon ?? 'circle');
 
-        const onPress = () => {
-          hapticLight();
-          const event = navigation.emit({
-            type: 'tabPress',
-            target: route.key,
-            canPreventDefault: true,
-          });
-          if (!isFocused && !event.defaultPrevented) {
-            navigation.navigate(route.name);
-          }
-        };
-
         return (
           <TouchableOpacity
             key={route.key}
-            onPress={onPress}
+            onPress={() => handleTabPress(route, isFocused)}
             activeOpacity={0.65}
             style={[styles.tabButton, isPhoneLandscape && { paddingTop: 4 }]}
             accessibilityLabel={`${tabDef?.title ?? route.name} tab`}
@@ -130,7 +153,7 @@ function AnimatedTabBar({ state, _descriptors, navigation }: any) {
           >
             <Icon
               name={iconName}
-              size={isPhoneLandscape ? 20 : 21}
+              size={iconSize}
               color={isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant}
             />
             {route.name === 'alerts' && unreadCount > 0 && (
@@ -232,8 +255,8 @@ const styles = StyleSheet.create({
     elevation: 0,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
   },
   indicator: {
     position: 'absolute',
@@ -243,9 +266,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   indicatorPill: {
-    width: '85%',
     height: '100%',
     borderRadius: 16,
+    borderWidth: 1,
   },
   topLine: {
     position: 'absolute',
@@ -254,7 +277,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   topLineDot: {
-    width: '56%',
     height: 2.5,
     borderBottomLeftRadius: 2,
     borderBottomRightRadius: 2,
@@ -263,13 +285,15 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingTop: 10,
+    paddingTop: 8,
+    paddingHorizontal: 8,
     minHeight: 44,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 10.5,
     marginTop: 4,
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
+    textAlign: 'center',
   },
 });
 

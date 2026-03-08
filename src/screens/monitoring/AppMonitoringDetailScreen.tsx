@@ -562,9 +562,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
   const hasInfluxData = messageCount != null || influxCpu != null || influxMem != null || influxThreadCount != null;
   const hasAnyMetrics = hasRealCpu || hasRealMem || hasRealThreads || hasInfluxData;
   const hasConfiguredSystemData = !hasRealCpu && !hasRealMem && (configuredCpu != null || configuredMemory != null);
-  const configuredCpuProgress = configuredCpu ? 1 : 0;
-  const configuredMemProgress = configuredMemory ? 1 : 0;
-
   // JVM extra metrics
   const jvmGcCollections = influxData?.extraMetrics?.gcCollections ?? jvmMetrics?.gcCollections ?? null;
   const jvmGcTime = influxData?.extraMetrics?.gcTime ?? jvmMetrics?.gcTime ?? null;
@@ -694,16 +691,9 @@ const AppMonitoringDetailScreen: React.FC = () => {
             />
           )}
           {!hasRealCpu && configuredCpu && (
-            <>
-              <ProgressBar
-                progress={configuredCpuProgress}
-                color={anypointColors.secondary}
-                style={styles.healthBar}
-              />
-              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
-                Configured CPU limit: {configuredCpu}
-              </Text>
-            </>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
+              Configured CPU limit: {configuredCpu}
+            </Text>
           )}
 
           {/* Memory Health */}
@@ -724,16 +714,9 @@ const AppMonitoringDetailScreen: React.FC = () => {
             />
           )}
           {!hasRealMem && configuredMemory && (
-            <>
-              <ProgressBar
-                progress={configuredMemProgress}
-                color={anypointColors.secondary}
-                style={styles.healthBar}
-              />
-              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
-                Configured memory limit: {configuredMemory}
-              </Text>
-            </>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }}>
+              Configured memory limit: {configuredMemory}
+            </Text>
           )}
 
           {/* Application Status */}
@@ -1130,8 +1113,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
               const wRegion = worker?.deployedRegion ?? worker?.region ?? '';
               const wHost = worker?.host ?? '';
               const wPort = worker?.port ?? '';
-              const hasLiveWorkerCpu = wCpu != null;
-              const hasLiveWorkerMem = wMem != null;
+              const hasLiveWorkerCpu = hasRealCpu && wCpu != null;
+              const hasLiveWorkerMem = hasRealMem && wMem != null;
 
               return (
                 <View
@@ -1188,11 +1171,9 @@ const AppMonitoringDetailScreen: React.FC = () => {
                           {configuredCpu}
                         </Text>
                       </View>
-                      <ProgressBar
-                        progress={1}
-                        color={anypointColors.secondary}
-                        style={styles.healthBar}
-                      />
+                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                        Configured worker CPU limit
+                      </Text>
                     </View>
                   ) : null}
 
@@ -1218,11 +1199,9 @@ const AppMonitoringDetailScreen: React.FC = () => {
                           {configuredMemory}
                         </Text>
                       </View>
-                      <ProgressBar
-                        progress={1}
-                        color={anypointColors.secondary}
-                        style={styles.healthBar}
-                      />
+                      <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                        Configured worker memory limit
+                      </Text>
                     </View>
                   ) : null}
 

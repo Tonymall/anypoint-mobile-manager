@@ -813,15 +813,21 @@ export async function getAppLogs(
       _cachedCh1Domain = domain;
       logger.log(`[getAppLogs] CH1 deployment discovered: ${deploymentId}`);
 
-      // Step 2: Get logs using POST (supports date range + all priorities)
-      // Fall back to GET with date params if POST fails
+      // Step 2: Match the real browser flow first.
       try {
-        return await api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
-      } catch (_) {
-        return api.get(
+        return await api.get(
           `${CLOUDHUB_BASE}/applications/${domain}/deployments/${deploymentId}/logs`,
-          { params: { startDate: startMs, endDate: endMs, limit, limitMsgLen: 5000 } },
+          { params: { tail: true, limitMsgLen: 5000, limit } },
         );
+      } catch (_) {
+        try {
+          return await api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
+        } catch (_) {
+          return api.get(
+            `${CLOUDHUB_BASE}/applications/${domain}/deployments/${deploymentId}/logs`,
+            { params: { startDate: startMs, endDate: endMs, limit, limitMsgLen: 5000 } },
+          );
+        }
       }
     }},
     // Fallback: try with domain as deployment ID (older API pattern)
@@ -1202,12 +1208,19 @@ async function _getLogsByStrategy(
       }
       // Prefer POST /logs (supports date range + all priorities) — fall back to GET with date params
       try {
-        return await api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
-      } catch (_) {
-        return api.get(
+        return await api.get(
           `${CLOUDHUB_BASE}/applications/${domain}/deployments/${_cachedCh1DeploymentId}/logs`,
-          { params: { startDate: getParams.startDate, endDate: getParams.endDate, limit: getParams.limit ?? 200, limitMsgLen: 5000 } },
+          { params: { tail: true, limitMsgLen: 5000, limit: getParams.limit ?? 200 } },
         );
+      } catch (_) {
+        try {
+          return await api.post(`${CLOUDHUB_BASE}/applications/${domain}/logs`, postBodyNoDeplId);
+        } catch (_) {
+          return api.get(
+            `${CLOUDHUB_BASE}/applications/${domain}/deployments/${_cachedCh1DeploymentId}/logs`,
+            { params: { startDate: getParams.startDate, endDate: getParams.endDate, limit: getParams.limit ?? 200, limitMsgLen: 5000 } },
+          );
+        }
       }
     }
     case 'get-deploy-v2':
@@ -1793,6 +1806,67 @@ async function discoverInfluxDatasource(): Promise<boolean> {
   if (_influxAvailable !== null) return _influxAvailable;
 
   let _influxTriedCount = 0;
+  let datasources: any[] = [];
+  const testedDatasourceIds = new Set<string>();
+
+  const verifyInfluxDatasource = async (ds: any): Promise<boolean> => {
+    const dsId = ds?.id;
+    if (dsId == null) return false;
+
+    const dsKey = String(dsId);
+    if (testedDatasourceIds.has(dsKey)) return false;
+    testedDatasourceIds.add(dsKey);
+    _influxTriedCount++;
+
+    const rawDbName = ds?.database ?? ds?.jsonData?.database ?? '';
+    const dbName = rawDbName.startsWith('"') ? rawDbName : `"${rawDbName}"`;
+
+    const orgId = getOrgId();
+    const envId = getEnvId();
+    const endMs = Date.now();
+    const startMs = endMs - (15 * 60 * 1000);
+    const testQ = orgId && envId
+      ? `SELECT sum("messageCount") FROM "app_stats" WHERE "org_id" = '${orgId}' AND "env_id" = '${envId}' AND time >= ${startMs}ms and time <= ${endMs}ms GROUP BY time(5m) fill(0)`
+      : 'SHOW MEASUREMENTS LIMIT 5';
+
+    try {
+      const { data: testResult } = await api.get(
+        `/monitoring/api/visualizer/api/datasources/proxy/${dsId}/query`,
+        { params: { db: dbName, q: testQ, epoch: 'ms' } },
+      );
+
+      if (testResult?.results) {
+        _influxDatasourceId = dsId;
+        _influxDbName = dbName;
+        _influxAvailable = true;
+        const measurements = testResult.results?.[0]?.series?.[0]?.values?.map((v: any) => v[0]) ?? [];
+        logger.log(`[Monitoring] InfluxDB datasource VERIFIED: id=${dsId}, db=${dbName}, measurements=[${measurements.slice(0, 5).join(', ')}]`);
+        return true;
+      }
+    } catch (testErr: any) {
+      const errBody = testErr?.response?.data ? (typeof testErr.response.data === 'string' ? testErr.response.data : JSON.stringify(testErr.response.data)).slice(0, 200) : '';
+      logger.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}${errBody ? ' body=' + errBody : ''}`);
+      if (rawDbName && !rawDbName.startsWith('"')) {
+        try {
+          const { data: testResult2 } = await api.get(
+            `/monitoring/api/visualizer/api/datasources/proxy/${dsId}/query`,
+            { params: { db: rawDbName, q: testQ, epoch: 'ms' } },
+          );
+          if (testResult2?.results) {
+            _influxDatasourceId = dsId;
+            _influxDbName = rawDbName;
+            _influxAvailable = true;
+            logger.log(`[Monitoring] InfluxDB datasource VERIFIED (unquoted): id=${dsId}, db=${rawDbName}`);
+            return true;
+          }
+        } catch (_) {
+          // continue
+        }
+      }
+    }
+
+    return false;
+  };
 
   // ── Step 1: List all datasources and find InfluxDB ones ──
   try {
@@ -1800,73 +1874,45 @@ async function discoverInfluxDatasource(): Promise<boolean> {
     logger.log(`[Monitoring] Datasources API returned: ${Array.isArray(data) ? data.length + ' entries' : typeof data}`);
 
     if (Array.isArray(data) && data.length > 0) {
+      datasources = data;
       // Log datasource summary: total count and all types
       logger.log(`[Monitoring] Datasource list: ${data.length} total, types: ${[...new Set(data.map((d: any) => d.type))].join(', ')}`);
       // Log all datasources for debug
       for (const ds of data) {
         logger.log(`[Monitoring] Datasource: id=${ds.id}, type=${ds.type}, name=${ds.name}, db=${ds.database ?? ds.jsonData?.database ?? 'unknown'}`);
       }
-
-      // Find ALL InfluxDB datasources
-      const influxDatasources = data.filter((ds: any) =>
-        ds.type === 'influxdb' || ds.typeName === 'InfluxDB'
-      );
-
-      if (influxDatasources.length > 0) {
-        logger.log(`[Monitoring] Found ${influxDatasources.length} InfluxDB datasource(s), testing each...`);
-
-        // Test each datasource to find one that works
-        for (const ds of influxDatasources) {
-          _influxTriedCount++;
-          const dsId = ds.id;
-          const rawDbName = ds.database ?? ds.jsonData?.database ?? '';
-
-          // The database name in the API params needs quotes: "dias_mt_1_prod"
-          // Some datasources may already have quotes, some may not
-          const dbName = rawDbName.startsWith('"') ? rawDbName : `"${rawDbName}"`;
-
-          try {
-            const testQ = 'SHOW MEASUREMENTS LIMIT 5';
-            const { data: testResult } = await api.get(
-              `/monitoring/api/visualizer/api/datasources/proxy/${dsId}/query`,
-              { params: { db: dbName, q: testQ, epoch: 'ms' } },
-            );
-
-            if (testResult?.results) {
-              _influxDatasourceId = dsId;
-              _influxDbName = dbName;
-              _influxAvailable = true;
-              const measurements = testResult.results?.[0]?.series?.[0]?.values?.map((v: any) => v[0]) ?? [];
-              logger.log(`[Monitoring] InfluxDB datasource VERIFIED: id=${dsId}, db=${dbName}, measurements=[${measurements.slice(0, 5).join(', ')}]`);
-              return true;
-            }
-          } catch (testErr: any) {
-            const errBody = testErr?.response?.data ? (typeof testErr.response.data === 'string' ? testErr.response.data : JSON.stringify(testErr.response.data)).slice(0, 200) : '';
-            logger.log(`[Monitoring] Datasource ${dsId} (db=${dbName}) test failed: ${testErr?.response?.status ?? testErr?.message}${errBody ? ' body=' + errBody : ''}`);
-            // Also try without quotes
-            if (rawDbName && !rawDbName.startsWith('"')) {
-              try {
-                const { data: testResult2 } = await api.get(
-                  `/monitoring/api/visualizer/api/datasources/proxy/${dsId}/query`,
-                  { params: { db: rawDbName, q: 'SHOW MEASUREMENTS LIMIT 5', epoch: 'ms' } },
-                );
-                if (testResult2?.results) {
-                  _influxDatasourceId = dsId;
-                  _influxDbName = rawDbName;
-                  _influxAvailable = true;
-                  logger.log(`[Monitoring] InfluxDB datasource VERIFIED (unquoted): id=${dsId}, db=${rawDbName}`);
-                  return true;
-                }
-              } catch (_) {
-                // continue
-              }
-            }
-          }
-        }
-      }
     }
   } catch (err: any) {
     logger.log(`[Monitoring] Datasource list API failed: ${err?.response?.status ?? err?.message}`);
+  }
+
+  if (datasources.length === 0) {
+    try {
+      const { data } = await api.get('/monitoring/api/visualizer/api/bootdata');
+      const bootDatasources = data?.Settings?.datasources ?? data?.settings?.datasources;
+      if (bootDatasources && typeof bootDatasources === 'object') {
+        datasources = Object.values(bootDatasources);
+        logger.log(`[Monitoring] Bootdata returned ${datasources.length} datasource entries`);
+      }
+    } catch (err: any) {
+      logger.log(`[Monitoring] Bootdata datasource fallback failed: ${err?.response?.status ?? err?.message}`);
+    }
+  }
+
+  const influxDatasources = datasources.filter((ds: any) =>
+    ds?.type === 'influxdb'
+    || ds?.typeName === 'InfluxDB'
+    || ds?.meta?.id === 'influxdb'
+    || ds?.meta?.name === 'InfluxDB'
+  );
+
+  if (influxDatasources.length > 0) {
+    logger.log(`[Monitoring] Found ${influxDatasources.length} InfluxDB datasource(s), testing each...`);
+    for (const ds of influxDatasources) {
+      if (await verifyInfluxDatasource(ds)) {
+        return true;
+      }
+    }
   }
 
   _influxAvailable = false;

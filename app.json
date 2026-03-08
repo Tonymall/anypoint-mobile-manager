@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MuleOps",
+    "name": "MuleOps Beta",
     "slug": "muleops",
     "version": "1.0.0",
     "orientation": "default",
@@ -8,9 +8,7 @@
     "userInterfaceStyle": "automatic",
     "scheme": "muleops",
     "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0A1628"
+      "backgroundColor": "#091428"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -58,6 +56,7 @@
       "typedRoutes": true
     },
     "extra": {
+      "releaseStage": "beta",
       "router": {},
       "eas": {
         "projectId": "d66e51ed-3908-4f1e-a8df-64216e724408"

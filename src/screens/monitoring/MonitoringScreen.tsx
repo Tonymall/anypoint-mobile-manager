@@ -1,7 +1,6 @@
 // ============================================================
 // Monitoring Screen - Application Health Overview
-// Fetches individual app details AND dashboardStats for each
-// running app so we get full JVM/worker monitoring data.
+// Fetches per-app monitoring stats for running apps.
 // ============================================================
 
 import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react';
@@ -10,7 +9,7 @@ import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator, type 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
-import { useApplications, runtimeKeys } from '../../hooks/queries';
+import { useApplications } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
 import { isMonitoringUnavailable, resetSessionFlags } from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
@@ -715,20 +714,6 @@ const MonitoringScreen: React.FC = () => {
     [appsList],
   );
 
-  // --- Fetch individual app details (only running, capped at 10) ---
-  const appDetailQueries = useQueries({
-    queries: runningApps.map((app: any) => {
-      const d = app?.domain ?? getAppId(app);
-      return {
-        queryKey: runtimeKeys.application(d),
-        queryFn: () => runtimeService.getApplication(d),
-        staleTime: 60_000,
-        refetchInterval: 120_000,
-        enabled: !!d,
-      };
-    }),
-  });
-
   // --- Fetch dashboardStats for running apps ---
   const monitoringContext = useMemo(() => ({
     organizationId: currentOrg?.id,
@@ -748,20 +733,7 @@ const MonitoringScreen: React.FC = () => {
     }),
   });
 
-  // Build lookup maps — use stable serialized key to prevent re-render loops
-  const detailDataKey = appDetailQueries.map((q) => q.dataUpdatedAt).join(',');
-  const detailMap = useMemo(() => {
-    const map = new Map<string, any>();
-    appDetailQueries.forEach((q) => {
-      if (q.data) {
-        const d = (q.data as any)?.domain ?? getAppId(q.data);
-        map.set(d, q.data);
-      }
-    });
-    return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detailDataKey]);
-
+  // Build lookup maps — use stable serialized keys to prevent re-render loops
   const dashDataKey = dashStatsQueries.map((q) => q.dataUpdatedAt).join(',');
   const dashStatsMap = useMemo(() => {
     const map = new Map<string, any>();
@@ -775,13 +747,12 @@ const MonitoringScreen: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashDataKey, runningApps]);
 
-  const loadingKey = appDetailQueries.map((q) => q.isLoading ? '1' : '0').join('') +
-    dashStatsQueries.map((q) => q.isLoading ? '1' : '0').join('');
+  const loadingKey = dashStatsQueries.map((q) => q.isLoading ? '1' : '0').join('');
   const loadingMap = useMemo(() => {
     const map = new Map<string, boolean>();
     runningApps.forEach((app: any, i: number) => {
       const d = app?.domain ?? getAppId(app);
-      map.set(d, (appDetailQueries[i]?.isLoading ?? false) || (dashStatsQueries[i]?.isLoading ?? false));
+      map.set(d, dashStatsQueries[i]?.isLoading ?? false);
     });
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -792,12 +763,11 @@ const MonitoringScreen: React.FC = () => {
     const map = new Map<string, MonitoringMetrics>();
     (appsList as any[]).forEach((app: any) => {
       const d = app?.domain ?? getAppId(app);
-      const detailed = detailMap.get(d);
       const dash = dashStatsMap.get(d);
-      map.set(d, extractMetrics(detailed ?? app, dash));
+      map.set(d, extractMetrics(app, dash));
     });
     return map;
-  }, [appsList, detailMap, dashStatsMap]);
+  }, [appsList, dashStatsMap]);
 
   const totalApps = appsList.length;
   const runningAppsCount = useMemo(() => appsList.filter((a: any) => a?.status === 'STARTED').length, [appsList]);
@@ -833,7 +803,7 @@ const MonitoringScreen: React.FC = () => {
       </View>
 
       {/* Summary */}
-      <View style={styles.summaryRow}>
+      <View style={[styles.summaryRow, windowWidth < 420 && styles.summaryRowStacked]}>
         <SummaryCard title="Total Apps" value={totalApps} icon="application-outline" color={anypointColors.primary}
           subtitle={failedApps > 0 ? `${failedApps} failed` : undefined} />
         <SummaryCard title="Running" value={`${runningAppsCount}/${totalApps}`} icon="check-circle-outline" color={anypointColors.success}
@@ -884,7 +854,7 @@ const MonitoringScreen: React.FC = () => {
         </View>
       </View>
     </>
-  ), [styles, insets.top, envName, totalApps, failedApps, runningAppsCount, monitoringDown, theme, sortOrder, sortedApps.length]);
+  ), [styles, insets.top, envName, totalApps, failedApps, runningAppsCount, monitoringDown, theme, sortOrder, sortedApps.length, windowWidth]);
 
   const listEmptyComponent = useMemo(() => {
     if (appsLoading) {
@@ -907,7 +877,7 @@ const MonitoringScreen: React.FC = () => {
     return (
       <AppHealthCard
         key={d}
-        app={detailMap.get(d) ?? app}
+        app={app}
         metrics={metricsMap.get(d) ?? extractMetrics(null, null)}
         detailLoading={loadingMap.get(d) ?? false}
         theme={theme}
@@ -915,7 +885,7 @@ const MonitoringScreen: React.FC = () => {
         onPress={() => handleAppPress(app)}
       />
     );
-  }, [detailMap, metricsMap, loadingMap, theme, styles, handleAppPress]);
+  }, [metricsMap, loadingMap, theme, styles, handleAppPress]);
 
   return (
     <View style={styles.container}>
@@ -955,6 +925,7 @@ const createStyles = (theme: MD3Theme) =>
     headerTitle: { fontWeight: '700', color: theme.colors.onBackground },
     headerSubtitle: { color: theme.colors.onSurfaceVariant, marginTop: 2 },
     summaryRow: { flexDirection: 'row', paddingHorizontal: 16, gap: 10, marginBottom: 20 },
+    summaryRowStacked: { flexDirection: 'column' },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 10 },
     sectionTitle: { fontWeight: '600', color: theme.colors.onBackground },
     listContent: { paddingBottom: 32 },

@@ -11,14 +11,39 @@
         "simulator": true
       }
     },
+    "development-device": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
     },
+    "beta": {
+      "extends": "production",
+      "channel": "beta"
+    },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "channel": "production"
+    }
+  },
+  "submit": {
+    "beta": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft"
+      },
+      "ios": {}
+    },
+    "production": {
+      "android": {
+        "track": "production",
+        "releaseStatus": "draft"
+      },
+      "ios": {}
     }
   }
 }

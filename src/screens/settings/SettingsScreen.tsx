@@ -36,6 +36,7 @@ import logger from '../../utils/logger';
 import Constants from 'expo-constants';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
+const RELEASE_STAGE = ((Constants.expoConfig?.extra as { releaseStage?: string } | undefined)?.releaseStage ?? 'beta').toUpperCase();
 
 // â”€â”€ Reusable Setting Row â”€â”€
 const SettingRow: React.FC<{
@@ -449,7 +450,7 @@ const SettingsScreen: React.FC = () => {
           icon="information-outline"
           iconColor={theme.colors.onSurfaceVariant}
           title="Version"
-          subtitle={APP_VERSION}
+          subtitle={`${APP_VERSION} (${RELEASE_STAGE})`}
         />
       </View>
 

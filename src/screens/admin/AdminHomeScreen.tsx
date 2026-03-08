@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Pressable,
   ListRenderItemInfo,
+  useWindowDimensions,
 } from 'react-native';
 import { Appbar, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -155,7 +156,9 @@ const AdminHomeScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const numColumns = width < 420 ? 1 : 2;
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<AdminFeature>) => (
@@ -182,7 +185,8 @@ const AdminHomeScreen: React.FC = () => {
         data={ADMIN_FEATURES}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
-        numColumns={2}
+        key={`admin-cols-${numColumns}`}
+        numColumns={numColumns}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       />
