@@ -6,3 +6,12 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /health
+    disk:
+      name: muleops-data
+      mountPath: /var/data/muleops
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /var/data/muleops
+      - key: PORT
+        value: 4000

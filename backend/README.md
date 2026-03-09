@@ -15,7 +15,7 @@ The mobile app should call this backend for bug reporting so the EmailJS private
 1. Copy `.env.example` to `.env`
 2. Fill in the EmailJS values
 3. Set `ADMIN_API_KEY` if you want to read stored reports
-3. Install dependencies:
+4. Install dependencies:
 
 ```powershell
 npm install
@@ -39,6 +39,8 @@ backend/data/bug-reports.json
 
 The backend stores every report before attempting email delivery. If email fails, the report still remains stored.
 
+Set `DATA_DIR` if you want storage outside the repo path, for example on a mounted Render disk.
+
 ## Admin report access
 
 List recent reports:
@@ -56,3 +58,22 @@ This backend is suitable for Railway or Render.
 - Start command: `npm start`
 - Build command: `npm run build`
 - Root directory: `backend`
+
+### Render
+
+- Root directory: `backend`
+- Build command: `npm install && npm run build`
+- Start command: `npm start`
+- Health check path: `/health`
+- Persistent disk mount path: `/var/data/muleops`
+- Set `DATA_DIR=/var/data/muleops`
+
+### Railway
+
+- Root directory: `backend`
+- Build command: `npm install && npm run build`
+- Start command: `npm start`
+- Health check path: `/health`
+- Set the same env vars as `.env.example`
+
+Railway does not provide the same simple mounted disk flow as Render, so if you want persistent server-side report history there, plan to move bug report storage to a real database next.

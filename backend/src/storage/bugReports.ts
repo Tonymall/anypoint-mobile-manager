@@ -2,7 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+import { env } from '../config';
+
+const DATA_DIR = env.DATA_DIR ? path.resolve(env.DATA_DIR) : path.resolve(process.cwd(), 'data');
 const BUG_REPORTS_FILE = path.join(DATA_DIR, 'bug-reports.json');
 
 export interface StoredBugReport {
