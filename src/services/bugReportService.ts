@@ -2,12 +2,17 @@ import Constants from 'expo-constants';
 
 import { getRegionById } from '../config/regions';
 import { useAuthStore } from '../stores/authStore';
+import { useRemoteConfigStore } from '../stores/remoteConfigStore';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 function assertBugReportConfig(): void {
   if (!BACKEND_URL) {
     throw new Error('Bug reporting is not configured yet.');
+  }
+
+  if (useRemoteConfigStore.getState().config?.bugReportingEnabled === false) {
+    throw new Error('Bug reporting is currently disabled.');
   }
 }
 

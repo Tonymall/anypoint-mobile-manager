@@ -2,6 +2,7 @@ import Constants from 'expo-constants';
 
 import { getRegionById } from '../config/regions';
 import { useAuthStore } from '../stores/authStore';
+import { useRemoteConfigStore } from '../stores/remoteConfigStore';
 import type { AppNotification } from '../types';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
@@ -35,10 +36,30 @@ export interface MobileRemoteConfig {
   releaseStage: string;
 }
 
+export interface AdminBugReport {
+  id: string;
+  createdAt: string;
+  title: string;
+  message: string;
+  details: string;
+  controlPlane: string;
+  appVersion: string;
+  userEmail: string;
+  userName: string;
+  emailDelivered: boolean;
+  emailError: string | null;
+}
+
+export interface AdminAlertEvent extends BackendAlertEvent {}
+
+async function readJson<T>(response: Response): Promise<T> {
+  return (await response.json()) as T;
+}
+
 export async function publishAlertEvent(notification: AppNotification): Promise<void> {
   const backendUrl = getBackendUrl();
   const auth = useAuthStore.getState();
-  if (!backendUrl || !auth.user?.id) {
+  if (!backendUrl || !auth.user?.id || useRemoteConfigStore.getState().config?.alertSyncEnabled === false) {
     return;
   }
 
@@ -78,7 +99,7 @@ export async function fetchAlertHistory(limit = 100): Promise<BackendAlertEvent[
     throw new Error(`Failed to fetch alert history: ${response.status}`);
   }
 
-  const data = (await response.json()) as { events?: BackendAlertEvent[] };
+  const data = await readJson<{ events?: BackendAlertEvent[] }>(response);
   return data.events ?? [];
 }
 
@@ -93,7 +114,67 @@ export async function fetchMobileRemoteConfig(): Promise<MobileRemoteConfig | nu
     throw new Error(`Failed to fetch mobile config: ${response.status}`);
   }
 
-  const data = (await response.json()) as { config?: MobileRemoteConfig };
+  const data = await readJson<{ config?: MobileRemoteConfig }>(response);
+  return data.config ?? null;
+}
+
+export async function fetchAdminBugReports(adminKey: string, limit = 25): Promise<AdminBugReport[]> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    throw new Error('Backend is not configured.');
+  }
+
+  const response = await fetch(`${backendUrl}/api/admin/bug-reports?limit=${limit}`, {
+    headers: {
+      'x-admin-key': adminKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch bug reports: ${response.status}`);
+  }
+
+  const data = await readJson<{ reports?: AdminBugReport[] }>(response);
+  return data.reports ?? [];
+}
+
+export async function fetchAdminAlerts(adminKey: string, limit = 50): Promise<AdminAlertEvent[]> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    throw new Error('Backend is not configured.');
+  }
+
+  const response = await fetch(`${backendUrl}/api/admin/alerts?limit=${limit}`, {
+    headers: {
+      'x-admin-key': adminKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch alert events: ${response.status}`);
+  }
+
+  const data = await readJson<{ events?: AdminAlertEvent[] }>(response);
+  return data.events ?? [];
+}
+
+export async function fetchAdminMobileConfig(adminKey: string): Promise<MobileRemoteConfig | null> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    throw new Error('Backend is not configured.');
+  }
+
+  const response = await fetch(`${backendUrl}/api/admin/config/mobile`, {
+    headers: {
+      'x-admin-key': adminKey,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch remote config: ${response.status}`);
+  }
+
+  const data = await readJson<{ config?: MobileRemoteConfig }>(response);
   return data.config ?? null;
 }
 

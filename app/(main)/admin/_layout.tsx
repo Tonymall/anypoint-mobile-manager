@@ -20,6 +20,7 @@ export default function AdminLayout() {
       <Stack.Screen name="business-groups" />
       <Stack.Screen name="secrets" />
       <Stack.Screen name="secret-detail" />
+      <Stack.Screen name="backend-ops" />
     </Stack>
   );
 }

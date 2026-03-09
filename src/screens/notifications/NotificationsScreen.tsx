@@ -1,31 +1,22 @@
-// ============================================================
-// Notifications Screen — 2026 Modern Dark-First Design
-//
-// Full notification center with unread indicators, swipe-to-
-// delete, pull-to-mark-all-read, and empty state.
-// ============================================================
-
-import React, { useMemo, useCallback, useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  StyleSheet,
-  View,
   FlatList,
   Pressable,
   RefreshControl,
+  StyleSheet,
+  View,
 } from 'react-native';
 import { Text, useTheme, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useNotificationStore } from '../../stores/notificationStore';
 import { fetchAlertHistory, mapBackendAlertToNotification } from '../../services/backendService';
-import { useAuthStore } from '../../stores/authStore';
 import logger from '../../utils/logger';
 import { anypointColors } from '../../theme';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import type { AppNotification, NotificationAction } from '../../types';
 
-// ── Action icon mapping ──
 const ACTION_ICONS: Record<NotificationAction, string> = {
   start: 'play-circle-outline',
   stop: 'stop-circle-outline',
@@ -50,7 +41,6 @@ const ACTION_COLORS: Record<NotificationAction, string> = {
   info: anypointColors.primary,
 };
 
-// ── Notification Card ──
 const NotificationCard: React.FC<{
   item: AppNotification;
   onPress: (id: string) => void;
@@ -60,19 +50,12 @@ const NotificationCard: React.FC<{
   const iconName = ACTION_ICONS[item.action] ?? 'information-outline';
   const iconColor = ACTION_COLORS[item.action] ?? anypointColors.primary;
 
-  const handlePress = useCallback(() => {
-    hapticLight();
-    onPress(item.id);
-  }, [item.id, onPress]);
-
-  const handleDelete = useCallback(() => {
-    hapticLight();
-    onDelete(item.id);
-  }, [item.id, onDelete]);
-
   return (
     <Pressable
-      onPress={handlePress}
+      onPress={() => {
+        hapticLight();
+        onPress(item.id);
+      }}
       android_ripple={{ color: theme.colors.primaryContainer }}
       accessibilityLabel={`${item.read ? '' : 'Unread '}notification: ${item.title}. ${item.body}. ${formatRelativeTime(item.timestamp)}`}
       accessibilityRole="button"
@@ -80,17 +63,12 @@ const NotificationCard: React.FC<{
       style={({ pressed }) => [
         styles.card,
         {
-          backgroundColor: item.read
-            ? theme.colors.surface
-            : theme.colors.surfaceVariant,
-          borderColor: item.read
-            ? theme.colors.outlineVariant
-            : iconColor + '30',
+          backgroundColor: item.read ? theme.colors.surface : theme.colors.surfaceVariant,
+          borderColor: item.read ? theme.colors.outlineVariant : iconColor + '30',
           opacity: pressed ? 0.85 : 1,
         },
       ]}
     >
-      {/* Unread dot */}
       {!item.read && (
         <View
           style={[styles.unreadDot, { backgroundColor: anypointColors.primary }]}
@@ -98,12 +76,10 @@ const NotificationCard: React.FC<{
         />
       )}
 
-      {/* Action icon */}
       <View style={[styles.iconBox, { backgroundColor: iconColor + '15' }]}>
         <Icon name={iconName} size={20} color={iconColor} />
       </View>
 
-      {/* Content */}
       <View style={styles.contentCol}>
         <View style={styles.titleRow}>
           <Text
@@ -133,9 +109,11 @@ const NotificationCard: React.FC<{
         </Text>
       </View>
 
-      {/* Delete button */}
       <Pressable
-        onPress={handleDelete}
+        onPress={() => {
+          hapticLight();
+          onDelete(item.id);
+        }}
         hitSlop={12}
         accessibilityLabel={`Delete notification: ${item.title}`}
         accessibilityRole="button"
@@ -152,7 +130,6 @@ const NotificationCard: React.FC<{
   );
 });
 
-// ── Empty State ──
 const EmptyState: React.FC<{ theme: MD3Theme }> = ({ theme }) => (
   <View style={styles.emptyContainer} accessibilityLabel="No notifications yet">
     <View style={[styles.emptyIconBox, { backgroundColor: theme.colors.surfaceVariant }]}>
@@ -178,11 +155,9 @@ const EmptyState: React.FC<{ theme: MD3Theme }> = ({ theme }) => (
   </View>
 );
 
-// ── Main Screen ──
 const NotificationsScreen: React.FC = () => {
   const theme = useTheme();
   const dynamicStyles = useMemo(() => createDynamicStyles(theme), [theme]);
-
   const notifications = useNotificationStore((s) => s.notifications);
   const replaceNotificationsForActiveUser = useNotificationStore((s) => s.replaceNotificationsForActiveUser);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
@@ -190,53 +165,30 @@ const NotificationsScreen: React.FC = () => {
   const markAllAsRead = useNotificationStore((s) => s.markAllAsRead);
   const clearAll = useNotificationStore((s) => s.clearAll);
   const removeNotification = useNotificationStore((s) => s.removeNotification);
-  const userId = useAuthStore((s) => s.user?.id);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    let isMounted = true;
+  const handleCardPress = useCallback((id: string) => {
+    markAsRead(id);
+  }, [markAsRead]);
 
-    if (!userId) {
-      return undefined;
-    }
-
-    void fetchAlertHistory(150)
-      .then((events) => {
-        if (!isMounted || events.length === 0) {
-          return;
-        }
-        replaceNotificationsForActiveUser(events.map(mapBackendAlertToNotification));
-      })
-      .catch((error) => {
-        logger.warn('[NotificationsScreen] Failed to load alert history:', (error as Error)?.message);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [replaceNotificationsForActiveUser, userId]);
-
-  const handleCardPress = useCallback(
-    (id: string) => {
-      markAsRead(id);
-    },
-    [markAsRead],
-  );
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      removeNotification(id);
-    },
-    [removeNotification],
-  );
+  const handleDelete = useCallback((id: string) => {
+    removeNotification(id);
+  }, [removeNotification]);
 
   const handleRefresh = useCallback(() => {
-    markAllAsRead();
-  }, [markAllAsRead]);
-
-  const handleClearAll = useCallback(() => {
-    hapticLight();
-    clearAll();
-  }, [clearAll]);
+    setRefreshing(true);
+    void fetchAlertHistory(150)
+      .then((events) => {
+        replaceNotificationsForActiveUser(events.map(mapBackendAlertToNotification));
+        markAllAsRead();
+      })
+      .catch((error) => {
+        logger.warn('[NotificationsScreen] Failed to refresh alert history:', (error as Error)?.message);
+      })
+      .finally(() => {
+        setRefreshing(false);
+      });
+  }, [markAllAsRead, replaceNotificationsForActiveUser]);
 
   const renderItem = useCallback(
     ({ item }: { item: AppNotification }) => (
@@ -250,11 +202,8 @@ const NotificationsScreen: React.FC = () => {
     [handleCardPress, handleDelete, theme],
   );
 
-  const keyExtractor = useCallback((item: AppNotification) => item.id, []);
-
   return (
     <View style={[dynamicStyles.container, { paddingTop: 0 }]}>
-      {/* Header */}
       <View style={dynamicStyles.header}>
         <View style={styles.headerLeft}>
           <Text
@@ -273,7 +222,10 @@ const NotificationsScreen: React.FC = () => {
         </View>
         {notifications.length > 0 && (
           <Pressable
-            onPress={handleClearAll}
+            onPress={() => {
+              hapticLight();
+              clearAll();
+            }}
             hitSlop={8}
             accessibilityLabel="Clear all notifications"
             accessibilityRole="button"
@@ -290,11 +242,10 @@ const NotificationsScreen: React.FC = () => {
         )}
       </View>
 
-      {/* List */}
       <FlatList
         data={notifications}
         renderItem={renderItem}
-        keyExtractor={keyExtractor}
+        keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.listContent,
           notifications.length === 0 && styles.listContentEmpty,
@@ -303,7 +254,7 @@ const NotificationsScreen: React.FC = () => {
         ListEmptyComponent={<EmptyState theme={theme} />}
         refreshControl={
           <RefreshControl
-            refreshing={false}
+            refreshing={refreshing}
             onRefresh={handleRefresh}
             tintColor={theme.colors.primary}
             colors={[anypointColors.primary]}
@@ -315,7 +266,6 @@ const NotificationsScreen: React.FC = () => {
   );
 };
 
-// ── Static Styles ──
 const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
@@ -395,7 +345,6 @@ const styles = StyleSheet.create({
   },
 });
 
-// ── Dynamic Styles (theme-dependent) ──
 const createDynamicStyles = (theme: MD3Theme) =>
   StyleSheet.create({
     container: {

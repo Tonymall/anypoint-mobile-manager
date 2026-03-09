@@ -32,6 +32,7 @@ import { hapticWarning, hapticSelection } from '../../utils/haptics';
 import { anypointColors } from '../../theme';
 import { requestPermissions } from '../../services/notificationService';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { useRemoteConfigStore } from '../../stores/remoteConfigStore';
 import logger from '../../utils/logger';
 import Constants from 'expo-constants';
 
@@ -121,6 +122,7 @@ const SettingsScreen: React.FC = () => {
   const updateSettings = useAppStore((s) => s.updateSettings);
   const queryClient = useQueryClient();
   const termsAcceptance = useLegalStore((s) => user ? s.getAcceptance(user.id) : undefined);
+  const remoteReleaseStage = useRemoteConfigStore((s) => s.config?.releaseStage);
 
   const [themeDialogVisible, setThemeDialogVisible] = useState(false);
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
@@ -460,7 +462,7 @@ const SettingsScreen: React.FC = () => {
           icon="information-outline"
           iconColor={theme.colors.onSurfaceVariant}
           title="Version"
-          subtitle={`${APP_VERSION} (${RELEASE_STAGE})`}
+          subtitle={`${APP_VERSION} (${(remoteReleaseStage ?? RELEASE_STAGE.toLowerCase()).toUpperCase()})`}
         />
       </View>
 

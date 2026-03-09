@@ -75,6 +75,14 @@ const ADMIN_FEATURES: AdminFeature[] = [
     iconColor: anypointColors.error,
     route: '/(main)/admin/secrets',
   },
+  {
+    id: 'backend-ops',
+    title: 'Backend Ops',
+    subtitle: 'Bug reports, alerts, and mobile config',
+    icon: 'server-security',
+    iconColor: anypointColors.info,
+    route: '/(main)/admin/backend-ops',
+  },
 ];
 
 // ── Feature Card Component ──
