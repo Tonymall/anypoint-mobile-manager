@@ -6,7 +6,12 @@ import { z } from 'zod';
 import { isAdminRequestAuthorized } from './auth';
 import { env } from './config';
 import { sendBugReportEmail } from './emailjs';
-import { createBugReport, listBugReports, updateBugReportDelivery } from './storage/bugReports';
+import {
+  createBugReport,
+  getBugReportStorageMode,
+  listBugReports,
+  updateBugReportDelivery,
+} from './storage/bugReports';
 
 const app = express();
 
@@ -22,6 +27,7 @@ app.get('/health', (_req: Request, res: Response) => {
   res.status(200).json({
     ok: true,
     service: 'muleops-backend',
+    storage: getBugReportStorageMode(),
     timestamp: new Date().toISOString(),
   });
 });

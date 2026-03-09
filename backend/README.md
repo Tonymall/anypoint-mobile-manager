@@ -41,6 +41,21 @@ The backend stores every report before attempting email delivery. If email fails
 
 Set `DATA_DIR` if you want storage outside the repo path, for example on a mounted Render disk.
 
+## Free database option
+
+This backend now supports Turso as an optional hosted database.
+
+If these env vars are set:
+
+```text
+TURSO_DATABASE_URL=libsql://...
+TURSO_AUTH_TOKEN=...
+```
+
+bug reports are stored in Turso instead of the local JSON file.
+
+If Turso is not configured, the backend falls back to file storage in `DATA_DIR`.
+
 ## Admin report access
 
 List recent reports:
@@ -67,6 +82,8 @@ This backend is suitable for Railway or Render.
 - Health check path: `/health`
 - Persistent disk mount path: `/var/data/muleops`
 - Set `DATA_DIR=/var/data/muleops`
+
+If you enable Turso, you can keep `DATA_DIR` as a fallback only and your primary storage will be the hosted database.
 
 ### Railway
 
