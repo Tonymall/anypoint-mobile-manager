@@ -7,6 +7,12 @@ Thin backend for server-side MuleOps services.
 - `GET /health`
 - `POST /api/bug-reports`
 - `GET /api/admin/bug-reports`
+- `POST /api/alerts`
+- `GET /api/alerts`
+- `GET /api/config/mobile`
+- `GET /api/admin/alerts`
+- `GET /api/admin/config/mobile`
+- `PUT /api/admin/config/mobile`
 
 The mobile app should call this backend for bug reporting so the EmailJS private key stays server-side.
 
@@ -64,6 +70,34 @@ List recent reports:
 Invoke-WebRequest -UseBasicParsing `
   -Headers @{ "x-admin-key" = "your_admin_key" } `
   http://localhost:4000/api/admin/bug-reports
+```
+
+List recent alert events:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing `
+  -Headers @{ "x-admin-key" = "your_admin_key" } `
+  http://localhost:4000/api/admin/alerts
+```
+
+Read mobile remote config:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing `
+  -Headers @{ "x-admin-key" = "your_admin_key" } `
+  http://localhost:4000/api/admin/config/mobile
+```
+
+Update mobile remote config:
+
+```powershell
+Invoke-WebRequest -Method Put -UseBasicParsing `
+  -Headers @{
+    "x-admin-key" = "your_admin_key"
+    "Content-Type" = "application/json"
+  } `
+  -Body '{"releaseStage":"beta","alertSyncEnabled":true}' `
+  http://localhost:4000/api/admin/config/mobile
 ```
 
 ## Deploy
