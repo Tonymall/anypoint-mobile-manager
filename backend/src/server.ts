@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { isAdminRequestAuthorized } from './auth';
 import { env } from './config';
 import { sendBugReportEmail } from './emailjs';
+import { renderPrivacyPolicyHtml } from './privacyPolicy';
 import { listAlertEvents, listAlertEventsForUser, recordAlertEvent } from './storage/alertEvents';
 import {
   createBugReport,
@@ -32,6 +33,11 @@ app.get('/health', (_req: Request, res: Response) => {
     storage: getBugReportStorageMode(),
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get('/privacy-policy', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(renderPrivacyPolicyHtml());
 });
 
 const bugReportSchema = z.object({

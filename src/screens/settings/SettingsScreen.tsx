@@ -5,7 +5,7 @@
 
 import React, { useCallback, useState, useMemo } from 'react';
 import { useRouter } from 'expo-router';
-import { StyleSheet, View, ScrollView, Pressable } from 'react-native';
+import { Linking, StyleSheet, View, ScrollView, Pressable } from 'react-native';
 import {
   Text,
   Switch,
@@ -38,6 +38,7 @@ import Constants from 'expo-constants';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 const RELEASE_STAGE = ((Constants.expoConfig?.extra as { releaseStage?: string } | undefined)?.releaseStage ?? 'beta').toUpperCase();
+const PRIVACY_POLICY_URL = `${(process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://muleops-backend.onrender.com').replace(/\/$/, '')}/privacy-policy`;
 
 // â”€â”€ Reusable Setting Row â”€â”€
 const SettingRow: React.FC<{
@@ -436,6 +437,18 @@ const SettingsScreen: React.FC = () => {
               : `Version ${TERMS_VERSION}`
           }
           onPress={() => router.push('/(main)/terms' as any)}
+          showChevron
+        />
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="shield-account-outline"
+          iconColor={theme.colors.primary}
+          iconBg={theme.colors.primary + '14'}
+          title="Privacy Policy"
+          subtitle="How MuleOps handles data"
+          onPress={() => {
+            void Linking.openURL(PRIVACY_POLICY_URL);
+          }}
           showChevron
         />
         <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
