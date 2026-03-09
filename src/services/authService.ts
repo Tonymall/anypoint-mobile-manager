@@ -37,8 +37,11 @@ export class MFARequiredError extends Error {
 }
 
 export interface PendingMFAChallenge {
+  username: string;
+  password: string;
   verifyUrl: string;
   requestToken: string;
+  baseUrl: string;
 }
 
 let pendingMFAChallenge: PendingMFAChallenge | null = null;

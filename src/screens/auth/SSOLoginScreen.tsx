@@ -8,7 +8,7 @@
 // to avoid native Axios calls that can't access WebView cookies.
 // ============================================================
 
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import {
   Text,
@@ -233,9 +233,10 @@ const SSOLoginScreen: React.FC = () => {
   const [webViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
+  const hasPrefilledRef = useRef(false);
   const retryCountRef = useRef(0);
   const timeoutIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  const baseUrl = getBaseUrl();
+  const baseUrl = pendingMfaChallenge?.baseUrl ?? getBaseUrl();
   const loginUrl = `${baseUrl}/login/signin`;
   const silentAuthJs = SILENT_AUTH_JS.replace(/__BASE_URL__/g, baseUrl);
 
@@ -256,69 +257,99 @@ const SSOLoginScreen: React.FC = () => {
     clearScheduledTimeouts();
   }, [clearScheduledTimeouts]);
 
-  const mfaWebViewSource = useMemo(() => {
-    if (!isMfaContinuation || !pendingMfaChallenge) {
-      return { uri: loginUrl };
-    }
+  const prefillCredentialsAndSubmit = useCallback(() => {
+    if (!isMfaContinuation || !pendingMfaChallenge || hasPrefilledRef.current) return;
 
-    const escapeAttribute = (value: string) =>
-      value
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+    const { username, password } = pendingMfaChallenge;
+    if (!username || !password) return;
 
-    const action = escapeAttribute(pendingMfaChallenge.verifyUrl);
-    const requestToken = escapeAttribute(pendingMfaChallenge.requestToken);
+    const escapedUsername = username
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
+    const escapedPassword = password
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'");
 
-    return {
-      html: `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
-      html, body {
-        height: 100%;
-        margin: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #091428;
-        color: #f4f8ff;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .wrap { text-align: center; padding: 24px; }
-      .spinner {
-        width: 28px;
-        height: 28px;
-        margin: 0 auto 16px;
-        border-radius: 50%;
-        border: 3px solid rgba(255,255,255,0.18);
-        border-top-color: #31c1ff;
-        animation: spin 0.9s linear infinite;
-      }
-      @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="spinner"></div>
-      <div>Opening identity verification…</div>
-    </div>
-    <form id="mfaForm" method="POST" action="${action}">
-      <input type="hidden" name="request" value="${requestToken}" />
-    </form>
-    <script>
-      setTimeout(function () {
-        document.getElementById('mfaForm').submit();
-      }, 60);
-    </script>
-  </body>
-</html>`,
-      baseUrl,
-    };
-  }, [baseUrl, isMfaContinuation, loginUrl, pendingMfaChallenge]);
+    const prefillJS = `
+      (function() {
+        var attempts = 0;
+        function query(selectors) {
+          for (var i = 0; i < selectors.length; i++) {
+            var el = document.querySelector(selectors[i]);
+            if (el) return el;
+          }
+          return null;
+        }
+        function setValue(el, value) {
+          if (!el) return false;
+          try {
+            var nativeSet = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSet.call(el, value);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          } catch (e) {
+            return false;
+          }
+        }
+        function tryFill() {
+          attempts += 1;
+          var username = query([
+            'input[name="username"]',
+            'input[type="email"]',
+            'input#username',
+            '#username',
+            'input[autocomplete="username"]'
+          ]);
+          var password = query([
+            'input[name="password"]',
+            'input[type="password"]',
+            'input#password',
+            'input[autocomplete="current-password"]'
+          ]);
+          if (!username || !password) {
+            if (attempts < 20) {
+              setTimeout(tryFill, 500);
+            }
+            return;
+          }
+          setValue(username, '${escapedUsername}');
+          setValue(password, '${escapedPassword}');
+
+          var submit = query([
+            'button[type="submit"]',
+            'input[type="submit"]',
+            'button[name="login"]',
+            'button[data-testid="login-button"]'
+          ]);
+          if (submit && typeof submit.click === 'function') {
+            submit.click();
+            return;
+          }
+          var enterEvent = new KeyboardEvent('keydown', {
+            bubbles: true,
+            cancelable: true,
+            key: 'Enter',
+            code: 'Enter'
+          });
+          password.dispatchEvent(enterEvent);
+
+          var form = username.form || password.form || document.querySelector('form');
+          if (form) {
+            var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+            form.dispatchEvent(submitEvent);
+          }
+        }
+        tryFill();
+      })();
+      true;
+    `;
+
+    hasPrefilledRef.current = true;
+    scheduleTimeout(() => {
+      webViewRef.current?.injectJavaScript(prefillJS);
+    }, 250);
+  }, [isMfaContinuation, pendingMfaChallenge, scheduleTimeout]);
 
   const isPostLoginUrl = useCallback(
     (url: string): boolean => {
@@ -544,6 +575,13 @@ const SSOLoginScreen: React.FC = () => {
       if (isMfaContinuation) {
         logger.log('[SSO] Hosted MFA page:', url);
 
+        if (
+          (url.includes('/accounts/login') || url.includes('/login/signin')) &&
+          !url.includes('errorMessage=')
+        ) {
+          prefillCredentialsAndSubmit();
+        }
+
         if (url.includes('/login/signin?errorMessage=')) {
           showError({
             title: 'MFA verification failed',
@@ -598,7 +636,7 @@ const SSOLoginScreen: React.FC = () => {
         }, 2500);
       }
     },
-    [isMfaContinuation, isPostLoginUrl, scheduleTimeout, showError, silentAuthJs],
+    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, scheduleTimeout, showError, silentAuthJs],
   );
 
   const handleWebViewMessage = useCallback(
@@ -675,6 +713,7 @@ const SSOLoginScreen: React.FC = () => {
 
   const handleBack = useCallback(() => {
     clearScheduledTimeouts();
+    hasPrefilledRef.current = false;
     if (isMfaContinuation) {
       authService.clearPendingMFAChallenge();
     }
@@ -697,7 +736,7 @@ const SSOLoginScreen: React.FC = () => {
         <WebView
           key={webViewKey}
           ref={webViewRef}
-          source={mfaWebViewSource}
+          source={{ uri: loginUrl }}
           style={styles.webView}
           onNavigationStateChange={handleNavigationStateChange}
           onMessage={handleWebViewMessage}

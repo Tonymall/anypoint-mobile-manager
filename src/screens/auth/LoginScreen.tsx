@@ -167,8 +167,11 @@ const LoginScreen: React.FC = () => {
       if (error instanceof authService.MFARequiredError) {
         logger.log('[Login] MFA required — opening hosted WebView for Salesforce verification');
         authService.setPendingMFAChallenge({
+          username: username.trim(),
+          password,
           verifyUrl: error.verifyUrl,
           requestToken: error.requestToken,
+          baseUrl: regionUrl,
         });
         router.push({
           pathname: '/(auth)/sso' as any,
@@ -193,8 +196,11 @@ const LoginScreen: React.FC = () => {
       if (responseData?.url?.includes('verify.salesforce.com') && responseData?.body?.request) {
         logger.log('[Login] MFA detected from error response — opening hosted WebView');
         authService.setPendingMFAChallenge({
+          username: username.trim(),
+          password,
           verifyUrl: responseData.url,
           requestToken: responseData.body.request,
+          baseUrl: regionUrl,
         });
         router.push({
           pathname: '/(auth)/sso' as any,
