@@ -23,6 +23,7 @@ module.exports = {
   ignorePatterns: [
     'node_modules/',
     '.expo/',
+    'backend/',
     'dist/',
     'build/',
     'android/',

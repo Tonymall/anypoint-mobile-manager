@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MuleOps Beta",
+    "name": "MuleOps",
     "slug": "muleops",
     "version": "1.0.0",
     "orientation": "default",
@@ -17,6 +17,25 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.muleops.mobile",
       "buildNumber": "1",
+      "privacyManifests": {
+        "NSPrivacyTracking": false,
+        "NSPrivacyTrackingDomains": [],
+        "NSPrivacyCollectedDataTypes": [],
+        "NSPrivacyAccessedAPITypes": [
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
+          },
+          {
+            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1"
+            ]
+          }
+        ]
+      },
       "infoPlist": {
         "NSFaceIDUsageDescription": "Use Face ID to securely login to MuleOps",
         "ITSAppUsesNonExemptEncryption": false

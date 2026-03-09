@@ -183,8 +183,11 @@ api.interceptors.request.use(
             logger.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
           }
         }
-      } catch (_) {
-        // SecureStore read failed — proceed without token
+      } catch (error: any) {
+        logger.warn(
+          '[API Interceptor] SecureStore token read failed:',
+          error?.message ?? 'unknown error',
+        );
       }
     }
 

@@ -147,8 +147,9 @@ function normalizeAuditResponse(raw: any): AuditLogResponse {
  * Normalize a single audit log entry.
  */
 function normalizeEntry(raw: any): AuditLogEntry {
+  const fallbackIdSeed = `${raw.timestamp ?? raw.createdAt ?? raw.date ?? 'ts'}-${raw.action ?? raw.actionName ?? 'action'}-${raw.objectId ?? raw.objectName ?? raw.userId ?? 'object'}`;
   return {
-    id: raw.id ?? raw.auditId ?? String(Math.random()),
+    id: raw.id ?? raw.auditId ?? fallbackIdSeed,
     action: raw.action ?? raw.actionName ?? 'Unknown',
     objectType: raw.objectType ?? raw.type ?? '',
     objectId: raw.objectId ?? raw.objectName ?? '',

@@ -35,6 +35,9 @@ const ReportBugScreen: React.FC = () => {
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [thankYouVisible, setThankYouVisible] = useState(false);
+  const goToSettings = useCallback(() => {
+    router.replace('/(main)/settings');
+  }, [router]);
 
   const handleSubmit = useCallback(async () => {
     const trimmed = description.trim();
@@ -63,8 +66,8 @@ const ReportBugScreen: React.FC = () => {
 
   const handleContinue = useCallback(() => {
     setThankYouVisible(false);
-    router.back();
-  }, [router]);
+    goToSettings();
+  }, [goToSettings]);
 
   return (
     <KeyboardAvoidingView
@@ -76,7 +79,7 @@ const ReportBugScreen: React.FC = () => {
         style={{ backgroundColor: theme.colors.background }}
         statusBarHeight={insets.top}
       >
-        <Appbar.BackAction onPress={() => router.back()} />
+        <Appbar.BackAction onPress={goToSettings} />
         <Appbar.Content
           title="Report a Bug"
           titleStyle={styles.headerTitle}

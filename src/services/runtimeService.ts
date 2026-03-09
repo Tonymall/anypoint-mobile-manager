@@ -171,6 +171,12 @@ async function describeObservabilityMetricType(
     dimensions: descriptorNamesOf(data?.dimensions ?? data?.tags ?? data?.labels),
     measurements: descriptorNamesOf(data?.measurements ?? data?.fields ?? data?.aggregations),
   };
+  if (_observabilityMetricDescribeCache.size >= OBSERVABILITY_DESCRIPTOR_CACHE_MAX) {
+    const oldestKey = _observabilityMetricDescribeCache.keys().next().value;
+    if (oldestKey) {
+      _observabilityMetricDescribeCache.delete(oldestKey);
+    }
+  }
   _observabilityMetricDescribeCache.set(metricType, descriptor);
   return descriptor;
 }
@@ -1692,6 +1698,7 @@ let _legacyJvmApiAvailable = false;
 let _legacyMetricsApiAvailable = false;
 let _observabilityMetricTypesPromise: Promise<string[]> | null = null;
 let _observabilityMetricTypesCache: string[] | null = null;
+const OBSERVABILITY_DESCRIPTOR_CACHE_MAX = 100;
 const _observabilityMetricDescribeCache = new Map<string, { dimensions: string[]; measurements: string[] }>();
 
 /**

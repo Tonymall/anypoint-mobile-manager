@@ -3,7 +3,13 @@
 // ============================================================
 
 import axios from 'axios';
-import api, { storeTokens, resetApiState, getBaseUrl, setAuthHeader } from './api';
+import api, {
+  storeTokens,
+  resetApiState,
+  getBaseUrl,
+  setAuthHeader,
+  getStoredAccessToken,
+} from './api';
 import logger from '../utils/logger';
 import type {
   AuthTokens,
@@ -31,11 +37,8 @@ export class MFARequiredError extends Error {
 }
 
 export interface PendingMFAChallenge {
-  username: string;
-  password: string;
   verifyUrl: string;
   requestToken: string;
-  baseUrl: string;
 }
 
 let pendingMFAChallenge: PendingMFAChallenge | null = null;
@@ -633,7 +636,6 @@ export async function switchOrganization(organizationId: string): Promise<void> 
 export async function getOrganizations(): Promise<Organization[]> {
   // Try fresh axios first with stored token
   const baseURL = getBaseUrl();
-  const { getStoredAccessToken } = require('./api');
   const token = await getStoredAccessToken();
   if (token) {
     try {
