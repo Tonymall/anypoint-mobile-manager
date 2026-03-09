@@ -1,196 +1,32 @@
-﻿import React, { useEffect } from 'react';
-import {
-  View,
-  TouchableOpacity,
-  StyleSheet,
-  useWindowDimensions,
-} from 'react-native';
-import { Tabs, Redirect } from 'expo-router';
-import { useTheme, Text } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-} from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { PanResponder, View } from 'react-native';
+import { Tabs, Redirect, useRouter, useSegments } from 'expo-router';
+import { useTheme } from 'react-native-paper';
 
-import { hapticLight } from '../../src/utils/haptics';
+import FloatingTabBar from '../../src/components/navigation/FloatingTabBar';
 import { useAuthStore } from '../../src/stores/authStore';
-import { useNotificationStore } from '../../src/stores/notificationStore';
-import { anypointColors } from '../../src/theme';
 import {
-  setAuthHeader,
-  setOrganizationHeader,
-  setEnvironmentHeader,
   getStoredAccessToken,
   isSessionAuthEnabled,
+  setAuthHeader,
+  setEnvironmentHeader,
+  setOrganizationHeader,
 } from '../../src/services/api';
 import logger from '../../src/utils/logger';
 
-// â”€â”€ Tab definitions (order matters â€” matches Tabs.Screen order) â”€â”€
-const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: string }> = {
-  index: { title: 'Dashboard', icon: 'view-dashboard-outline', iconFocused: 'view-dashboard' },
-  runtime: { title: 'Runtime', icon: 'application-cog-outline', iconFocused: 'application-cog' },
-  apis: { title: 'APIs', icon: 'api' },
-  alerts: { title: 'Alerts', icon: 'bell-outline', iconFocused: 'bell' },
-  monitoring: { title: 'Monitor', icon: 'chart-line-variant', iconFocused: 'chart-line' },
-  settings: { title: 'Settings', icon: 'cog-outline', iconFocused: 'cog' },
-};
-
-const HIDDEN_TAB_PARENTS: Record<string, keyof typeof TAB_ITEMS> = {
+const FLOATING_TAB_SCENE_PADDING = 110;
+const SWIPE_TAB_ORDER = ['index', 'runtime', 'apis', 'alerts', 'monitoring', 'settings'] as const;
+const HIDDEN_TAB_PARENTS: Record<string, (typeof SWIPE_TAB_ORDER)[number]> = {
   admin: 'settings',
+  'report-bug': 'settings',
   terms: 'settings',
   workers: 'runtime',
 };
 
-// â”€â”€ Custom Animated Tab Bar â€” 2026 Minimal Design â”€â”€
-function AnimatedTabBar({ state, _descriptors, navigation }: any) {
-  const theme = useTheme();
-  const insets = useSafeAreaInsets();
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const isPhoneLandscape = screenWidth > screenHeight && Math.min(screenWidth, screenHeight) < 768;
-  const unreadCount = useNotificationStore((s) => s.unreadCount);
-
-  const visibleRoutes = React.useMemo(
-    () => state.routes.filter((route: any) => TAB_ITEMS[route.name] !== undefined),
-    [state.routes],
-  );
-  const visibleCount = visibleRoutes.length;
-  const tabWidth = screenWidth / visibleCount;
-
-  const activeRoute = state.routes[state.index];
-  const activeTabName = React.useMemo(
-    () => (TAB_ITEMS[activeRoute?.name] ? activeRoute.name : HIDDEN_TAB_PARENTS[activeRoute?.name] ?? 'index'),
-    [activeRoute?.name],
-  );
-  const activeVisibleIndex = React.useMemo(
-    () => visibleRoutes.findIndex((route: any) => route.name === activeTabName),
-    [activeTabName, visibleRoutes],
-  );
-  const safeIndex = activeVisibleIndex >= 0 ? activeVisibleIndex : 0;
-
-  const indicatorX = useSharedValue(safeIndex * tabWidth);
-
-  useEffect(() => {
-    indicatorX.value = withTiming(safeIndex * tabWidth, {
-      duration: 220,
-      easing: Easing.bezier(0.33, 0, 0, 1), // iOS-like spring curve
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- indicatorX is a Reanimated SharedValue (stable ref)
-  }, [safeIndex, tabWidth]);
-
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: indicatorX.value }],
-    width: tabWidth,
-  }));
-
-  const bottomPad = Math.max(insets.bottom, 8);
-  const barHeight = isPhoneLandscape ? (40 + bottomPad) : (60 + bottomPad);
-  const indicatorWidth = Math.max(60, Math.min(tabWidth * 0.78, 96));
-  const iconSize = isPhoneLandscape ? 20 : 21;
-
-  const handleTabPress = React.useCallback((route: any, isFocused: boolean) => {
-    requestAnimationFrame(() => hapticLight());
-    const event = navigation.emit({
-      type: 'tabPress',
-      target: route.key,
-      canPreventDefault: true,
-    });
-    if (!isFocused && !event.defaultPrevented) {
-      navigation.jumpTo(route.name);
-    }
-  }, [navigation]);
-
-  return (
-    <View
-      style={[
-        styles.tabBar,
-        {
-          height: barHeight,
-          paddingBottom: bottomPad,
-          backgroundColor: theme.colors.surface,
-          borderTopColor: theme.colors.outlineVariant,
-        },
-      ]}
-    >
-      {/* Sliding pill indicator */}
-      <Animated.View style={[styles.indicator, indicatorStyle]}>
-        <View
-          style={[
-            styles.indicatorPill,
-            {
-              width: indicatorWidth,
-              backgroundColor: theme.colors.primary + '12',
-              borderColor: theme.colors.primary + '18',
-            },
-          ]}
-        />
-      </Animated.View>
-      {/* Accent line at top of active tab */}
-      <Animated.View style={[styles.topLine, indicatorStyle]}>
-        <View style={[styles.topLineDot, { width: indicatorWidth - 18, backgroundColor: theme.colors.primary }]} />
-      </Animated.View>
-
-      {/* Tab buttons */}
-      {visibleRoutes.map((route: any, index: number) => {
-        const isFocused = safeIndex === index;
-        const tabDef = TAB_ITEMS[route.name];
-        const iconName = isFocused
-          ? (tabDef?.iconFocused ?? tabDef?.icon ?? 'circle')
-          : (tabDef?.icon ?? 'circle');
-
-        return (
-          <TouchableOpacity
-            key={route.key}
-            onPress={() => handleTabPress(route, isFocused)}
-            activeOpacity={0.65}
-            style={[styles.tabButton, isPhoneLandscape && { paddingTop: 4 }]}
-            accessibilityLabel={`${tabDef?.title ?? route.name} tab`}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: isFocused }}
-          >
-            <Icon
-              name={iconName}
-              size={iconSize}
-              color={isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant}
-            />
-            {route.name === 'alerts' && unreadCount > 0 && (
-              <View style={{
-                position: 'absolute',
-                top: 6,
-                right: tabWidth / 2 - 18,
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: anypointColors.error,
-              }} />
-            )}
-            {!isPhoneLandscape && (
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: isFocused ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                    fontWeight: isFocused ? '700' : '500',
-                    opacity: isFocused ? 1 : 0.7,
-                  },
-                ]}
-                numberOfLines={1}
-              >
-                {tabDef?.title ?? route.name}
-              </Text>
-            )}
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-}
-
 export default function MainLayout() {
   const theme = useTheme();
+  const router = useRouter();
+  const segments = useSegments();
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const currentOrg = useAuthStore((s) => s.currentOrganization);
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
@@ -210,90 +46,85 @@ export default function MainLayout() {
           logger.warn('[MainLayout] No token available to set auth header!');
         }
       }
+
       if (currentOrg?.id) setOrganizationHeader(currentOrg.id);
       if (currentEnv?.id) setEnvironmentHeader(currentEnv.id);
     }
 
     syncHeaders();
-  }, [isAuthenticated, currentOrg?.id, currentEnv?.id, tokens?.accessToken]);
+  }, [isAuthenticated, currentEnv?.id, currentOrg?.id, tokens?.accessToken]);
+
+  const activeTabName = useMemo<(typeof SWIPE_TAB_ORDER)[number]>(() => {
+    const currentSegment = segments[1] ?? 'index';
+    if ((SWIPE_TAB_ORDER as readonly string[]).includes(currentSegment)) {
+      return currentSegment as (typeof SWIPE_TAB_ORDER)[number];
+    }
+    return HIDDEN_TAB_PARENTS[currentSegment] ?? 'index';
+  }, [segments]);
+
+  const handleTabSwipe = useCallback((direction: 'next' | 'previous') => {
+    const currentIndex = SWIPE_TAB_ORDER.indexOf(activeTabName);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+    if (targetIndex < 0 || targetIndex >= SWIPE_TAB_ORDER.length) return;
+
+    const targetRoute = SWIPE_TAB_ORDER[targetIndex];
+    const targetHref = targetRoute === 'index' ? '/(main)' : `/(main)/${targetRoute}`;
+    router.navigate(targetHref as any);
+  }, [activeTabName, router]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.25
+          && Math.abs(gestureState.dx) > 18,
+        onPanResponderRelease: (_, gestureState) => {
+          const { dx, dy, vx } = gestureState;
+          const isHorizontal = Math.abs(dx) > Math.abs(dy) * 1.25;
+          const crossedThreshold = Math.abs(dx) > 72 || Math.abs(vx) > 0.75;
+          if (!isHorizontal || !crossedThreshold) return;
+          if (dx < 0) {
+            handleTabSwipe('next');
+          } else {
+            handleTabSwipe('previous');
+          }
+        },
+      }),
+    [handleTabSwipe],
+  );
 
   if (!isAuthenticated) {
     return <Redirect href="/(auth)/login" />;
   }
 
   return (
-    <Tabs
-      tabBar={(props) => <AnimatedTabBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-        lazy: true,
-        freezeOnBlur: true,
-        sceneStyle: { backgroundColor: theme.colors.background },
-      }}
-    >
-      <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
-      <Tabs.Screen name="runtime" options={{ title: 'Runtime' }} />
-      <Tabs.Screen name="apis" options={{ title: 'APIs' }} />
-      <Tabs.Screen name="alerts" options={{ title: 'Alerts' }} />
-      <Tabs.Screen name="monitoring" options={{ title: 'Monitoring' }} />
-      <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
-      {/* Workers: hidden from tab bar â€” only accessible via router.push */}
-      <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
-      {/* Admin: hidden from tab bar â€” accessible from Settings screen */}
-      <Tabs.Screen name="admin" options={{ href: null, title: 'Admin' }} />
-      {/* Terms: hidden from tab bar â€” accessible from Settings screen */}
-      <Tabs.Screen name="terms" options={{ href: null, title: 'Terms' }} />
-    </Tabs>
+    <View style={{ flex: 1 }} collapsable={false} {...panResponder.panHandlers}>
+      <Tabs
+        tabBar={(props) => <FloatingTabBar {...props} />}
+        screenOptions={{
+          headerShown: false,
+          lazy: true,
+          freezeOnBlur: true,
+          animation: 'none',
+          sceneStyle: {
+            backgroundColor: theme.colors.background,
+            paddingBottom: FLOATING_TAB_SCENE_PADDING,
+          },
+        }}
+      >
+        <Tabs.Screen name="index" options={{ title: 'Home' }} />
+        <Tabs.Screen name="runtime" options={{ title: 'Runtime' }} />
+        <Tabs.Screen name="apis" options={{ title: 'APIs' }} />
+        <Tabs.Screen name="alerts" options={{ title: 'Alerts' }} />
+        <Tabs.Screen name="monitoring" options={{ title: 'Monitoring' }} />
+        <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
+        <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
+        <Tabs.Screen name="admin" options={{ href: null, title: 'Admin' }} />
+        <Tabs.Screen name="report-bug" options={{ href: null, title: 'Report a Bug' }} />
+        <Tabs.Screen name="terms" options={{ href: null, title: 'Terms' }} />
+      </Tabs>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  tabBar: {
-    flexDirection: 'row',
-    position: 'relative',
-    borderTopWidth: 1,
-    elevation: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-  },
-  indicator: {
-    position: 'absolute',
-    top: 4,
-    bottom: 4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  indicatorPill: {
-    height: '100%',
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  topLine: {
-    position: 'absolute',
-    top: 0,
-    height: 2.5,
-    alignItems: 'center',
-  },
-  topLineDot: {
-    height: 2.5,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
-  },
-  tabButton: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 8,
-    paddingHorizontal: 8,
-    minHeight: 44,
-  },
-  tabLabel: {
-    fontSize: 10.5,
-    marginTop: 4,
-    letterSpacing: 0.1,
-    textAlign: 'center',
-  },
-});
-

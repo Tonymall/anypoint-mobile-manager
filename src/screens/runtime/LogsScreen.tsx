@@ -80,6 +80,31 @@ function fmtDate(raw: string | number): string {
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
 }
 
+function getEntryPriority(entry: any): string {
+  const ev = entry?.event;
+  const rawPriority = String(
+    entry?.priority ??
+    ev?.priority ??
+    entry?.level ??
+    ev?.level ??
+    entry?.severity ??
+    entry?.logLevel ??
+    'INFO',
+  ).toUpperCase();
+
+  if (rawPriority && rawPriority !== 'INFO') {
+    return rawPriority === 'WARNING' ? 'WARN' : rawPriority;
+  }
+
+  const message = String(entry?.message ?? ev?.message ?? entry?.msg ?? entry?.line ?? '');
+  const inferredPriority = message.match(/\b(ERROR|WARN|WARNING|INFO|DEBUG|TRACE|FATAL)\b/i)?.[1]?.toUpperCase();
+  if (inferredPriority) {
+    return inferredPriority === 'WARNING' ? 'WARN' : inferredPriority;
+  }
+
+  return 'INFO';
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // App Log Card — Muleye-inspired card design
 // ═══════════════════════════════════════════════════════════════════
@@ -89,7 +114,7 @@ const AppLogCard = React.memo<{
   theme: MD3Theme;
   onPress: (entry: any) => void;
 }>(({ entry, theme, onPress }) => {
-  const priority = String(entry.priority ?? entry.level ?? entry.severity ?? entry.logLevel ?? 'INFO').toUpperCase();
+  const priority = getEntryPriority(entry);
   const priColor = PRIORITY_COLORS[priority] ?? '#9E9E9E';
 
   // Extract message — handle nested event wrapper from CH1
@@ -342,6 +367,13 @@ const LogsScreen: React.FC = () => {
 
   const isWide = windowWidth > CONTENT_MAX_WIDTH;
   const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
+  const headerBackgroundColor = theme.dark ? '#08111F' : '#F6FAFF';
+  const headerBorderColor = theme.dark ? 'rgba(126, 164, 208, 0.18)' : 'rgba(49, 193, 255, 0.16)';
+  const headerIconColor = theme.dark ? '#E8F3FF' : theme.colors.onSurface;
+  const headerTitleColor = theme.dark ? '#F4F8FF' : theme.colors.onSurface;
+  const headerSubtitleColor = theme.dark ? 'rgba(232,243,255,0.72)' : theme.colors.onSurfaceVariant;
+  const headerBadgeBackground = theme.dark ? 'rgba(49,193,255,0.14)' : 'rgba(49,193,255,0.10)';
+  const headerBadgeText = theme.dark ? '#A9DEFF' : theme.colors.primary;
 
   // ── Debug: log domain on mount ──
   useEffect(() => {
@@ -377,9 +409,6 @@ const LogsScreen: React.FC = () => {
   // Scale limit based on date range — larger windows need more entries
   const logLimit = DATE_RANGES[dateIdx].ms > 86_400_000 ? 500 : 200;
 
-  // Server-side priority filter — when user selects a specific level, ask the API to filter
-  const serverPriority = levelFilter !== 'ALL' ? levelFilter : undefined;
-
   // ---- App Logs (CloudHub) — with auto-polling for live feed ----
   const {
     data: appLogs,
@@ -390,13 +419,12 @@ const LogsScreen: React.FC = () => {
     isFetched: appLogsFetched,
     dataUpdatedAt,
   } = useQuery({
-    queryKey: ['appLogs', domain, dateRange.startDate, dateRange.endDate, logLimit, serverPriority ?? 'ALL'],
+    queryKey: ['appLogs', domain, dateRange.startDate, dateRange.endDate, logLimit],
     queryFn: () =>
       runtimeService.getAppLogs(domain!, {
         startDate: dateRange.startDate,
         endDate: new Date().toISOString(), // always use current time for endDate
         limit: logLimit,
-        priority: serverPriority,
       }),
     enabled: !!domain,
     retry: 1,
@@ -447,7 +475,7 @@ const LogsScreen: React.FC = () => {
     return logs.filter((l: any) => {
       const ev = l.event;
       const msg = String(l.message ?? ev?.message ?? l.msg ?? l.line ?? '');
-      const pri = String(l.priority ?? ev?.priority ?? l.level ?? l.severity ?? l.logLevel ?? 'INFO').toUpperCase();
+      const pri = getEntryPriority(l);
       const logger = String(l.loggerName ?? ev?.loggerName ?? l.logger ?? '');
       const thread = String(l.threadName ?? ev?.threadName ?? '');
 
@@ -472,8 +500,7 @@ const LogsScreen: React.FC = () => {
   const levelCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     (appLogs ?? []).forEach((l: any) => {
-      const ev = l.event;
-      const pri = String(l.priority ?? ev?.priority ?? l.level ?? l.severity ?? l.logLevel ?? 'INFO').toUpperCase();
+      const pri = getEntryPriority(l);
       counts[pri] = (counts[pri] ?? 0) + 1;
     });
     return counts;
@@ -524,7 +551,17 @@ const LogsScreen: React.FC = () => {
 
   // Empty
   const renderEmpty = useCallback(() => {
-    if (isLoading) return null;
+    if (isLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <LoadingState
+            fullScreen={false}
+            size="large"
+            message={tab === 'app' ? 'Loading application logs...' : 'Loading audit logs...'}
+          />
+        </View>
+      );
+    }
     const err = tab === 'app' ? appLogsError : auditError;
     return (
       <View style={styles.emptyContainer}>
@@ -567,26 +604,35 @@ const LogsScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* ── Header Banner (Muleye-style) ── */}
-      <View style={[styles.headerBanner, { backgroundColor: theme.colors.primary }, isWide && { paddingHorizontal: sidePadding + 4 }]}>
+      <View
+        style={[
+          styles.headerBanner,
+          {
+            backgroundColor: headerBackgroundColor,
+            borderBottomColor: headerBorderColor,
+          },
+          isWide && { paddingHorizontal: sidePadding + 4 },
+        ]}
+      >
         <View style={styles.headerBannerTop}>
           <IconButton
             icon="arrow-left"
-            iconColor="#fff"
+            iconColor={headerIconColor}
             size={22}
             onPress={() => router.back()}
           />
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerBannerTitle}>
+            <Text style={[styles.headerBannerTitle, { color: headerTitleColor }]}>
               Application Logs
             </Text>
-            <Text style={styles.headerBannerSubtitle}>
+            <Text style={[styles.headerBannerSubtitle, { color: headerSubtitleColor }]}>
               {domain ?? 'Unknown'}
             </Text>
           </View>
           {lastUpdated && (
-            <View style={styles.updatedBadge}>
-              <Icon name="clock-outline" size={12} color="#fff" />
-              <Text style={styles.updatedText}>
+            <View style={[styles.updatedBadge, { backgroundColor: headerBadgeBackground }]}>
+              <Icon name="clock-outline" size={12} color={headerBadgeText} />
+              <Text style={[styles.updatedText, { color: headerBadgeText }]}>
                 Updated {fmtTimeOnly(lastUpdated.getTime())}
               </Text>
             </View>
@@ -709,11 +755,7 @@ const LogsScreen: React.FC = () => {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5, paddingRight: 12 }}>
             {(['ALL', 'ERROR', 'WARN', 'INFO', 'DEBUG'] as const).map((level) => {
               const sel = levelFilter === level;
-              // When server-side priority filter is active, only show count for the selected level
-              // (other levels' data isn't fetched, so counts would be misleading)
-              const count = serverPriority
-                ? (level === serverPriority ? (appLogs?.length ?? 0) : 0)
-                : (level === 'ALL' ? (appLogs?.length ?? 0) : (levelCounts[level] ?? 0));
+              const count = level === 'ALL' ? (appLogs?.length ?? 0) : (levelCounts[level] ?? 0);
               const lvlColor = PRIORITY_COLORS[level] ?? theme.colors.primary;
               return (
                 <Chip
@@ -818,6 +860,7 @@ const makeStyles = (theme: MD3Theme) =>
       paddingTop: Platform.OS === 'ios' ? 50 : 8,
       paddingBottom: 12,
       paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
     },
     headerBannerTop: {
       flexDirection: 'row',
@@ -826,11 +869,9 @@ const makeStyles = (theme: MD3Theme) =>
     headerBannerTitle: {
       fontSize: 20,
       fontWeight: '700',
-      color: '#fff',
     },
     headerBannerSubtitle: {
       fontSize: 12,
-      color: 'rgba(255,255,255,0.75)',
       marginTop: 1,
     },
     updatedBadge: {
@@ -845,7 +886,6 @@ const makeStyles = (theme: MD3Theme) =>
     },
     updatedText: {
       fontSize: 10,
-      color: '#fff',
       fontWeight: '600',
     },
 
@@ -897,6 +937,11 @@ const makeStyles = (theme: MD3Theme) =>
     // List
     listContent: { paddingBottom: 24, paddingTop: 4 },
     emptyList: { flexGrow: 1 },
+    loadingContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingTop: 72,
+    },
 
     // Empty state
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, paddingTop: 80 },

@@ -9,6 +9,7 @@ import { Slot } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as ExpoSplashScreen from 'expo-splash-screen';
 
 import { lightTheme, darkTheme } from '../src/theme';
@@ -108,7 +109,8 @@ export default function RootLayout() {
   if (!ready) return null;
 
   return (
-    <SafeAreaProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
       <QueryProvider>
         <PaperProvider theme={theme}>
           <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -122,6 +124,7 @@ export default function RootLayout() {
           </ErrorBoundary>
         </PaperProvider>
       </QueryProvider>
-    </SafeAreaProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -59,8 +59,11 @@ const initialState: AuthState = {
 };
 
 function resetSessionScopedState(previousUserId?: string | null, nextUserId?: string | null) {
-  if (previousUserId && nextUserId && previousUserId === nextUserId) return;
-  useNotificationStore.getState().clearAll();
+  if (previousUserId && nextUserId && previousUserId === nextUserId) {
+    useNotificationStore.getState().setActiveUser(nextUserId);
+    return;
+  }
+  useNotificationStore.getState().setActiveUser(nextUserId ?? null);
   useRuntimeTransitionStore.getState().clearAllTransitions();
 }
 

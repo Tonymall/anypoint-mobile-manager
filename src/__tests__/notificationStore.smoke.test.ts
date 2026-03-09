@@ -12,6 +12,7 @@ import { useNotificationStore } from '../stores/notificationStore';
 
 // Reset store before each test
 beforeEach(() => {
+  useNotificationStore.getState().setActiveUser('test-user');
   useNotificationStore.getState().clearAll();
 });
 
@@ -57,7 +58,7 @@ describe('Notification Store', () => {
     expect(state.unreadCount).toBe(0);
   });
 
-  it('should clear all notifications (logout)', () => {
+  it('should clear all notifications for the active user', () => {
     // Add multiple notifications
     for (let i = 0; i < 5; i++) {
       useNotificationStore.getState().addNotification({

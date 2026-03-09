@@ -78,6 +78,28 @@ function isWithinMutationGrace(domain: string): boolean {
   return false;
 }
 
+function clearMutationGrace(domain: string) {
+  _mutationGraceMap.delete(domain);
+}
+
+function patchApplicationStatusInCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  domain: string,
+  status: string,
+) {
+  queryClient.setQueryData(runtimeKeys.application(domain), (current: any) =>
+    current ? { ...current, status } : current,
+  );
+
+  queryClient.setQueryData(runtimeKeys.applications(), (current: any) => {
+    if (!Array.isArray(current)) return current;
+    return current.map((app: any) => {
+      const appDomain = app.domain ?? app.name ?? '';
+      return appDomain === domain ? { ...app, status } : app;
+    });
+  });
+}
+
 export function useApplications() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const addNotification = useNotificationStore((s) => s.addNotification);
@@ -102,19 +124,15 @@ export function useApplications() {
             const isNonFinal = NON_FINAL_STATUSES.has(newStatus);
 
             if (!isNonFinal) {
-              // Grace period: if a lifecycle mutation JUST fired for this app,
-              // skip the polling notification. The mutation's "Starting/Stopping"
-              // notification should appear first. The next poll cycle (30s later)
-              // will pick up the final state.
-              if (isWithinMutationGrace(appName)) {
-                continue;
-              }
+              const withinMutationGrace = isWithinMutationGrace(appName);
+              clearMutationGrace(appName);
+              transitionStore.clearTransition(appName);
 
               // Cooldown: suppress rapid duplicate notifications (STOPPED -> UNDEPLOYED)
               const lastNotifiedTime = _lastNotifiedMap.get(appName) ?? 0;
               const withinCooldown = (now - lastNotifiedTime) < NOTIFICATION_COOLDOWN_MS;
 
-              if (!withinCooldown) {
+              if (!withinMutationGrace && !withinCooldown) {
                 const statusMsg = FINAL_STATUS_MESSAGES[newStatus];
                 const title = statusMsg?.title ?? `Application ${newStatus}`;
 
@@ -130,7 +148,6 @@ export function useApplications() {
                 scheduleLocalNotification(title, `${appName} — ${title.toLowerCase()}`);
                 _lastNotifiedMap.set(appName, now);
               }
-              transitionStore.clearTransition(appName);
             } else {
               _lastNotifiedMap.delete(appName);
             }
@@ -247,6 +264,7 @@ export function useStartApp() {
       // won't fire "Application Deployed" before "Application Starting"
       setMutationGrace(domain);
       setTransition(domain, 'starting');
+      patchApplicationStatusInCache(queryClient, domain, 'STARTING');
       if (data) {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
@@ -285,6 +303,7 @@ export function useStopApp() {
     onSuccess: (data, domain) => {
       setMutationGrace(domain);
       setTransition(domain, 'stopping');
+      patchApplicationStatusInCache(queryClient, domain, 'STOPPING');
       if (data) {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
@@ -323,6 +342,7 @@ export function useRestartApp() {
     onSuccess: (data, domain) => {
       setMutationGrace(domain);
       setTransition(domain, 'restarting');
+      patchApplicationStatusInCache(queryClient, domain, 'STARTING');
       if (data) {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }

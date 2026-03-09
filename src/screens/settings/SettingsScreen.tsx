@@ -436,6 +436,16 @@ const SettingsScreen: React.FC = () => {
           onPress={() => router.push('/(main)/terms' as any)}
           showChevron
         />
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="bug-outline"
+          iconColor={anypointColors.warning}
+          iconBg={anypointColors.warning + '14'}
+          title="Report a Bug"
+          subtitle="Tell us what went wrong"
+          onPress={() => router.push('/(main)/report-bug' as any)}
+          showChevron
+        />
       </View>
 
       {/* â”€â”€ About Section â”€â”€ */}
@@ -512,6 +522,7 @@ const SettingsScreen: React.FC = () => {
           </Dialog.Actions>
         </Dialog>
       </Portal>
+
     </ScrollView>
   );
 };

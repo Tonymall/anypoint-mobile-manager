@@ -42,31 +42,27 @@ export async function submitBugReport(payload: BugReportPayload): Promise<void> 
     submitted_at: new Date().toISOString(),
   };
 
-  try {
-    const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        service_id: serviceId,
-        template_id: templateId,
-        user_id: publicKey,
-        accessToken: privateKey,
-        template_params: templateParams,
-      }),
-    });
+  const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      service_id: serviceId,
+      template_id: templateId,
+      user_id: publicKey,
+      accessToken: privateKey,
+      template_params: templateParams,
+    }),
+  });
 
-    if (!response.ok) {
-      const text = await response.text();
-      if (response.status === 403) {
-        throw new Error(
-          'Bug reporting is blocked in EmailJS. Verify that non-browser API access is enabled in EmailJS Account > Security.',
-        );
-      }
-      throw new Error(`Bug report failed with status ${response.status}: ${text}`);
+  if (!response.ok) {
+    const text = await response.text();
+    if (response.status === 403) {
+      throw new Error(
+        'Bug reporting is blocked in EmailJS. Verify that non-browser API access is enabled in EmailJS Account > Security.',
+      );
     }
-  } catch (error) {
-    throw error;
+    throw new Error(`Bug report failed with status ${response.status}: ${text}`);
   }
 }
