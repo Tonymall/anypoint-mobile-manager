@@ -5,7 +5,7 @@
 // delete, pull-to-mark-all-read, and empty state.
 // ============================================================
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import {
   StyleSheet,
   View,
@@ -17,6 +17,9 @@ import { Text, useTheme, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useNotificationStore } from '../../stores/notificationStore';
+import { fetchAlertHistory, mapBackendAlertToNotification } from '../../services/backendService';
+import { useAuthStore } from '../../stores/authStore';
+import logger from '../../utils/logger';
 import { anypointColors } from '../../theme';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
@@ -181,11 +184,36 @@ const NotificationsScreen: React.FC = () => {
   const dynamicStyles = useMemo(() => createDynamicStyles(theme), [theme]);
 
   const notifications = useNotificationStore((s) => s.notifications);
+  const replaceNotificationsForActiveUser = useNotificationStore((s) => s.replaceNotificationsForActiveUser);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const markAsRead = useNotificationStore((s) => s.markAsRead);
   const markAllAsRead = useNotificationStore((s) => s.markAllAsRead);
   const clearAll = useNotificationStore((s) => s.clearAll);
   const removeNotification = useNotificationStore((s) => s.removeNotification);
+  const userId = useAuthStore((s) => s.user?.id);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    if (!userId) {
+      return undefined;
+    }
+
+    void fetchAlertHistory(150)
+      .then((events) => {
+        if (!isMounted || events.length === 0) {
+          return;
+        }
+        replaceNotificationsForActiveUser(events.map(mapBackendAlertToNotification));
+      })
+      .catch((error) => {
+        logger.warn('[NotificationsScreen] Failed to load alert history:', (error as Error)?.message);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [replaceNotificationsForActiveUser, userId]);
 
   const handleCardPress = useCallback(
     (id: string) => {

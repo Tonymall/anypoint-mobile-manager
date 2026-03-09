@@ -2,9 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { createClient, type Client } from '@libsql/client';
-
 import { env } from '../config';
+import { getDatabaseClient, mapBoolean } from './db';
 
 const DATA_DIR = env.DATA_DIR ? path.resolve(env.DATA_DIR) : path.resolve(process.cwd(), 'data');
 const BUG_REPORTS_FILE = path.join(DATA_DIR, 'bug-reports.json');
@@ -23,33 +22,7 @@ export interface StoredBugReport {
   emailError: string | null;
 }
 
-let dbClient: Client | null = null;
 let databaseReadyPromise: Promise<void> | null = null;
-
-function getDatabaseClient(): Client | null {
-  if (!env.TURSO_DATABASE_URL) {
-    return null;
-  }
-
-  if (!dbClient) {
-    dbClient = createClient({
-      url: env.TURSO_DATABASE_URL,
-      authToken: env.TURSO_AUTH_TOKEN,
-    });
-  }
-
-  return dbClient;
-}
-
-function mapBoolean(value: unknown): boolean {
-  if (typeof value === 'number') {
-    return value === 1;
-  }
-  if (typeof value === 'string') {
-    return value === '1' || value.toLowerCase() === 'true';
-  }
-  return Boolean(value);
-}
 
 async function ensureDataDir(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });

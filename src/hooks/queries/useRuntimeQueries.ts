@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as runtimeService from '../../services/runtimeService';
+import { publishAlertEvent } from '../../services/backendService';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { scheduleLocalNotification } from '../../services/notificationService';
@@ -82,6 +83,19 @@ function clearMutationGrace(domain: string) {
   _mutationGraceMap.delete(domain);
 }
 
+function emitNotification(
+  notification: Omit<import('../../types').AppNotification, 'id' | 'timestamp' | 'read'>,
+  addNotification: (notification: Omit<import('../../types').AppNotification, 'id' | 'timestamp' | 'read'>) => void,
+) {
+  addNotification(notification);
+  void publishAlertEvent({
+    ...notification,
+    id: '',
+    timestamp: new Date().toISOString(),
+    read: false,
+  });
+}
+
 function patchApplicationStatusInCache(
   queryClient: ReturnType<typeof useQueryClient>,
   domain: string,
@@ -136,14 +150,14 @@ export function useApplications() {
                 const statusMsg = FINAL_STATUS_MESSAGES[newStatus];
                 const title = statusMsg?.title ?? `Application ${newStatus}`;
 
-                addNotification({
+                emitNotification({
                   type: 'deployment',
                   action: 'status_change',
                   title,
                   body: `${appName} — ${title.toLowerCase()}`,
                   applicationName: appName,
                   domain: appName,
-                });
+                }, addNotification);
 
                 scheduleLocalNotification(title, `${appName} — ${title.toLowerCase()}`);
                 _lastNotifiedMap.set(appName, now);
@@ -269,26 +283,26 @@ export function useStartApp() {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
       queryClient.invalidateQueries({ queryKey: runtimeKeys.applications() });
-      addNotification({
+      emitNotification({
         type: 'lifecycle',
         action: 'start',
         title: 'Application Starting',
         body: `${domain} is being started`,
         applicationName: domain,
         domain,
-      });
+      }, addNotification);
       scheduleLocalNotification('Application Starting', `${domain} is being started`);
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
-      addNotification({
+      emitNotification({
         type: 'lifecycle',
         action: 'start',
         title: 'Start Failed',
         body: `Failed to start ${domain}: ${(error as Error)?.message ?? 'Unknown error'}`,
         applicationName: domain,
         domain,
-      });
+      }, addNotification);
     },
   });
 }
@@ -308,26 +322,26 @@ export function useStopApp() {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
       queryClient.invalidateQueries({ queryKey: runtimeKeys.applications() });
-      addNotification({
+      emitNotification({
         type: 'lifecycle',
         action: 'stop',
         title: 'Application Stopping',
         body: `${domain} is being stopped`,
         applicationName: domain,
         domain,
-      });
+      }, addNotification);
       scheduleLocalNotification('Application Stopping', `${domain} is being stopped`);
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
-      addNotification({
+      emitNotification({
         type: 'lifecycle',
         action: 'stop',
         title: 'Stop Failed',
         body: `Failed to stop ${domain}: ${(error as Error)?.message ?? 'Unknown error'}`,
         applicationName: domain,
         domain,
-      });
+      }, addNotification);
     },
   });
 }
@@ -347,26 +361,26 @@ export function useRestartApp() {
         queryClient.setQueryData(runtimeKeys.application(domain), data);
       }
       queryClient.invalidateQueries({ queryKey: runtimeKeys.applications() });
-      addNotification({
+      emitNotification({
         type: 'lifecycle',
         action: 'restart',
         title: 'Application Restarting',
         body: `${domain} is being restarted`,
         applicationName: domain,
         domain,
-      });
+      }, addNotification);
       scheduleLocalNotification('Application Restarting', `${domain} is being restarted`);
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
-      addNotification({
+      emitNotification({
         type: 'lifecycle',
         action: 'restart',
         title: 'Restart Failed',
         body: `Failed to restart ${domain}: ${(error as Error)?.message ?? 'Unknown error'}`,
         applicationName: domain,
         domain,
-      });
+      }, addNotification);
     },
   });
 }

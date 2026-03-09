@@ -21,6 +21,7 @@ interface NotificationState {
 
 interface NotificationActions {
   setActiveUser: (userId: string | null) => void;
+  replaceNotificationsForActiveUser: (notifications: AppNotification[]) => void;
   addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
@@ -54,6 +55,20 @@ export const useNotificationStore = create<NotificationState & NotificationActio
             activeUserId: userId,
             notifications,
             unreadCount: getUnreadCount(notifications),
+          };
+        }),
+
+      replaceNotificationsForActiveUser: (notifications) =>
+        set((state) => {
+          const userKey = resolveUserKey(state.activeUserId);
+          const deduped = notifications.slice(0, MAX_NOTIFICATIONS);
+          return {
+            notificationsByUser: {
+              ...state.notificationsByUser,
+              [userKey]: deduped,
+            },
+            notifications: deduped,
+            unreadCount: getUnreadCount(deduped),
           };
         }),
 
