@@ -8,6 +8,8 @@
     "userInterfaceStyle": "automatic",
     "scheme": "muleops",
     "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
       "backgroundColor": "#091428"
     },
     "assetBundlePatterns": [
