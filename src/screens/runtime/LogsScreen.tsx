@@ -23,6 +23,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuditLogs } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
 import { areLogEndpointsAvailable } from '../../services/runtimeService';
@@ -360,6 +361,7 @@ const CONTENT_MAX_WIDTH = 768;
 const LogsScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { domain } = useLocalSearchParams<{ domain: string }>();
   const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -374,6 +376,8 @@ const LogsScreen: React.FC = () => {
   const headerSubtitleColor = theme.dark ? 'rgba(232,243,255,0.72)' : theme.colors.onSurfaceVariant;
   const headerBadgeBackground = theme.dark ? 'rgba(49,193,255,0.14)' : 'rgba(49,193,255,0.10)';
   const headerBadgeText = theme.dark ? '#A9DEFF' : theme.colors.primary;
+  const headerTopPadding = Math.max(insets.top, Platform.OS === 'android' ? 12 : 16);
+  const headerBottomPadding = Platform.OS === 'android' ? 10 : 12;
 
   // ── Debug: log domain on mount ──
   useEffect(() => {
@@ -610,6 +614,8 @@ const LogsScreen: React.FC = () => {
           {
             backgroundColor: headerBackgroundColor,
             borderBottomColor: headerBorderColor,
+            paddingTop: headerTopPadding,
+            paddingBottom: headerBottomPadding,
           },
           isWide && { paddingHorizontal: sidePadding + 4 },
         ]}
@@ -857,8 +863,6 @@ const makeStyles = (theme: MD3Theme) =>
 
     // Header banner (Muleye-style blue banner)
     headerBanner: {
-      paddingTop: Platform.OS === 'ios' ? 50 : 8,
-      paddingBottom: 12,
       paddingHorizontal: 4,
       borderBottomWidth: StyleSheet.hairlineWidth,
     },

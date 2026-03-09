@@ -103,6 +103,40 @@ export async function fetchAlertHistory(limit = 100): Promise<BackendAlertEvent[
   return data.events ?? [];
 }
 
+export async function clearAlertHistory(): Promise<void> {
+  const backendUrl = getBackendUrl();
+  const auth = useAuthStore.getState();
+  if (!backendUrl || !auth.user?.id) {
+    return;
+  }
+
+  const response = await fetch(
+    `${backendUrl}/api/alerts?userId=${encodeURIComponent(auth.user.id)}`,
+    { method: 'DELETE' },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to clear alert history: ${response.status}`);
+  }
+}
+
+export async function deleteAlertHistoryItem(alertId: string): Promise<void> {
+  const backendUrl = getBackendUrl();
+  const auth = useAuthStore.getState();
+  if (!backendUrl || !auth.user?.id) {
+    return;
+  }
+
+  const response = await fetch(
+    `${backendUrl}/api/alerts/${encodeURIComponent(alertId)}?userId=${encodeURIComponent(auth.user.id)}`,
+    { method: 'DELETE' },
+  );
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`Failed to delete alert history item: ${response.status}`);
+  }
+}
+
 export async function fetchMobileRemoteConfig(): Promise<MobileRemoteConfig | null> {
   const backendUrl = getBackendUrl();
   if (!backendUrl) {

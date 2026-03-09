@@ -7,7 +7,13 @@ import { isAdminRequestAuthorized } from './auth';
 import { env } from './config';
 import { sendBugReportEmail } from './emailjs';
 import { renderPrivacyPolicyHtml } from './privacyPolicy';
-import { listAlertEvents, listAlertEventsForUser, recordAlertEvent } from './storage/alertEvents';
+import {
+  clearAlertEventsForUser,
+  deleteAlertEventForUser,
+  listAlertEvents,
+  listAlertEventsForUser,
+  recordAlertEvent,
+} from './storage/alertEvents';
 import {
   createBugReport,
   getBugReportStorageMode,
@@ -175,6 +181,40 @@ app.get('/api/alerts', async (req: Request, res: Response) => {
     ok: true,
     count: events.length,
     events,
+  });
+});
+
+app.delete('/api/alerts', async (req: Request, res: Response) => {
+  const userId = String(req.query.userId ?? '').trim();
+  if (!userId) {
+    res.status(400).json({
+      error: 'userId is required',
+    });
+    return;
+  }
+
+  const deletedCount = await clearAlertEventsForUser(userId);
+  res.status(200).json({
+    ok: true,
+    deletedCount,
+  });
+});
+
+app.delete('/api/alerts/:id', async (req: Request, res: Response) => {
+  const userId = String(req.query.userId ?? '').trim();
+  const eventId = String(req.params.id ?? '').trim();
+
+  if (!userId || !eventId) {
+    res.status(400).json({
+      error: 'userId and alert id are required',
+    });
+    return;
+  }
+
+  const deleted = await deleteAlertEventForUser(userId, eventId);
+  res.status(deleted ? 200 : 404).json({
+    ok: deleted,
+    deleted,
   });
 });
 

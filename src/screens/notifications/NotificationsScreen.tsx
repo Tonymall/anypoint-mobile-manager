@@ -10,7 +10,12 @@ import { Text, useTheme, type MD3Theme } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useNotificationStore } from '../../stores/notificationStore';
-import { fetchAlertHistory, mapBackendAlertToNotification } from '../../services/backendService';
+import {
+  clearAlertHistory,
+  deleteAlertHistoryItem,
+  fetchAlertHistory,
+  mapBackendAlertToNotification,
+} from '../../services/backendService';
 import logger from '../../utils/logger';
 import { anypointColors } from '../../theme';
 import { formatRelativeTime } from '../../utils/statusHelpers';
@@ -166,14 +171,32 @@ const NotificationsScreen: React.FC = () => {
   const clearAll = useNotificationStore((s) => s.clearAll);
   const removeNotification = useNotificationStore((s) => s.removeNotification);
   const [refreshing, setRefreshing] = useState(false);
+  const [clearingAll, setClearingAll] = useState(false);
 
   const handleCardPress = useCallback((id: string) => {
     markAsRead(id);
   }, [markAsRead]);
 
-  const handleDelete = useCallback((id: string) => {
-    removeNotification(id);
+  const handleDelete = useCallback(async (id: string) => {
+    try {
+      await deleteAlertHistoryItem(id);
+      removeNotification(id);
+    } catch (error) {
+      logger.warn('[NotificationsScreen] Failed to delete alert history item:', (error as Error)?.message);
+    }
   }, [removeNotification]);
+
+  const handleClearAll = useCallback(async () => {
+    try {
+      setClearingAll(true);
+      await clearAlertHistory();
+      clearAll();
+    } catch (error) {
+      logger.warn('[NotificationsScreen] Failed to clear alert history:', (error as Error)?.message);
+    } finally {
+      setClearingAll(false);
+    }
+  }, [clearAll]);
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
@@ -195,7 +218,9 @@ const NotificationsScreen: React.FC = () => {
       <NotificationCard
         item={item}
         onPress={handleCardPress}
-        onDelete={handleDelete}
+        onDelete={(id) => {
+          void handleDelete(id);
+        }}
         theme={theme}
       />
     ),
@@ -224,19 +249,19 @@ const NotificationsScreen: React.FC = () => {
           <Pressable
             onPress={() => {
               hapticLight();
-              clearAll();
+              void handleClearAll();
             }}
             hitSlop={8}
             accessibilityLabel="Clear all notifications"
             accessibilityRole="button"
             style={({ pressed }) => [
               dynamicStyles.clearBtn,
-              { opacity: pressed ? 0.7 : 1 },
+              { opacity: pressed || clearingAll ? 0.7 : 1 },
             ]}
           >
             <Icon name="notification-clear-all" size={16} color={anypointColors.error} />
             <Text style={{ color: anypointColors.error, fontSize: 13, fontWeight: '600' }}>
-              Clear All
+              {clearingAll ? 'Clearing...' : 'Clear All'}
             </Text>
           </Pressable>
         )}

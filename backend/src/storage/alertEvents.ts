@@ -273,3 +273,60 @@ export async function listAlertEvents(limit = 100): Promise<StoredAlertEvent[]> 
     createdAt: String(row.created_at),
   }));
 }
+
+export async function clearAlertEventsForUser(userId: string): Promise<number> {
+  const client = getDatabaseClient();
+
+  if (!client) {
+    const events = await readAllEventsFromFile();
+    const remaining = events.filter((event) => event.userId !== userId);
+    const deletedCount = events.length - remaining.length;
+    await writeAllEventsToFile(remaining);
+    return deletedCount;
+  }
+
+  await ensureDatabaseReady();
+  const before = await client.execute({
+    sql: 'SELECT COUNT(*) AS count FROM alert_events WHERE user_id = ?',
+    args: [userId],
+  });
+  const deletedCount = Number(before.rows[0]?.count ?? 0);
+
+  await client.execute({
+    sql: 'DELETE FROM alert_events WHERE user_id = ?',
+    args: [userId],
+  });
+
+  return deletedCount;
+}
+
+export async function deleteAlertEventForUser(userId: string, eventId: string): Promise<boolean> {
+  const client = getDatabaseClient();
+
+  if (!client) {
+    const events = await readAllEventsFromFile();
+    const remaining = events.filter((event) => !(event.userId === userId && event.id === eventId));
+    const deleted = remaining.length !== events.length;
+    if (deleted) {
+      await writeAllEventsToFile(remaining);
+    }
+    return deleted;
+  }
+
+  await ensureDatabaseReady();
+  const existing = await client.execute({
+    sql: 'SELECT id FROM alert_events WHERE user_id = ? AND id = ? LIMIT 1',
+    args: [userId, eventId],
+  });
+
+  if (!existing.rows[0]) {
+    return false;
+  }
+
+  await client.execute({
+    sql: 'DELETE FROM alert_events WHERE user_id = ? AND id = ?',
+    args: [userId, eventId],
+  });
+
+  return true;
+}
