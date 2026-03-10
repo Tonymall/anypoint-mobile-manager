@@ -20,13 +20,13 @@ export const CONTROL_PLANE_REGIONS: ControlPlaneRegion[] = [
   {
     id: 'ca1',
     label: 'CA',
-    url: 'https://ca1.anypoint.mulesoft.com',
+    url: 'https://ca1.platform.mulesoft.com',
     notes: 'Canada',
   },
   {
     id: 'jp1',
     label: 'JP',
-    url: 'https://jp1.anypoint.mulesoft.com',
+    url: 'https://jp1.platform.mulesoft.com',
     notes: 'Japan',
   },
 ];
