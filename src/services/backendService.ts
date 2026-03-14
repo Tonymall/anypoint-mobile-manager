@@ -56,6 +56,38 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function createMfaBridgeUrl(
+  verifyUrl: string,
+  requestToken: string,
+): Promise<string | null> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    return null;
+  }
+
+  const response = await fetch(`${backendUrl}/api/auth/mfa-bridge-sessions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      verifyUrl,
+      requestToken,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create MFA bridge session: ${response.status}`);
+  }
+
+  const data = await readJson<{ sessionId?: string }>(response);
+  if (!data.sessionId) {
+    throw new Error('Backend did not return an MFA bridge session.');
+  }
+
+  return `${backendUrl}/auth/mfa/bridge/${encodeURIComponent(data.sessionId)}`;
+}
+
 export async function publishAlertEvent(notification: AppNotification): Promise<void> {
   const backendUrl = getBackendUrl();
   const auth = useAuthStore.getState();
