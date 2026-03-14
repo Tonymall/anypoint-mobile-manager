@@ -28,6 +28,7 @@ import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
 import * as authService from '../../services/authService';
+import { loginWithBrowser, AuthCancelledError } from '../../services/browserAuthService';
 import { setRegion, resetApiState } from '../../services/api';
 import { resetSessionFlags } from '../../services/runtimeService';
 import { CONTROL_PLANE_REGIONS, getRegionById, getRegionUrl } from '../../config/regions';
@@ -225,6 +226,48 @@ const LoginScreen: React.FC = () => {
       loginInProgressRef.current = false;
     }
   }, [username, password, selectedRegion, loginPending, setIsLoadingStore, router, showError]);
+
+  const handleBrowserLogin = useCallback(async () => {
+    if (loginInProgressRef.current) return;
+    loginInProgressRef.current = true;
+
+    setIsLoading(true);
+    setIsLoadingStore(true);
+
+    try {
+      await resetApiState();
+      resetSessionFlags();
+      await setRegion(selectedRegion);
+
+      const regionUrl = getRegionUrl(selectedRegion);
+      const { tokens } = await loginWithBrowser(selectedRegion);
+
+      const user: User = await authService.getCurrentUser(
+        tokens.accessToken,
+        regionUrl,
+      );
+
+      loginPending(user, tokens);
+      hapticSuccess();
+      router.push('/(auth)/select-org' as any);
+    } catch (error: any) {
+      if (error instanceof AuthCancelledError) {
+        // User dismissed the browser — do nothing
+      } else {
+        const message =
+          error?.message ?? 'Browser authentication failed. Please try again.';
+        showError({
+          title: 'Browser login failed',
+          message,
+        });
+        hapticError();
+      }
+    } finally {
+      setIsLoading(false);
+      setIsLoadingStore(false);
+      loginInProgressRef.current = false;
+    }
+  }, [selectedRegion, loginPending, setIsLoadingStore, router, showError]);
 
   const handleSSOLogin = useCallback(() => {
     router.push('/(auth)/sso');
@@ -458,6 +501,20 @@ const LoginScreen: React.FC = () => {
                   <Divider style={styles.dividerLine} />
                 </View>
 
+                {/* Browser Login — handles Salesforce MFA seamlessly */}
+                <Button
+                  mode="contained-tonal"
+                  onPress={handleBrowserLogin}
+                  disabled={isLoading}
+                  icon="open-in-app"
+                  style={styles.browserLoginButton}
+                  contentStyle={styles.ssoButtonContent}
+                  accessibilityLabel="Sign in with browser for MFA-compatible login"
+                  accessibilityRole="button"
+                >
+                  Sign in with Browser (MFA)
+                </Button>
+
                 {/* SSO Button */}
                 <Button
                   mode="outlined"
@@ -654,6 +711,10 @@ const styles = StyleSheet.create({
   },
   dividerText: {
     marginHorizontal: 16,
+  },
+  browserLoginButton: {
+    borderRadius: 14,
+    marginBottom: 12,
   },
   ssoButton: {
     borderRadius: 14,
