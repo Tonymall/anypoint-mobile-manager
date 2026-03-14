@@ -6,6 +6,11 @@ import { z } from 'zod';
 import { isAdminRequestAuthorized } from './auth';
 import { env } from './config';
 import { sendBugReportEmail } from './emailjs';
+import {
+  createMfaBridgeSession,
+  getMfaBridgeSession,
+  renderMfaBridgeHtml,
+} from './mfaBridge';
 import { renderPrivacyPolicyHtml } from './privacyPolicy';
 import {
   clearAlertEventsForUser,
@@ -23,6 +28,7 @@ import {
 import { getRemoteConfig, updateRemoteConfig } from './storage/remoteConfig';
 
 const app = express();
+app.set('trust proxy', 1);
 
 const corsOrigin = env.CORS_ORIGIN
   ? env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
@@ -76,6 +82,50 @@ const remoteConfigSchema = z.object({
   supportEmail: z.string().trim().email().optional(),
   minimumSupportedVersion: z.string().trim().max(64).optional(),
   releaseStage: z.string().trim().max(64).optional(),
+});
+
+const mfaBridgeSessionSchema = z.object({
+  verifyUrl: z.string().trim().url().max(2048),
+  requestToken: z.string().trim().min(1).max(12000),
+});
+
+app.post('/api/auth/mfa-bridge-sessions', (req: Request, res: Response) => {
+  const parsed = mfaBridgeSessionSchema.safeParse(req.body);
+
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid MFA bridge payload',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const session = createMfaBridgeSession(parsed.data.verifyUrl, parsed.data.requestToken);
+  res.status(201).json({
+    ok: true,
+    sessionId: session.id,
+  });
+});
+
+app.get('/auth/mfa/bridge/:sessionId', (req: Request, res: Response) => {
+  const sessionId = String(req.params.sessionId ?? '').trim();
+  const session = getMfaBridgeSession(sessionId);
+
+  if (!session) {
+    res
+      .status(404)
+      .setHeader('Content-Type', 'text/html; charset=utf-8')
+      .send('<!DOCTYPE html><html><body><p>This verification link has expired. Return to MuleOps and try signing in again.</p></body></html>');
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: https:; form-action https://verify.salesforce.com https://*.salesforce.com; base-uri 'self'; frame-ancestors 'none';",
+  );
+  res.status(200).send(renderMfaBridgeHtml(session));
 });
 
 app.post('/api/bug-reports', async (req: Request, res: Response) => {

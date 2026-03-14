@@ -9,18 +9,20 @@
 // ============================================================
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, Platform, Linking, AppState, type AppStateStatus } from 'react-native';
 import {
   Text,
   useTheme,
   Appbar,
   ActivityIndicator,
+  Button,
 } from 'react-native-paper';
 import { WebView, type WebViewNavigation, type WebViewMessageEvent } from 'react-native-webview';
 import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
 import { getBaseUrl, setAuthHeader, storeTokens, enableCookieSessionAuth } from '../../services/api';
+import { createMfaBridgeUrl } from '../../services/backendService';
 import * as authService from '../../services/authService';
 import type { AuthTokens } from '../../types';
 import logger from '../../utils/logger';
@@ -230,10 +232,14 @@ const SSOLoginScreen: React.FC = () => {
   const showError = useErrorDialogStore((state) => state.showError);
 
   const [isExtracting, setIsExtracting] = useState(false);
+  const [externalVerificationBridgeUrl, setExternalVerificationBridgeUrl] = useState<string | null>(null);
+  const [showExternalVerificationHelp, setShowExternalVerificationHelp] = useState(false);
+  const [isCompletingExternalVerification, setIsCompletingExternalVerification] = useState(false);
   const [webViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
   const hasPrefilledRef = useRef(false);
+  const launchedExternalVerificationRef = useRef(false);
   const retryCountRef = useRef(0);
   const timeoutIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const baseUrl = pendingMfaChallenge?.baseUrl ?? getBaseUrl();
@@ -256,6 +262,34 @@ const SSOLoginScreen: React.FC = () => {
   useEffect(() => () => {
     clearScheduledTimeouts();
   }, [clearScheduledTimeouts]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !isMfaContinuation || !pendingMfaChallenge) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const prepareBridgeUrl = async () => {
+      try {
+        const bridgeUrl = await createMfaBridgeUrl(
+          pendingMfaChallenge.verifyUrl,
+          pendingMfaChallenge.requestToken,
+        );
+        if (!cancelled) {
+          setExternalVerificationBridgeUrl(bridgeUrl);
+        }
+      } catch (error: any) {
+        logger.warn('[SSO] Failed to prepare MFA browser bridge:', error?.message);
+      }
+    };
+
+    void prepareBridgeUrl();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isMfaContinuation, pendingMfaChallenge]);
 
   const prefillCredentialsAndSubmit = useCallback(() => {
     if (!isMfaContinuation || !pendingMfaChallenge || hasPrefilledRef.current) return;
@@ -567,6 +601,81 @@ const SSOLoginScreen: React.FC = () => {
     [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, showError],
   );
 
+  const completeExternalVerification = useCallback(async (silent: boolean) => {
+    if (!pendingMfaChallenge) return;
+
+    setIsCompletingExternalVerification(true);
+    try {
+      const tokens = await authService.completeMFAWithRequestToken(
+        pendingMfaChallenge.username,
+        pendingMfaChallenge.password,
+        pendingMfaChallenge.requestToken,
+        pendingMfaChallenge.baseUrl,
+      );
+
+      await completeWithTokenOnly(tokens.accessToken);
+    } catch (error: any) {
+      logger.warn('[SSO] External verification completion failed:', error?.message);
+      if (!silent) {
+        showError({
+          title: 'Verification not completed yet',
+          message:
+            'Complete the verification in Safari first, then return to MuleOps and continue.',
+        });
+      }
+    } finally {
+      setIsCompletingExternalVerification(false);
+    }
+  }, [completeWithTokenOnly, pendingMfaChallenge, showError]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !isMfaContinuation) {
+      return;
+    }
+
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState !== 'active' || !launchedExternalVerificationRef.current) {
+        return;
+      }
+
+      launchedExternalVerificationRef.current = false;
+      setShowExternalVerificationHelp(true);
+      scheduleTimeout(() => {
+        void completeExternalVerification(true);
+      }, 1200);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [completeExternalVerification, isMfaContinuation, scheduleTimeout]);
+
+  const handleOpenVerificationInSafari = useCallback(async () => {
+    if (!externalVerificationBridgeUrl) {
+      showError({
+        title: 'Verification link not ready',
+        message: 'Please wait a moment and try opening the verification again.',
+      });
+      return;
+    }
+
+    try {
+      launchedExternalVerificationRef.current = true;
+      await Linking.openURL(externalVerificationBridgeUrl);
+    } catch (error: any) {
+      launchedExternalVerificationRef.current = false;
+      logger.warn('[SSO] Failed to open verification in Safari:', error?.message);
+      showError({
+        title: 'Could not open Safari',
+        message: 'We could not open the verification page in Safari. Please try again.',
+      });
+    }
+  }, [externalVerificationBridgeUrl, showError]);
+
+  const handleContinueAfterSafariVerification = useCallback(async () => {
+    await completeExternalVerification(false);
+  }, [completeExternalVerification]);
+
   const handleNavigationStateChange = useCallback(
     (navState: WebViewNavigation) => {
       const { url } = navState;
@@ -579,6 +688,7 @@ const SSOLoginScreen: React.FC = () => {
           (url.includes('/accounts/login') || url.includes('/login/signin')) &&
           !url.includes('errorMessage=')
         ) {
+          setShowExternalVerificationHelp(false);
           prefillCredentialsAndSubmit();
         }
 
@@ -592,12 +702,18 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (url.includes('/accounts/login/mfa_callback')) {
+          setShowExternalVerificationHelp(false);
           hasInjectedRef.current = false;
           retryCountRef.current = 0;
           return;
         }
 
+        if (Platform.OS === 'ios' && url.includes('verify.salesforce.com')) {
+          setShowExternalVerificationHelp(true);
+        }
+
         if (isPostLoginUrl(url)) {
+          setShowExternalVerificationHelp(false);
           if (!hasInjectedRef.current) {
             hasInjectedRef.current = true;
             retryCountRef.current = 0;
@@ -623,11 +739,15 @@ const SSOLoginScreen: React.FC = () => {
         url.includes('/verify') ||
         url.includes('/mfa')
       ) {
+        if (Platform.OS === 'ios' && url.includes('verify.salesforce.com')) {
+          setShowExternalVerificationHelp(true);
+        }
         logger.log('[SSO] MFA/verification page — waiting for user');
         return;
       }
 
       if (isPostLoginUrl(url)) {
+        setShowExternalVerificationHelp(false);
         logger.log('[SSO] Post-login redirect detected');
         hasInjectedRef.current = true;
         retryCountRef.current = 0;
@@ -733,6 +853,50 @@ const SSOLoginScreen: React.FC = () => {
       </Appbar.Header>
 
       <View style={styles.webViewContainer}>
+        {Platform.OS === 'ios' && showExternalVerificationHelp && (
+          <View
+            style={[
+              styles.externalVerificationCard,
+              {
+                backgroundColor: theme.colors.surface,
+                borderColor: theme.colors.outlineVariant,
+              },
+            ]}
+          >
+            <Text
+              variant="titleSmall"
+              style={[styles.externalVerificationTitle, { color: theme.colors.onSurface }]}
+            >
+              Need Safari for verification?
+            </Text>
+            <Text
+              variant="bodySmall"
+              style={[styles.externalVerificationBody, { color: theme.colors.onSurfaceVariant }]}
+            >
+              Some Salesforce identity checks use Face ID, Touch ID, or passkeys that are only available in Safari. Open the verification in Safari, complete it there, then come back and continue.
+            </Text>
+            <View style={styles.externalVerificationActions}>
+              <Button
+                mode="outlined"
+                onPress={handleOpenVerificationInSafari}
+                disabled={!externalVerificationBridgeUrl}
+                compact
+              >
+                Open in Safari
+              </Button>
+              <Button
+                mode="contained"
+                onPress={handleContinueAfterSafariVerification}
+                loading={isCompletingExternalVerification}
+                disabled={isCompletingExternalVerification}
+                compact
+              >
+                Continue
+              </Button>
+            </View>
+          </View>
+        )}
+
         <WebView
           key={webViewKey}
           ref={webViewRef}
@@ -818,6 +982,27 @@ const styles = StyleSheet.create({
   },
   webViewContainer: {
     flex: 1,
+  },
+  externalVerificationCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    padding: 16,
+  },
+  externalVerificationTitle: {
+    fontWeight: '600',
+  },
+  externalVerificationBody: {
+    marginTop: 8,
+    lineHeight: 20,
+  },
+  externalVerificationActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 16,
   },
   webView: {
     flex: 1,
