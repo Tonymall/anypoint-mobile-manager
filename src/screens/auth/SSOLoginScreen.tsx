@@ -28,14 +28,22 @@ import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 const INJECTED_JS = `
   (function() {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', '/accounts/api/me', false);
-      xhr.withCredentials = true;
-      xhr.send();
+    function tryProfileRequest(path) {
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', path, false);
+        xhr.withCredentials = true;
+        xhr.send();
+        if (xhr.status === 200) {
+          return JSON.parse(xhr.responseText);
+        }
+      } catch (e) {}
+      return null;
+    }
 
-      if (xhr.status === 200) {
-        var data = JSON.parse(xhr.responseText);
+    try {
+      var data = tryProfileRequest('/accounts/api/me') || tryProfileRequest('/accounts/api/profile');
+      if (data) {
         var user = data.user || data;
         var orgs = user.memberOfOrganizations || [];
 
@@ -100,10 +108,12 @@ const INJECTED_JS = `
         path === '/accounts/' ||
         path === '/accounts/login' ||
         path === '/accounts/login/' ||
+        path === '/login' ||
+        path === '/login/' ||
         path === '/login/signin' ||
         path === '/login/signin/' ||
         path.indexOf('/accounts/login') === 0 ||
-        path.indexOf('/login/signin') === 0;
+        path.indexOf('/login/') === 0;
       if (xsrfOnly && !isLoginLikePath) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'session_only',
@@ -382,8 +392,11 @@ const SSOLoginScreen: React.FC = () => {
           path === '/accounts/' ||
           path === '/accounts/login' ||
           path === '/accounts/login/' ||
+          path === '/login' ||
+          path === '/login/' ||
           path === '/login/signin' ||
-          path === '/login/signin/'
+          path === '/login/signin/' ||
+          path.startsWith('/login/')
         ) {
           return false;
         }
@@ -395,9 +408,10 @@ const SSOLoginScreen: React.FC = () => {
         if (
           parsed.origin === baseUrl &&
           path !== '/accounts/login' &&
+          path !== '/login' &&
           path !== '/login/signin' &&
           !path.startsWith('/accounts/login') &&
-          !path.startsWith('/login/signin')
+          !path.startsWith('/login/')
         ) {
           return true;
         }
