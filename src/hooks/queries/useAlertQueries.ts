@@ -21,15 +21,19 @@ export const alertKeys = {
 
 // ---------- Queries ----------
 
-export function usePlatformAlerts(params?: Parameters<typeof alertService.getAlerts>[2]) {
+export function usePlatformAlerts(
+  params?: Parameters<typeof alertService.getAlerts>[2],
+  options?: { enabled?: boolean },
+) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const envId = useAuthStore((s) => s.currentEnvironment?.id);
+  const isEnabled = options?.enabled ?? true;
 
   return useQuery({
     queryKey: alertKeys.list(params),
     queryFn: () => alertService.getAlerts(orgId!, envId!, params),
-    enabled: !!orgId && !!envId,
-    refetchInterval: 30_000,
+    enabled: !!orgId && !!envId && isEnabled,
+    refetchInterval: isEnabled ? 30_000 : false,
   });
 }
 

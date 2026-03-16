@@ -103,6 +103,7 @@ export default function MainLayout() {
     <View style={{ flex: 1 }} collapsable={false} {...panResponder.panHandlers}>
       <Tabs
         tabBar={(props) => <FloatingTabBar {...props} />}
+        detachInactiveScreens
         screenOptions={{
           headerShown: false,
           lazy: true,

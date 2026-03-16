@@ -114,16 +114,17 @@ function patchApplicationStatusInCache(
   });
 }
 
-export function useApplications() {
+export function useApplications(options?: { enabled?: boolean }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const addNotification = useNotificationStore((s) => s.addNotification);
   const hasActiveTransitions = useRuntimeTransitionStore((s) => Object.keys(s.transitions).length > 0);
+  const isEnabled = options?.enabled ?? true;
 
   return useQuery({
     queryKey: runtimeKeys.applications(),
     queryFn: () => runtimeService.getApplications(),
-    enabled: isAuthenticated,
-    refetchInterval: hasActiveTransitions ? 5_000 : 30_000,
+    enabled: isAuthenticated && isEnabled,
+    refetchInterval: isEnabled ? (hasActiveTransitions ? 5_000 : 30_000) : false,
     select: (data) => {
       if (Array.isArray(data)) {
         const now = Date.now();

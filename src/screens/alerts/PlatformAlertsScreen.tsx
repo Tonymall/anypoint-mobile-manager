@@ -24,6 +24,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 import type { Alert, AlertSeverity } from '../../types';
 import { anypointColors, severityColors } from '../../theme';
@@ -229,11 +230,12 @@ const tagTextStyle = (theme: MD3Theme) => ({
 const PlatformAlertsScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const isFocused = useIsFocused();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ALL');
 
-  const { data: alerts, isLoading, error, refetch, isRefetching } = usePlatformAlerts();
+  const { data: alerts, isLoading, error, refetch, isRefetching } = usePlatformAlerts(undefined, { enabled: isFocused });
 
   const alertsList = useMemo(() => ((alerts as any)?.data ?? []) as Alert[], [alerts]);
 

@@ -23,6 +23,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useIsFocused } from '@react-navigation/native';
 
 import { useAuthStore } from '../../stores/authStore';
 import { getRegionById } from '../../config/regions';
@@ -193,6 +194,7 @@ const CONTENT_MAX_WIDTH = 768;
 const DashboardScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { isLandscape, isPhoneLandscape } = useResponsiveLayout();
@@ -206,8 +208,8 @@ const DashboardScreen: React.FC = () => {
   const region = getRegionById(selectedRegion);
 
   // Real data queries
-  const { data: applications, isLoading: appsLoading, error: appsError, refetch: refetchApps } = useApplications();
-  const { data: apisResponse, isLoading: apisLoading, error: apisError, refetch: refetchApis } = useManagedAPIs();
+  const { data: applications, isLoading: appsLoading, error: appsError, refetch: refetchApps } = useApplications({ enabled: isFocused });
+  const { data: apisResponse, isLoading: apisLoading, error: apisError, refetch: refetchApis } = useManagedAPIs(undefined, { enabled: isFocused });
 
   const handleRefresh = () => { refetchApps(); refetchApis(); };
 

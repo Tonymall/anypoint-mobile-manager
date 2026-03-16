@@ -28,6 +28,7 @@ import {
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 import type { Application, AppStatus } from '../../types';
 import { anypointColors } from '../../theme';
@@ -171,6 +172,7 @@ const CONTENT_MAX_WIDTH = 768;
 const ApplicationsListScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const isFocused = useIsFocused();
   const { width: windowWidth } = useWindowDimensions();
   const { columns } = useResponsiveLayout();
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -181,7 +183,7 @@ const ApplicationsListScreen: React.FC = () => {
   const [filterVisible, setFilterVisible] = useState(false);
   const [sortOrder, setSortOrder] = useState<'default' | 'az' | 'za'>('default');
 
-  const { data: applications, isLoading, error, refetch, isRefetching } = useApplications();
+  const { data: applications, isLoading, error, refetch, isRefetching } = useApplications({ enabled: isFocused });
 
   const appsList = useMemo(() => applications ?? [], [applications]);
 
