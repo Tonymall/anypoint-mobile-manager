@@ -94,7 +94,17 @@ const INJECTED_JS = `
       var xsrfOnly = null;
       var xsrfOnlyMatch = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/);
       if (xsrfOnlyMatch) xsrfOnly = decodeURIComponent(xsrfOnlyMatch[1]);
-      if (xsrfOnly) {
+      var path = window.location.pathname || '';
+      var isLoginLikePath =
+        path === '/accounts' ||
+        path === '/accounts/' ||
+        path === '/accounts/login' ||
+        path === '/accounts/login/' ||
+        path === '/login/signin' ||
+        path === '/login/signin/' ||
+        path.indexOf('/accounts/login') === 0 ||
+        path.indexOf('/login/signin') === 0;
+      if (xsrfOnly && !isLoginLikePath) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'session_only',
           xsrfToken: xsrfOnly,
@@ -206,7 +216,6 @@ const SILENT_AUTH_JS = `
 const POST_LOGIN_PATHS = [
   '/home/',
   '/home',
-  '/accounts/',
   '/exchange/',
   '/apimanager/',
   '/cloudhub/',
@@ -369,6 +378,8 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (
+          path === '/accounts' ||
+          path === '/accounts/' ||
           path === '/accounts/login' ||
           path === '/accounts/login/' ||
           path === '/login/signin' ||
