@@ -125,6 +125,8 @@ export function useApplications(options?: { enabled?: boolean }) {
     queryFn: () => runtimeService.getApplications(),
     enabled: isAuthenticated && isEnabled,
     refetchInterval: isEnabled ? (hasActiveTransitions ? 5_000 : 30_000) : false,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
     select: (data) => {
       if (Array.isArray(data)) {
         const now = Date.now();
@@ -190,6 +192,8 @@ export function useApplication(
     queryFn: () => runtimeService.getApplication(domain),
     enabled: !!domain,
     refetchInterval: options?.refetchInterval ?? (hasActiveTransition ? 5_000 : false),
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
   });
 }
 
