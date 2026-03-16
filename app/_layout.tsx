@@ -15,11 +15,13 @@ import { useNotificationStore } from '../src/stores/notificationStore';
 import { useRemoteConfigStore } from '../src/stores/remoteConfigStore';
 import {
   restoreRegion,
+  setAuthHeader,
   setOrganizationHeader,
   setEnvironmentHeader,
   getStoredAccessToken,
   clearTokens,
 } from '../src/services/api';
+import * as authService from '../src/services/authService';
 import {
   fetchAlertHistory,
   fetchMobileRemoteConfig,
@@ -81,18 +83,36 @@ export default function RootLayout() {
       const token = await getStoredAccessToken();
       const state = useAuthStore.getState();
 
-      if (!token) {
-        if (state.isAuthenticated) {
+      if (!state.rememberSession) {
+        if (token) {
+          await clearTokens();
+        }
+        if (state.isAuthenticated || state.user) {
           state.logout();
         }
-      } else if (!state.isAuthenticated && !state.user) {
-        await clearTokens();
-      } else if (state.isAuthenticated) {
-        if (state.currentOrganization) {
-          setOrganizationHeader(state.currentOrganization.id);
+      } else if (!token) {
+        if (state.isAuthenticated || state.user) {
+          state.logout();
         }
-        if (state.currentEnvironment) {
-          setEnvironmentHeader(state.currentEnvironment.id);
+      } else if (!state.isAuthenticated || !state.user) {
+        await clearTokens();
+        state.logout();
+      } else {
+        try {
+          setAuthHeader(token);
+          const restoredUser = await authService.getCurrentUser(token);
+          state.setUser(restoredUser);
+
+          if (state.currentOrganization) {
+            setOrganizationHeader(state.currentOrganization.id);
+          }
+          if (state.currentEnvironment) {
+            setEnvironmentHeader(state.currentEnvironment.id);
+          }
+        } catch (error: any) {
+          logger.warn('[RootLayout] Stored session restore failed:', error?.message);
+          await clearTokens();
+          state.logout();
         }
       }
 

@@ -23,6 +23,7 @@ export interface AuthState {
   tokens: AuthTokens | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  rememberSession: boolean;
   selectedRegion: ControlPlaneRegionId;
   currentOrganization: Organization | null;
   currentEnvironment: Environment | null;
@@ -36,6 +37,7 @@ export interface AuthActions {
   completeLogin: () => void;
   logout: () => void;
   refreshToken: (tokens: AuthTokens) => void;
+  setRememberSession: (rememberSession: boolean) => void;
   setSelectedRegion: (region: ControlPlaneRegionId) => void;
   switchOrganization: (organization: Organization) => void;
   switchEnvironment: (environment: Environment) => void;
@@ -51,6 +53,7 @@ const initialState: AuthState = {
   tokens: null,
   isAuthenticated: false,
   isLoading: false,
+  rememberSession: false,
   selectedRegion: DEFAULT_REGION_ID,
   currentOrganization: null,
   currentEnvironment: null,
@@ -121,6 +124,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
           resetSessionScopedState(state.user?.id, null);
           return {
             ...initialState,
+            rememberSession: state.rememberSession,
             selectedRegion: state.selectedRegion,
           };
         }),
@@ -128,6 +132,11 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       refreshToken: (tokens) =>
         set({
           tokens,
+        }),
+
+      setRememberSession: (rememberSession) =>
+        set({
+          rememberSession,
         }),
 
       setSelectedRegion: (region) =>
@@ -177,9 +186,27 @@ export const useAuthStore = create<AuthState & AuthActions>()(
     {
       name: 'anypoint-auth-v3',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({
-        selectedRegion: state.selectedRegion,
-      }),
+      partialize: (state) => {
+        const baseState = {
+          selectedRegion: state.selectedRegion,
+          rememberSession: state.rememberSession,
+        };
+
+        if (!state.rememberSession) {
+          return baseState;
+        }
+
+        return {
+          ...baseState,
+          user: state.user,
+          tokens: state.tokens,
+          isAuthenticated: state.isAuthenticated,
+          currentOrganization: state.currentOrganization,
+          currentEnvironment: state.currentEnvironment,
+          organizations: state.organizations,
+          environments: state.environments,
+        };
+      },
     },
   ),
 );
