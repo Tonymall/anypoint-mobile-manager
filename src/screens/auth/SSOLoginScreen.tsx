@@ -28,14 +28,22 @@ import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 const INJECTED_JS = `
   (function() {
-    try {
-      var xhr = new XMLHttpRequest();
-      xhr.open('GET', '/accounts/api/me', false);
-      xhr.withCredentials = true;
-      xhr.send();
+    function tryProfileRequest(path) {
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', path, false);
+        xhr.withCredentials = true;
+        xhr.send();
+        if (xhr.status === 200) {
+          return JSON.parse(xhr.responseText);
+        }
+      } catch (e) {}
+      return null;
+    }
 
-      if (xhr.status === 200) {
-        var data = JSON.parse(xhr.responseText);
+    try {
+      var data = tryProfileRequest('/accounts/api/me') || tryProfileRequest('/accounts/api/profile');
+      if (data) {
         var user = data.user || data;
         var orgs = user.memberOfOrganizations || [];
 
@@ -94,7 +102,19 @@ const INJECTED_JS = `
       var xsrfOnly = null;
       var xsrfOnlyMatch = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]+)/);
       if (xsrfOnlyMatch) xsrfOnly = decodeURIComponent(xsrfOnlyMatch[1]);
-      if (xsrfOnly) {
+      var path = window.location.pathname || '';
+      var isLoginLikePath =
+        path === '/accounts' ||
+        path === '/accounts/' ||
+        path === '/accounts/login' ||
+        path === '/accounts/login/' ||
+        path === '/login' ||
+        path === '/login/' ||
+        path === '/login/signin' ||
+        path === '/login/signin/' ||
+        path.indexOf('/accounts/login') === 0 ||
+        path.indexOf('/login/') === 0;
+      if (xsrfOnly && !isLoginLikePath) {
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'session_only',
           xsrfToken: xsrfOnly,
@@ -206,7 +226,6 @@ const SILENT_AUTH_JS = `
 const POST_LOGIN_PATHS = [
   '/home/',
   '/home',
-  '/accounts/',
   '/exchange/',
   '/apimanager/',
   '/cloudhub/',
@@ -234,6 +253,7 @@ const SSOLoginScreen: React.FC = () => {
 
   const hasInjectedRef = useRef(false);
   const hasPrefilledRef = useRef(false);
+  const hasRetriedSilentAuthRef = useRef(false);
   const retryCountRef = useRef(0);
   const timeoutIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const baseUrl = pendingMfaChallenge?.baseUrl ?? getBaseUrl();
@@ -369,10 +389,15 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (
+          path === '/accounts' ||
+          path === '/accounts/' ||
           path === '/accounts/login' ||
           path === '/accounts/login/' ||
+          path === '/login' ||
+          path === '/login/' ||
           path === '/login/signin' ||
-          path === '/login/signin/'
+          path === '/login/signin/' ||
+          path.startsWith('/login/')
         ) {
           return false;
         }
@@ -384,9 +409,10 @@ const SSOLoginScreen: React.FC = () => {
         if (
           parsed.origin === baseUrl &&
           path !== '/accounts/login' &&
+          path !== '/login' &&
           path !== '/login/signin' &&
           !path.startsWith('/accounts/login') &&
-          !path.startsWith('/login/signin')
+          !path.startsWith('/login/')
         ) {
           return true;
         }
@@ -410,11 +436,19 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (!token || typeof token !== 'string' || token.length === 0) {
-          if (isMfaContinuation) {
-            logger.log('[SSO] No bearer token yet after MFA browser login; waiting for silent auth token');
+          if (!hasRetriedSilentAuthRef.current) {
+            hasRetriedSilentAuthRef.current = true;
+            logger.log(
+              isMfaContinuation
+                ? '[SSO] No bearer token yet after MFA browser login; waiting for silent auth token'
+                : '[SSO] No bearer token yet after browser login; retrying silent auth token capture',
+            );
             scheduleTimeout(() => {
               webViewRef.current?.injectJavaScript(silentAuthJs);
             }, 250);
+            scheduleTimeout(() => {
+              webViewRef.current?.injectJavaScript(INJECTED_JS);
+            }, 3000);
             setIsExtracting(false);
             return;
           }
@@ -474,6 +508,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Authentication complete, navigating to org selection');
+        hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Authentication failed:', error?.message);
@@ -512,6 +547,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Session-cookie authentication complete');
+        hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Session-cookie auth failed:', error?.message);
@@ -552,6 +588,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Token-only authentication complete');
+        hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Token-only auth failed:', error?.message);
@@ -631,9 +668,13 @@ const SSOLoginScreen: React.FC = () => {
         logger.log('[SSO] Post-login redirect detected');
         hasInjectedRef.current = true;
         retryCountRef.current = 0;
+        hasRetriedSilentAuthRef.current = false;
+        scheduleTimeout(() => {
+          webViewRef.current?.injectJavaScript(silentAuthJs);
+        }, 250);
         scheduleTimeout(() => {
           webViewRef.current?.injectJavaScript(INJECTED_JS);
-        }, 2500);
+        }, 3500);
       }
     },
     [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, scheduleTimeout, showError, silentAuthJs],
@@ -661,6 +702,7 @@ const SSOLoginScreen: React.FC = () => {
 
           case 'spa_token':
             logger.log('[SSO] anypoint_spa token captured from silent auth iframe');
+            hasRetriedSilentAuthRef.current = false;
             completeWithTokenOnly(data.token);
             break;
 
@@ -684,9 +726,7 @@ const SSOLoginScreen: React.FC = () => {
               scheduleTimeout(() => {
                 if (!hasInjectedRef.current) {
                   hasInjectedRef.current = true;
-                  if (isMfaContinuation) {
-                    webViewRef.current?.injectJavaScript(silentAuthJs);
-                  }
+                  webViewRef.current?.injectJavaScript(silentAuthJs);
                   webViewRef.current?.injectJavaScript(INJECTED_JS);
                 }
               }, 2000);

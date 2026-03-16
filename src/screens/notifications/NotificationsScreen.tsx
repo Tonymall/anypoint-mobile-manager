@@ -178,24 +178,22 @@ const NotificationsScreen: React.FC = () => {
   }, [markAsRead]);
 
   const handleDelete = useCallback(async (id: string) => {
+    removeNotification(id);
     try {
       await deleteAlertHistoryItem(id);
-      removeNotification(id);
     } catch (error) {
       logger.warn('[NotificationsScreen] Failed to delete alert history item:', (error as Error)?.message);
     }
   }, [removeNotification]);
 
   const handleClearAll = useCallback(async () => {
-    try {
-      setClearingAll(true);
-      await clearAlertHistory();
-      clearAll();
-    } catch (error) {
+    setClearingAll(true);
+    clearAll();
+    setClearingAll(false);
+
+    void clearAlertHistory().catch((error) => {
       logger.warn('[NotificationsScreen] Failed to clear alert history:', (error as Error)?.message);
-    } finally {
-      setClearingAll(false);
-    }
+    });
   }, [clearAll]);
 
   const handleRefresh = useCallback(() => {

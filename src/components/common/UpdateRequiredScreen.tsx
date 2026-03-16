@@ -2,6 +2,19 @@ import React from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 import { Button, Text, useTheme } from 'react-native-paper';
 
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    const supported = await Linking.canOpenURL(url);
+    if (!supported) {
+      return;
+    }
+
+    await Linking.openURL(url);
+  } catch {
+    // Ignore store-link open failures in unsupported runtimes.
+  }
+}
+
 interface UpdateRequiredScreenProps {
   currentVersion: string;
   minimumVersion: string;
@@ -40,10 +53,10 @@ const UpdateRequiredScreen: React.FC<UpdateRequiredScreenProps> = ({
         <Button mode="contained" onPress={onRetry} style={styles.button}>
           Check Again
         </Button>
-        <Button mode="outlined" onPress={() => Linking.openURL(APP_STORE_URL)} style={styles.button}>
+        <Button mode="outlined" onPress={() => void openExternalUrl(APP_STORE_URL)} style={styles.button}>
           Open App Store
         </Button>
-        <Button mode="outlined" onPress={() => Linking.openURL(PLAY_STORE_URL)} style={styles.button}>
+        <Button mode="outlined" onPress={() => void openExternalUrl(PLAY_STORE_URL)} style={styles.button}>
           Open Play Store
         </Button>
       </View>

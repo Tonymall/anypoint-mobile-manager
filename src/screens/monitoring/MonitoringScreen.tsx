@@ -9,6 +9,7 @@ import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator, type 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
+import { useIsFocused } from '@react-navigation/native';
 import { useApplications } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
 import { isMonitoringUnavailable, resetSessionFlags } from '../../services/runtimeService';
@@ -674,6 +675,7 @@ const MonitoringScreen: React.FC = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const isFocused = useIsFocused();
   const { width: windowWidth } = useWindowDimensions();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef<FlatList>(null);
@@ -689,7 +691,7 @@ const MonitoringScreen: React.FC = () => {
     error: appsError,
     refetch: refetchApps,
     isRefetching: appsRefetching,
-  } = useApplications();
+  } = useApplications({ enabled: isFocused });
 
   const isRefreshing = appsRefetching;
 
@@ -727,8 +729,8 @@ const MonitoringScreen: React.FC = () => {
         queryKey: ['runtime', 'dashStats', d],
         queryFn: () => runtimeService.getDashboardStats(d, 60, monitoringContext),
         staleTime: 60_000,
-        refetchInterval: 120_000,
-        enabled: !!d,
+        refetchInterval: isFocused ? 120_000 : false,
+        enabled: !!d && isFocused,
       };
     }),
   });

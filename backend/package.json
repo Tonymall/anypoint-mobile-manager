@@ -1,6 +1,6 @@
 {
   "name": "muleops-backend",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Thin backend for MuleOps operational services",
   "main": "dist/server.js",

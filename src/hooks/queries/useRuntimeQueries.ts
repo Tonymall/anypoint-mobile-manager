@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as runtimeService from '../../services/runtimeService';
-import { publishAlertEvent } from '../../services/backendService';
+import { publishAlertEvent, startLifecycleWatch } from '../../services/backendService';
+import { getRegionById } from '../../config/regions';
+import { getBaseUrl } from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { scheduleLocalNotification } from '../../services/notificationService';
@@ -96,6 +98,31 @@ function emitNotification(
   });
 }
 
+function queueLifecycleWatch(domain: string, action: 'start' | 'stop' | 'restart') {
+  const auth = useAuthStore.getState();
+  const accessToken = auth.tokens?.accessToken;
+  const organizationId = auth.currentOrganization?.id;
+  const environmentId = auth.currentEnvironment?.id;
+  const userId = auth.user?.id;
+
+  if (!accessToken || !organizationId || !environmentId || !userId) {
+    return;
+  }
+
+  const region = getRegionById(auth.selectedRegion);
+
+  void startLifecycleWatch({
+    userId,
+    domain,
+    action,
+    accessToken,
+    baseUrl: getBaseUrl(),
+    organizationId,
+    environmentId,
+    controlPlane: region.label,
+  });
+}
+
 function patchApplicationStatusInCache(
   queryClient: ReturnType<typeof useQueryClient>,
   domain: string,
@@ -114,16 +141,19 @@ function patchApplicationStatusInCache(
   });
 }
 
-export function useApplications() {
+export function useApplications(options?: { enabled?: boolean }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const addNotification = useNotificationStore((s) => s.addNotification);
   const hasActiveTransitions = useRuntimeTransitionStore((s) => Object.keys(s.transitions).length > 0);
+  const isEnabled = options?.enabled ?? true;
 
   return useQuery({
     queryKey: runtimeKeys.applications(),
     queryFn: () => runtimeService.getApplications(),
-    enabled: isAuthenticated,
-    refetchInterval: hasActiveTransitions ? 5_000 : 30_000,
+    enabled: isAuthenticated && isEnabled,
+    refetchInterval: isEnabled ? (hasActiveTransitions ? 5_000 : 30_000) : false,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
     select: (data) => {
       if (Array.isArray(data)) {
         const now = Date.now();
@@ -189,6 +219,8 @@ export function useApplication(
     queryFn: () => runtimeService.getApplication(domain),
     enabled: !!domain,
     refetchInterval: options?.refetchInterval ?? (hasActiveTransition ? 5_000 : false),
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
   });
 }
 
@@ -292,6 +324,7 @@ export function useStartApp() {
         domain,
       }, addNotification);
       scheduleLocalNotification('Application Starting', `${domain} is being started`);
+      queueLifecycleWatch(domain, 'start');
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
@@ -331,6 +364,7 @@ export function useStopApp() {
         domain,
       }, addNotification);
       scheduleLocalNotification('Application Stopping', `${domain} is being stopped`);
+      queueLifecycleWatch(domain, 'stop');
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
@@ -370,6 +404,7 @@ export function useRestartApp() {
         domain,
       }, addNotification);
       scheduleLocalNotification('Application Restarting', `${domain} is being restarted`);
+      queueLifecycleWatch(domain, 'restart');
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);

@@ -13,6 +13,7 @@ import {
   Icon,
   type MD3Theme,
 } from 'react-native-paper';
+import { useIsFocused } from '@react-navigation/native';
 
 import type { APIStatus, ManagedAPI } from '../../types';
 import { statusColors, anypointColors } from '../../theme';
@@ -265,6 +266,7 @@ const cardStyles = StyleSheet.create({
 
 const APIListScreen: React.FC = () => {
   const theme = useTheme<MD3Theme>();
+  const isFocused = useIsFocused();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -275,7 +277,7 @@ const APIListScreen: React.FC = () => {
     error,
     refetch,
     isRefetching,
-  } = useManagedAPIs({ query: debouncedSearch || undefined });
+  } = useManagedAPIs({ query: debouncedSearch || undefined }, { enabled: isFocused });
 
   const allApis = useMemo(() => apisResponse ?? [], [apisResponse]);
 

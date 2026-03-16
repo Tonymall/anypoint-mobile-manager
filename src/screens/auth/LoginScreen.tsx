@@ -21,6 +21,7 @@ import {
   ActivityIndicator,
   Divider,
   Menu,
+  Checkbox,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,6 +65,8 @@ const LoginScreen: React.FC = () => {
   // --- Region State ---
   const selectedRegion = useAuthStore((state) => state.selectedRegion);
   const setSelectedRegion = useAuthStore((state) => state.setSelectedRegion);
+  const rememberSession = useAuthStore((state) => state.rememberSession);
+  const setRememberSession = useAuthStore((state) => state.setRememberSession);
   const [regionMenuVisible, setRegionMenuVisible] = useState(false);
 
   // --- UI State ---
@@ -105,6 +108,7 @@ const LoginScreen: React.FC = () => {
     setIsLoadingStore(true);
 
     const regionUrl = getRegionUrl(selectedRegion);
+    setRememberSession(rememberSession);
 
     try {
       logger.log('[Login] Starting login flow...');
@@ -224,11 +228,12 @@ const LoginScreen: React.FC = () => {
       setIsLoadingStore(false);
       loginInProgressRef.current = false;
     }
-  }, [username, password, selectedRegion, loginPending, setIsLoadingStore, router, showError]);
+  }, [username, password, selectedRegion, rememberSession, loginPending, setIsLoadingStore, router, setRememberSession, showError]);
 
   const handleSSOLogin = useCallback(() => {
+    setRememberSession(rememberSession);
     router.push('/(auth)/sso');
-  }, [router]);
+  }, [rememberSession, router, setRememberSession]);
 
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
   const currentRegion = getRegionById(selectedRegion);
@@ -427,6 +432,44 @@ const LoginScreen: React.FC = () => {
                   onSubmitEditing={handleLogin}
                   outlineStyle={styles.inputOutline}
                 />
+
+                <Pressable
+                  onPress={() => setRememberSession(!rememberSession)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: rememberSession }}
+                  accessibilityLabel="Stay signed in"
+                  style={styles.rememberRow}
+                >
+                  <View
+                    style={[
+                      styles.rememberCheckboxBox,
+                      {
+                        borderColor: rememberSession ? theme.colors.primary : theme.colors.outline,
+                        backgroundColor: rememberSession
+                          ? theme.colors.primary + '10'
+                          : theme.colors.surface,
+                      },
+                    ]}
+                  >
+                    <Checkbox
+                      status={rememberSession ? 'checked' : 'unchecked'}
+                    />
+                  </View>
+                  <View style={styles.rememberTextWrap}>
+                    <Text
+                      variant="bodyMedium"
+                      style={{ color: theme.colors.onSurface, fontWeight: '500' }}
+                    >
+                      Stay signed in
+                    </Text>
+                    <Text
+                      variant="bodySmall"
+                      style={{ color: theme.colors.onSurfaceVariant }}
+                    >
+                      Keep this account logged in on this device
+                    </Text>
+                  </View>
+                </Pressable>
 
                 {/* Sign In Button */}
                 <Button
@@ -629,6 +672,21 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 14,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: -2,
+    marginBottom: 12,
+    paddingRight: 8,
+  },
+  rememberCheckboxBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  rememberTextWrap: {
+    flex: 1,
   },
   inputOutline: {
     borderRadius: 12,

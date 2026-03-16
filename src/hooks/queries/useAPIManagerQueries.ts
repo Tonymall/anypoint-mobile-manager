@@ -8,15 +8,19 @@ export const apiManagerKeys = {
   api: (orgId: string, envId: string, apiId: number) => [...apiManagerKeys.all, 'api', orgId, envId, apiId] as const,
 };
 
-export function useManagedAPIs(params?: { query?: string; offset?: number; limit?: number }) {
+export function useManagedAPIs(
+  params?: { query?: string; offset?: number; limit?: number },
+  options?: { enabled?: boolean },
+) {
   const org = useAuthStore((s) => s.currentOrganization);
   const env = useAuthStore((s) => s.currentEnvironment);
+  const isEnabled = options?.enabled ?? true;
 
   return useQuery({
     queryKey: [...apiManagerKeys.apis(org?.id ?? '', env?.id ?? ''), params],
     queryFn: () => apiManagerService.getManagedAPIs(org!.id, env!.id, params),
-    enabled: !!org && !!env,
-    refetchInterval: 60_000,
+    enabled: !!org && !!env && isEnabled,
+    refetchInterval: isEnabled ? 60_000 : false,
   });
 }
 

@@ -10,10 +10,13 @@
 // ============================================================
 
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { useAppStore } from '../stores/appStore';
+import logger from '../utils/logger';
 
 type NotificationsModule = typeof import('expo-notifications');
+const PUSH_INSTALLATION_ID_KEY = 'muleops_push_installation_id';
 
 let notificationsModulePromise: Promise<NotificationsModule | null> | null = null;
 let notificationHandlerConfigured = false;
@@ -70,6 +73,65 @@ async function ensureNotificationPermission(
   if (existing === 'granted') return true;
   const { status } = await Notifications.requestPermissionsAsync();
   return status === 'granted';
+}
+
+async function getInstallationId(): Promise<string> {
+  const existing = await AsyncStorage.getItem(PUSH_INSTALLATION_ID_KEY);
+  if (existing) {
+    return existing;
+  }
+
+  const generated = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  await AsyncStorage.setItem(PUSH_INSTALLATION_ID_KEY, generated);
+  return generated;
+}
+
+function getExpoProjectId(): string | null {
+  const fromEasConfig = (Constants.easConfig as { projectId?: string } | null)?.projectId;
+  const fromExpoConfig = (Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined)?.eas?.projectId;
+  return fromEasConfig ?? fromExpoConfig ?? null;
+}
+
+export interface RemotePushRegistration {
+  installationId: string;
+  expoPushToken: string;
+}
+
+export async function getRemotePushRegistration(): Promise<RemotePushRegistration | null> {
+  if (Platform.OS === 'web') {
+    return null;
+  }
+
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) {
+    return null;
+  }
+
+  const permissionGranted = await ensureNotificationPermission(Notifications);
+  if (!permissionGranted) {
+    return null;
+  }
+
+  const projectId = getExpoProjectId();
+  if (!projectId) {
+    logger.warn('[Notifications] Missing Expo projectId, remote push registration skipped');
+    return null;
+  }
+
+  try {
+    const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
+    if (!tokenResponse.data) {
+      return null;
+    }
+
+    return {
+      installationId: await getInstallationId(),
+      expoPushToken: tokenResponse.data,
+    };
+  } catch (error) {
+    logger.warn('[Notifications] Failed to get Expo push token:', (error as Error)?.message);
+    return null;
+  }
 }
 
 /**
