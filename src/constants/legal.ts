@@ -5,8 +5,8 @@
 // All users must re-accept when the version changes.
 // ============================================================
 
-export const TERMS_VERSION = '2026-03.2';
-export const TERMS_LAST_UPDATED = 'March 9, 2026';
+export const TERMS_VERSION = '2026-03.3';
+export const TERMS_LAST_UPDATED = 'March 16, 2026';
 
 export interface TermsSection {
   title: string;
@@ -32,7 +32,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
   },
   {
     title: 'Credentials, Data & Privacy',
-    body: 'MuleOps uses the credentials or tokens you provide to authenticate with connected MuleSoft APIs. App settings and accepted legal state may be stored locally on your device. Data shown in the application is retrieved from the MuleSoft services you are authorized to access. Bug reports and server-synced alert history may be processed through MuleOps backend services to support diagnostics and improve the application. You remain responsible for protecting access to your device, accounts, and environments. Additional privacy details are described in the MuleOps Privacy Policy.',
+    body: 'MuleOps uses the credentials or tokens you provide to authenticate with connected MuleSoft APIs. App settings, accepted legal state, cached notifications, and optionally remembered session data may be stored locally on your device when you enable stay signed in. Data shown in the application is retrieved from the MuleSoft services you are authorized to access. Bug reports, server-synced alert history, device push-registration data, and lifecycle notification delivery data may be processed through MuleOps backend services to support diagnostics, synchronization, and notification delivery. You remain responsible for protecting access to your device, accounts, and environments. Additional privacy details are described in the MuleOps Privacy Policy.',
   },
   {
     title: 'No Ownership Claim',

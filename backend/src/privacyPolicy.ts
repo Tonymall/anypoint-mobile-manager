@@ -58,7 +58,7 @@ export function renderPrivacyPolicyHtml(): string {
     <main>
       <div class="card">
         <h1>Privacy Policy</h1>
-        <p class="muted">Last updated: March 9, 2026</p>
+        <p class="muted">Last updated: March 16, 2026</p>
 
         <p>
           MuleOps is an independent mobile operations companion for authorized users of MuleSoft Anypoint Platform.
@@ -78,6 +78,8 @@ export function renderPrivacyPolicyHtml(): string {
           <li>Operational data retrieved from MuleSoft APIs, such as applications, alerts, logs, deployments, and monitoring results.</li>
           <li>Optional bug reports submitted by the user, including email address, username, app version, control plane, and description of the issue.</li>
           <li>Local app preferences such as theme, notification preferences, accepted legal terms, and cached notification history.</li>
+          <li>Optional remembered-session state when the user enables stay signed in on the device.</li>
+          <li>Device push registration data, including Expo push token, installation identifier, platform, and app version, when push notifications are enabled.</li>
           <li>Biometric preference state used to support secure local authentication features when enabled by the user.</li>
         </ul>
 
@@ -86,6 +88,7 @@ export function renderPrivacyPolicyHtml(): string {
           <li>To authenticate the user against MuleSoft services.</li>
           <li>To display operational information the user is authorized to access.</li>
           <li>To send local notifications and maintain alert history for the signed-in user.</li>
+          <li>To register devices for remote push notifications and deliver lifecycle completion alerts after the app is backgrounded or closed.</li>
           <li>To receive, store, and deliver bug reports sent by the user.</li>
           <li>To enforce app configuration such as minimum supported version and operational feature flags.</li>
         </ul>
@@ -96,14 +99,15 @@ export function renderPrivacyPolicyHtml(): string {
         </p>
         <ul>
           <li>MuleSoft / Salesforce services requested by the user through the app.</li>
-          <li>The MuleOps backend for bug reporting, alert history synchronization, and remote configuration.</li>
+          <li>The MuleOps backend for bug reporting, alert history synchronization, remote configuration, device push registration, and lifecycle notification delivery.</li>
           <li>Email delivery infrastructure used to forward bug reports to support.</li>
         </ul>
 
         <h2>Local storage</h2>
         <p>
           The app stores some information locally on the device, including preferences, accepted legal terms, cached notifications,
-          and secure authentication material required for the current session.
+          secure authentication material required for the current session, and optionally remembered-session state when the user
+          chooses to stay signed in.
         </p>
 
         <h2>Retention</h2>

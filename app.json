@@ -2,7 +2,7 @@
   "expo": {
     "name": "MuleOps",
     "slug": "muleops",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -99,7 +99,7 @@
         "projectId": "d66e51ed-3908-4f1e-a8df-64216e724408"
       }
     },
-    "runtimeVersion": "1.0.0",
+    "runtimeVersion": "1.0.1",
     "updates": {
       "url": "https://u.expo.dev/d66e51ed-3908-4f1e-a8df-64216e724408"
     }
