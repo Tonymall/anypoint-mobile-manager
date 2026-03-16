@@ -40,6 +40,20 @@ const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 const RELEASE_STAGE = ((Constants.expoConfig?.extra as { releaseStage?: string } | undefined)?.releaseStage ?? 'beta').toUpperCase();
 const PRIVACY_POLICY_URL = `${(process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://muleops-backend.onrender.com').replace(/\/$/, '')}/privacy-policy`;
 
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    const supported = await Linking.canOpenURL(url);
+    if (!supported) {
+      logger.warn('[Settings] Unable to open external URL:', url);
+      return;
+    }
+
+    await Linking.openURL(url);
+  } catch (error) {
+    logger.warn('[Settings] Failed to open external URL:', (error as Error)?.message);
+  }
+}
+
 // â”€â”€ Reusable Setting Row â”€â”€
 const SettingRow: React.FC<{
   icon: string;
@@ -447,7 +461,7 @@ const SettingsScreen: React.FC = () => {
           title="Privacy Policy"
           subtitle="How MuleOps handles data"
           onPress={() => {
-            void Linking.openURL(PRIVACY_POLICY_URL);
+            void openExternalUrl(PRIVACY_POLICY_URL);
           }}
           showChevron
         />

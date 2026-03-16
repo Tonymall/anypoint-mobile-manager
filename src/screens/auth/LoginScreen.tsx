@@ -438,19 +438,23 @@ const LoginScreen: React.FC = () => {
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: rememberSession }}
                   accessibilityLabel="Stay signed in"
-                  style={[
-                    styles.rememberRow,
-                    {
-                      borderColor: rememberSession ? theme.colors.primary : theme.colors.outline,
-                      backgroundColor: rememberSession
-                        ? theme.colors.primary + '10'
-                        : theme.colors.surface,
-                    },
-                  ]}
+                  style={styles.rememberRow}
                 >
-                  <Checkbox
-                    status={rememberSession ? 'checked' : 'unchecked'}
-                  />
+                  <View
+                    style={[
+                      styles.rememberCheckboxBox,
+                      {
+                        borderColor: rememberSession ? theme.colors.primary : theme.colors.outline,
+                        backgroundColor: rememberSession
+                          ? theme.colors.primary + '10'
+                          : theme.colors.surface,
+                      },
+                    ]}
+                  >
+                    <Checkbox
+                      status={rememberSession ? 'checked' : 'unchecked'}
+                    />
+                  </View>
                   <View style={styles.rememberTextWrap}>
                     <Text
                       variant="bodyMedium"
@@ -672,16 +676,17 @@ const styles = StyleSheet.create({
   rememberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: -4,
+    marginTop: -2,
     marginBottom: 12,
-    marginLeft: -8,
+    paddingRight: 8,
+  },
+  rememberCheckboxBox: {
     borderWidth: 1,
     borderRadius: 12,
-    paddingRight: 12,
+    marginRight: 8,
   },
   rememberTextWrap: {
     flex: 1,
-    marginLeft: 4,
   },
   inputOutline: {
     borderRadius: 12,
