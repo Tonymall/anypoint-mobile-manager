@@ -14,6 +14,7 @@ const ANONYMOUS_USER_ID = 'anonymous';
 interface NotificationState {
   activeUserId: string | null;
   notificationsByUser: Record<string, AppNotification[]>;
+  clearedAtByUser: Record<string, number>;
   notifications: AppNotification[];
   unreadCount: number;
   permissionGranted: boolean | null;
@@ -43,6 +44,7 @@ export const useNotificationStore = create<NotificationState & NotificationActio
     (set, _get) => ({
       activeUserId: null,
       notificationsByUser: {},
+      clearedAtByUser: {},
       notifications: [],
       unreadCount: 0,
       permissionGranted: null,
@@ -61,7 +63,13 @@ export const useNotificationStore = create<NotificationState & NotificationActio
       replaceNotificationsForActiveUser: (notifications) =>
         set((state) => {
           const userKey = resolveUserKey(state.activeUserId);
-          const deduped = notifications.slice(0, MAX_NOTIFICATIONS);
+          const clearedAt = state.clearedAtByUser[userKey] ?? 0;
+          const deduped = notifications
+            .filter((notification) => {
+              const timestamp = Date.parse(notification.timestamp);
+              return Number.isNaN(timestamp) || timestamp > clearedAt;
+            })
+            .slice(0, MAX_NOTIFICATIONS);
           return {
             notificationsByUser: {
               ...state.notificationsByUser,
@@ -135,6 +143,10 @@ export const useNotificationStore = create<NotificationState & NotificationActio
           delete notificationsByUser[userKey];
           return {
             notificationsByUser,
+            clearedAtByUser: {
+              ...state.clearedAtByUser,
+              [userKey]: Date.now(),
+            },
             notifications: [],
             unreadCount: 0,
           };
@@ -162,12 +174,17 @@ export const useNotificationStore = create<NotificationState & NotificationActio
       partialize: (state) => ({
         activeUserId: state.activeUserId,
         notificationsByUser: state.notificationsByUser,
+        clearedAtByUser: state.clearedAtByUser,
         permissionGranted: state.permissionGranted,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           const activeUserKey = resolveUserKey(state.activeUserId);
-          const notifications = state.notificationsByUser?.[activeUserKey] ?? [];
+          const clearedAt = state.clearedAtByUser?.[activeUserKey] ?? 0;
+          const notifications = (state.notificationsByUser?.[activeUserKey] ?? []).filter((notification) => {
+            const timestamp = Date.parse(notification.timestamp);
+            return Number.isNaN(timestamp) || timestamp > clearedAt;
+          });
           state.notifications = notifications;
           state.unreadCount = getUnreadCount(notifications);
         }
