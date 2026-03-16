@@ -253,6 +253,7 @@ const SSOLoginScreen: React.FC = () => {
 
   const hasInjectedRef = useRef(false);
   const hasPrefilledRef = useRef(false);
+  const hasRetriedSilentAuthRef = useRef(false);
   const retryCountRef = useRef(0);
   const timeoutIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const baseUrl = pendingMfaChallenge?.baseUrl ?? getBaseUrl();
@@ -435,11 +436,19 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (!token || typeof token !== 'string' || token.length === 0) {
-          if (isMfaContinuation) {
-            logger.log('[SSO] No bearer token yet after MFA browser login; waiting for silent auth token');
+          if (!hasRetriedSilentAuthRef.current) {
+            hasRetriedSilentAuthRef.current = true;
+            logger.log(
+              isMfaContinuation
+                ? '[SSO] No bearer token yet after MFA browser login; waiting for silent auth token'
+                : '[SSO] No bearer token yet after browser login; retrying silent auth token capture',
+            );
             scheduleTimeout(() => {
               webViewRef.current?.injectJavaScript(silentAuthJs);
             }, 250);
+            scheduleTimeout(() => {
+              webViewRef.current?.injectJavaScript(INJECTED_JS);
+            }, 3000);
             setIsExtracting(false);
             return;
           }
@@ -499,6 +508,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Authentication complete, navigating to org selection');
+        hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Authentication failed:', error?.message);
@@ -537,6 +547,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Session-cookie authentication complete');
+        hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Session-cookie auth failed:', error?.message);
@@ -577,6 +588,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Token-only authentication complete');
+        hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
         logger.error('[SSO] Token-only auth failed:', error?.message);
@@ -656,9 +668,13 @@ const SSOLoginScreen: React.FC = () => {
         logger.log('[SSO] Post-login redirect detected');
         hasInjectedRef.current = true;
         retryCountRef.current = 0;
+        hasRetriedSilentAuthRef.current = false;
+        scheduleTimeout(() => {
+          webViewRef.current?.injectJavaScript(silentAuthJs);
+        }, 250);
         scheduleTimeout(() => {
           webViewRef.current?.injectJavaScript(INJECTED_JS);
-        }, 2500);
+        }, 3500);
       }
     },
     [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, scheduleTimeout, showError, silentAuthJs],
@@ -686,6 +702,7 @@ const SSOLoginScreen: React.FC = () => {
 
           case 'spa_token':
             logger.log('[SSO] anypoint_spa token captured from silent auth iframe');
+            hasRetriedSilentAuthRef.current = false;
             completeWithTokenOnly(data.token);
             break;
 
@@ -709,9 +726,7 @@ const SSOLoginScreen: React.FC = () => {
               scheduleTimeout(() => {
                 if (!hasInjectedRef.current) {
                   hasInjectedRef.current = true;
-                  if (isMfaContinuation) {
-                    webViewRef.current?.injectJavaScript(silentAuthJs);
-                  }
+                  webViewRef.current?.injectJavaScript(silentAuthJs);
                   webViewRef.current?.injectJavaScript(INJECTED_JS);
                 }
               }, 2000);
