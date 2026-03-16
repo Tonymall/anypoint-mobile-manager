@@ -7,6 +7,7 @@ import { isAdminRequestAuthorized } from './auth';
 import { env } from './config';
 import { sendBugReportEmail } from './emailjs';
 import { renderPrivacyPolicyHtml } from './privacyPolicy';
+import { queueLifecycleWatch } from './runtimeWatchers';
 import {
   clearAlertEventsForUser,
   deleteAlertEventForUser,
@@ -14,6 +15,10 @@ import {
   listAlertEventsForUser,
   recordAlertEvent,
 } from './storage/alertEvents';
+import {
+  removeDevicePushToken,
+  upsertDevicePushToken,
+} from './storage/devicePushTokens';
 import {
   createBugReport,
   getBugReportStorageMode,
@@ -76,6 +81,30 @@ const remoteConfigSchema = z.object({
   supportEmail: z.string().trim().email().optional(),
   minimumSupportedVersion: z.string().trim().max(64).optional(),
   releaseStage: z.string().trim().max(64).optional(),
+});
+
+const pushRegistrationSchema = z.object({
+  userId: z.string().trim().min(1).max(200),
+  installationId: z.string().trim().min(1).max(200),
+  expoPushToken: z.string().trim().min(1).max(300),
+  platform: z.string().trim().min(1).max(32),
+  appVersion: z.string().trim().min(1).max(64),
+});
+
+const pushUnregisterSchema = z.object({
+  userId: z.string().trim().min(1).max(200),
+  installationId: z.string().trim().min(1).max(200),
+});
+
+const lifecycleWatchSchema = z.object({
+  userId: z.string().trim().min(1).max(200),
+  domain: z.string().trim().min(1).max(200),
+  action: z.enum(['start', 'stop', 'restart']),
+  accessToken: z.string().trim().min(1).max(8000),
+  baseUrl: z.string().trim().url(),
+  organizationId: z.string().trim().min(1).max(200),
+  environmentId: z.string().trim().min(1).max(200),
+  controlPlane: z.string().trim().min(1).max(64),
 });
 
 app.post('/api/bug-reports', async (req: Request, res: Response) => {
@@ -215,6 +244,57 @@ app.delete('/api/alerts/:id', async (req: Request, res: Response) => {
   res.status(deleted ? 200 : 404).json({
     ok: deleted,
     deleted,
+  });
+});
+
+app.post('/api/push/register', async (req: Request, res: Response) => {
+  const parsed = pushRegistrationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid push registration payload',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const record = await upsertDevicePushToken(parsed.data);
+  res.status(200).json({
+    ok: true,
+    record,
+  });
+});
+
+app.delete('/api/push/register', async (req: Request, res: Response) => {
+  const parsed = pushUnregisterSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid push unregister payload',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  const removed = await removeDevicePushToken(parsed.data.userId, parsed.data.installationId);
+  res.status(removed ? 200 : 404).json({
+    ok: removed,
+    removed,
+  });
+});
+
+app.post('/api/runtime/lifecycle-watch', async (req: Request, res: Response) => {
+  const parsed = lifecycleWatchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid lifecycle watch payload',
+      details: parsed.error.flatten(),
+    });
+    return;
+  }
+
+  queueLifecycleWatch(parsed.data);
+  res.status(202).json({
+    ok: true,
+    queued: true,
   });
 });
 

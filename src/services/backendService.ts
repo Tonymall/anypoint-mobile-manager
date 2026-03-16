@@ -51,9 +51,45 @@ export interface AdminBugReport {
 }
 
 export interface AdminAlertEvent extends BackendAlertEvent {}
+export interface PushRegistrationPayload {
+  userId: string;
+  installationId: string;
+  expoPushToken: string;
+  platform: string;
+  appVersion: string;
+}
+
+export interface LifecycleWatchPayload {
+  userId: string;
+  domain: string;
+  action: 'start' | 'stop' | 'restart';
+  accessToken: string;
+  baseUrl: string;
+  organizationId: string;
+  environmentId: string;
+  controlPlane: string;
+}
 
 async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
+}
+
+async function fetchWithTimeout(
+  input: string,
+  init?: RequestInit,
+  timeoutMs: number = 12000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function publishAlertEvent(notification: AppNotification): Promise<void> {
@@ -110,7 +146,7 @@ export async function clearAlertHistory(): Promise<void> {
     return;
   }
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${backendUrl}/api/alerts?userId=${encodeURIComponent(auth.user.id)}`,
     { method: 'DELETE' },
   );
@@ -127,7 +163,7 @@ export async function deleteAlertHistoryItem(alertId: string): Promise<void> {
     return;
   }
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `${backendUrl}/api/alerts/${encodeURIComponent(alertId)}?userId=${encodeURIComponent(auth.user.id)}`,
     { method: 'DELETE' },
   );
@@ -210,6 +246,63 @@ export async function fetchAdminMobileConfig(adminKey: string): Promise<MobileRe
 
   const data = await readJson<{ config?: MobileRemoteConfig }>(response);
   return data.config ?? null;
+}
+
+export async function registerPushDevice(payload: PushRegistrationPayload): Promise<void> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(`${backendUrl}/api/push/register`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to register push device: ${response.status}`);
+  }
+}
+
+export async function unregisterPushDevice(userId: string, installationId: string): Promise<void> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(`${backendUrl}/api/push/register`, {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ userId, installationId }),
+  });
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`Failed to unregister push device: ${response.status}`);
+  }
+}
+
+export async function startLifecycleWatch(payload: LifecycleWatchPayload): Promise<void> {
+  const backendUrl = getBackendUrl();
+  if (!backendUrl) {
+    return;
+  }
+
+  const response = await fetchWithTimeout(`${backendUrl}/api/runtime/lifecycle-watch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  }, 15000);
+
+  if (!response.ok) {
+    throw new Error(`Failed to start lifecycle watch: ${response.status}`);
+  }
 }
 
 export function mapBackendAlertToNotification(event: BackendAlertEvent): AppNotification {

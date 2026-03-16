@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as runtimeService from '../../services/runtimeService';
-import { publishAlertEvent } from '../../services/backendService';
+import { publishAlertEvent, startLifecycleWatch } from '../../services/backendService';
+import { getRegionById } from '../../config/regions';
+import { getBaseUrl } from '../../services/api';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { scheduleLocalNotification } from '../../services/notificationService';
@@ -93,6 +95,31 @@ function emitNotification(
     id: '',
     timestamp: new Date().toISOString(),
     read: false,
+  });
+}
+
+function queueLifecycleWatch(domain: string, action: 'start' | 'stop' | 'restart') {
+  const auth = useAuthStore.getState();
+  const accessToken = auth.tokens?.accessToken;
+  const organizationId = auth.currentOrganization?.id;
+  const environmentId = auth.currentEnvironment?.id;
+  const userId = auth.user?.id;
+
+  if (!accessToken || !organizationId || !environmentId || !userId) {
+    return;
+  }
+
+  const region = getRegionById(auth.selectedRegion);
+
+  void startLifecycleWatch({
+    userId,
+    domain,
+    action,
+    accessToken,
+    baseUrl: getBaseUrl(),
+    organizationId,
+    environmentId,
+    controlPlane: region.label,
   });
 }
 
@@ -297,6 +324,7 @@ export function useStartApp() {
         domain,
       }, addNotification);
       scheduleLocalNotification('Application Starting', `${domain} is being started`);
+      queueLifecycleWatch(domain, 'start');
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
@@ -336,6 +364,7 @@ export function useStopApp() {
         domain,
       }, addNotification);
       scheduleLocalNotification('Application Stopping', `${domain} is being stopped`);
+      queueLifecycleWatch(domain, 'stop');
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);
@@ -375,6 +404,7 @@ export function useRestartApp() {
         domain,
       }, addNotification);
       scheduleLocalNotification('Application Restarting', `${domain} is being restarted`);
+      queueLifecycleWatch(domain, 'restart');
     },
     onError: (error: any, domain: string) => {
       clearTransition(domain);

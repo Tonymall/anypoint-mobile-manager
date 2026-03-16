@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, useColorScheme, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Platform, useColorScheme, View } from 'react-native';
 import { Slot } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PaperProvider } from 'react-native-paper';
@@ -27,13 +27,18 @@ import {
   fetchMobileRemoteConfig,
   getAppVersion,
   mapBackendAlertToNotification,
+  registerPushDevice,
+  unregisterPushDevice,
 } from '../src/services/backendService';
 import { QueryProvider } from '../src/providers/QueryProvider';
 import SplashScreen from '../src/components/common/SplashScreen';
 import ErrorBoundary from '../src/components/common/ErrorBoundary';
 import AppErrorDialog from '../src/components/common/AppErrorDialog';
 import UpdateRequiredScreen from '../src/components/common/UpdateRequiredScreen';
-import { setupNotificationChannel } from '../src/services/notificationService';
+import {
+  getRemotePushRegistration,
+  setupNotificationChannel,
+} from '../src/services/notificationService';
 import { isVersionBelowMinimum } from '../src/utils/version';
 import logger from '../src/utils/logger';
 
@@ -42,6 +47,7 @@ ExpoSplashScreen.preventAutoHideAsync().catch(() => {});
 export default function RootLayout() {
   const systemScheme = useColorScheme();
   const themeSetting = useAppStore((s) => s.settings.theme);
+  const pushNotificationsEnabled = useAppStore((s) => s.settings.pushNotificationsEnabled);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const userId = useAuthStore((s) => s.user?.id);
   const replaceNotificationsForActiveUser = useNotificationStore((s) => s.replaceNotificationsForActiveUser);
@@ -53,6 +59,7 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const [splashDone, setSplashDone] = useState(false);
   const appVersion = useMemo(() => getAppVersion(), []);
+  const pushRegistrationRef = useRef<{ userId: string; installationId: string } | null>(null);
 
   const isDark =
     themeSetting === 'dark' || (themeSetting === 'system' && systemScheme === 'dark');
@@ -126,6 +133,80 @@ export default function RootLayout() {
   useEffect(() => {
     void setupNotificationChannel();
   }, []);
+
+  useEffect(() => {
+    if (!ready) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function syncPushRegistration() {
+      const previous = pushRegistrationRef.current;
+
+      if (!isAuthenticated || !userId || !pushNotificationsEnabled) {
+        if (previous) {
+          pushRegistrationRef.current = null;
+          try {
+            await unregisterPushDevice(previous.userId, previous.installationId);
+          } catch (error) {
+            logger.warn('[RootLayout] Failed to unregister push device:', (error as Error)?.message);
+          }
+        }
+        return;
+      }
+
+      const registration = await getRemotePushRegistration();
+      if (cancelled) {
+        return;
+      }
+
+      if (!registration) {
+        if (previous?.userId === userId) {
+          pushRegistrationRef.current = null;
+          try {
+            await unregisterPushDevice(previous.userId, previous.installationId);
+          } catch (error) {
+            logger.warn('[RootLayout] Failed to unregister push device after token loss:', (error as Error)?.message);
+          }
+        }
+        return;
+      }
+
+      if (
+        previous &&
+        (previous.userId !== userId || previous.installationId !== registration.installationId)
+      ) {
+        try {
+          await unregisterPushDevice(previous.userId, previous.installationId);
+        } catch (error) {
+          logger.warn('[RootLayout] Failed to unregister previous push device:', (error as Error)?.message);
+        }
+      }
+
+      try {
+        await registerPushDevice({
+          userId,
+          installationId: registration.installationId,
+          expoPushToken: registration.expoPushToken,
+          platform: Platform.OS,
+          appVersion,
+        });
+        pushRegistrationRef.current = {
+          userId,
+          installationId: registration.installationId,
+        };
+      } catch (error) {
+        logger.warn('[RootLayout] Failed to register push device:', (error as Error)?.message);
+      }
+    }
+
+    void syncPushRegistration();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appVersion, isAuthenticated, pushNotificationsEnabled, ready, userId]);
 
   const syncRemoteConfig = useCallback(async () => {
     try {
