@@ -18,6 +18,7 @@ const FLOATING_TAB_SCENE_PADDING = 110;
 const SWIPE_TAB_ORDER = ['index', 'runtime', 'apis', 'alerts', 'monitoring', 'settings'] as const;
 const HIDDEN_TAB_PARENTS: Record<string, (typeof SWIPE_TAB_ORDER)[number]> = {
   admin: 'settings',
+  features: 'index',
   'report-bug': 'settings',
   terms: 'settings',
   workers: 'runtime',
@@ -123,6 +124,7 @@ export default function MainLayout() {
         <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
         <Tabs.Screen name="workers" options={{ href: null, title: 'Workers' }} />
         <Tabs.Screen name="admin" options={{ href: null, title: 'Admin' }} />
+        <Tabs.Screen name="features" options={{ href: null, title: 'Features' }} />
         <Tabs.Screen name="report-bug" options={{ href: null, title: 'Report a Bug' }} />
         <Tabs.Screen name="terms" options={{ href: null, title: 'Terms' }} />
       </Tabs>

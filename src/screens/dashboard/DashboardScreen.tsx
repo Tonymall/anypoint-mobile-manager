@@ -413,6 +413,41 @@ const DashboardScreen: React.FC = () => {
       </View>
 
       {/* ── Running Applications ── */}
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionAccent} />
+        <Text style={styles.sectionTitle}>Feature Center</Text>
+        <Text style={styles.sectionSubtitle}>Free in test</Text>
+      </View>
+      <Pressable
+        onPress={() => router.navigate('/(main)/features' as any)}
+        accessibilityLabel="Open Feature Center"
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          styles.featureHubCard,
+          {
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.primary + '25',
+            opacity: pressed ? 0.92 : 1,
+          },
+        ]}
+      >
+        <View style={[styles.featureHubGlow, { backgroundColor: theme.colors.primary }]} />
+        <View style={styles.featureHubInner}>
+          <View style={[styles.featureHubIcon, { backgroundColor: theme.colors.primary + '15' }]}>
+            <Icon name="star-four-points-outline" size={22} color={theme.colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.colors.onSurface }}>
+              Explore New Free Features
+            </Text>
+            <Text style={{ fontSize: 12, color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+              Compare environments, review governance, inspect topology, and check MQ/Object Store activity.
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} />
+        </View>
+      </Pressable>
+
       {topRunningApps.length > 0 && (
         <>
           <View style={styles.sectionHeader}>
@@ -620,6 +655,29 @@ const createStyles = (theme: MD3Theme) =>
     },
 
     // ── Actions ──
+    featureHubCard: {
+      marginHorizontal: 16,
+      borderRadius: 20,
+      borderWidth: 1,
+      overflow: 'hidden',
+    },
+    featureHubGlow: {
+      height: 3,
+      opacity: 0.7,
+    },
+    featureHubInner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 14,
+      padding: 16,
+    },
+    featureHubIcon: {
+      width: 46,
+      height: 46,
+      borderRadius: 14,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
     actionsRow: {
       flexDirection: 'row',
       paddingHorizontal: 16,

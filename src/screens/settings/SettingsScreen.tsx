@@ -26,6 +26,7 @@ import { useAppStore } from '../../stores/appStore';
 import { useLegalStore } from '../../stores/legalStore';
 import { TERMS_VERSION } from '../../constants/legal';
 import * as authService from '../../services/authService';
+import { activateRememberedAccount } from '../../services/rememberedAccountService';
 import { resetSessionFlags } from '../../services/runtimeService';
 import { getRegionById } from '../../config/regions';
 import { hapticWarning, hapticSelection } from '../../utils/haptics';
@@ -33,6 +34,7 @@ import { anypointColors } from '../../theme';
 import { requestPermissions } from '../../services/notificationService';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { useRemoteConfigStore } from '../../stores/remoteConfigStore';
+import { useErrorDialogStore } from '../../stores/errorDialogStore';
 import logger from '../../utils/logger';
 import Constants from 'expo-constants';
 
@@ -129,21 +131,37 @@ const SettingsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const user = useAuthStore((s) => s.user);
+  const userId = useAuthStore((s) => s.user?.id);
   const selectedRegion = useAuthStore((s) => s.selectedRegion);
   const logout = useAuthStore((s) => s.logout);
+  const rememberedAccountsMap = useAuthStore((s) => s.rememberedAccounts);
   const currentOrg = useAuthStore((s) => s.currentOrganization);
   const currentEnv = useAuthStore((s) => s.currentEnvironment);
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
+  const showError = useErrorDialogStore((s) => s.showError);
   const queryClient = useQueryClient();
   const termsAcceptance = useLegalStore((s) => user ? s.getAcceptance(user.id) : undefined);
   const remoteReleaseStage = useRemoteConfigStore((s) => s.config?.releaseStage);
 
   const [themeDialogVisible, setThemeDialogVisible] = useState(false);
+  const [accountDialogVisible, setAccountDialogVisible] = useState(false);
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [switchingAccountId, setSwitchingAccountId] = useState<string | null>(null);
 
   const currentRegion = getRegionById(selectedRegion);
+  const rememberedAccounts = useMemo(
+    () =>
+      Object.values(rememberedAccountsMap).sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [rememberedAccountsMap],
+  );
+  const otherRememberedAccounts = useMemo(
+    () => rememberedAccounts.filter((account) => account.accountId !== userId),
+    [rememberedAccounts, userId],
+  );
 
   const handleThemeChange = useCallback(
     (value: 'light' | 'dark' | 'system') => {
@@ -185,6 +203,38 @@ const SettingsScreen: React.FC = () => {
     queryClient.clear();
     router.push({ pathname: '/(auth)/select-env' as any, params: { fromSettings: '1' } });
   }, [router, queryClient]);
+
+  const handleAddAnotherAccount = useCallback(() => {
+    router.push({ pathname: '/(auth)/login' as any, params: { fromSettings: '1' } });
+  }, [router]);
+
+  const handleSwitchAccount = useCallback(
+    async (accountId: string) => {
+      if (accountId === userId) {
+        setAccountDialogVisible(false);
+        return;
+      }
+
+      setSwitchingAccountId(accountId);
+      setAccountDialogVisible(false);
+      queryClient.clear();
+      resetSessionFlags();
+
+      try {
+        await activateRememberedAccount(accountId);
+        router.replace('/(main)' as any);
+      } catch (error) {
+        logger.warn('[Settings] Failed to switch account:', (error as Error)?.message);
+        showError({
+          title: 'Unable to switch account',
+          message: (error as Error)?.message ?? 'Please try again.',
+        });
+      } finally {
+        setSwitchingAccountId(null);
+      }
+    },
+    [queryClient, router, showError, userId],
+  );
 
   const themeLabel =
     settings.theme === 'system'
@@ -263,6 +313,45 @@ const SettingsScreen: React.FC = () => {
             </View>
           )}
         </View>
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
+        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+          ACCOUNTS
+        </Text>
+      </View>
+      <View style={styles.card}>
+        <SettingRow
+          icon="account-switch-outline"
+          iconColor={theme.colors.primary}
+          iconBg={theme.colors.primary + '14'}
+          title="Switch Account"
+          subtitle={
+            otherRememberedAccounts.length > 0
+              ? `${otherRememberedAccounts.length} other saved account${otherRememberedAccounts.length === 1 ? '' : 's'}`
+              : 'No other saved accounts yet'
+          }
+          onPress={otherRememberedAccounts.length > 0 ? () => setAccountDialogVisible(true) : undefined}
+          showChevron={otherRememberedAccounts.length > 0}
+          right={
+            switchingAccountId ? (
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                Switching...
+              </Text>
+            ) : undefined
+          }
+        />
+        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
+        <SettingRow
+          icon="account-plus-outline"
+          iconColor={theme.colors.secondary}
+          iconBg={theme.colors.secondary + '14'}
+          title="Add Another Account"
+          subtitle="Keep your current account and sign in to another client"
+          onPress={handleAddAnotherAccount}
+          showChevron
+        />
       </View>
 
       {/* â”€â”€ Administration Section â”€â”€ */}
@@ -511,6 +600,57 @@ const SettingsScreen: React.FC = () => {
       {/* Theme Dialog */}
       <Portal>
         <Dialog
+          visible={accountDialogVisible}
+          onDismiss={() => setAccountDialogVisible(false)}
+          style={styles.dialog}
+        >
+          <Dialog.Title>Switch Account</Dialog.Title>
+          <Dialog.Content>
+            {rememberedAccounts.map((account) => {
+              const fullName = `${account.user.firstName ?? ''} ${account.user.lastName ?? ''}`.trim();
+              const isCurrent = account.accountId === userId;
+
+              return (
+                <Pressable
+                  key={account.accountId}
+                  onPress={() => {
+                    void handleSwitchAccount(account.accountId);
+                  }}
+                  disabled={isCurrent}
+                  style={[
+                    styles.accountOption,
+                    {
+                      borderColor: isCurrent ? theme.colors.primary : theme.colors.outlineVariant,
+                      backgroundColor: isCurrent
+                        ? theme.colors.primary + '12'
+                        : theme.colors.surface,
+                    },
+                  ]}
+                >
+                  <View style={styles.accountOptionText}>
+                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                      {fullName || account.user.username}
+                    </Text>
+                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                      {account.user.email || account.user.username}
+                    </Text>
+                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                      {account.currentOrganization?.name ?? account.user.organizationName}
+                    </Text>
+                  </View>
+                  <Text variant="bodySmall" style={{ color: isCurrent ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
+                    {isCurrent ? 'Current' : getRegionById(account.selectedRegion).label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setAccountDialogVisible(false)}>Close</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        <Dialog
           visible={themeDialogVisible}
           onDismiss={() => setThemeDialogVisible(false)}
           style={styles.dialog}
@@ -654,6 +794,21 @@ const createStyles = (theme: MD3Theme) =>
     separator: {
       height: StyleSheet.hairlineWidth,
       marginLeft: 66,
+    },
+    accountOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      marginBottom: 10,
+      gap: 12,
+    },
+    accountOptionText: {
+      flex: 1,
+      gap: 2,
     },
     // â”€â”€ Logout â”€â”€
     logoutBtn: {

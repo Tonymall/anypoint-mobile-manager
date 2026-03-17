@@ -389,6 +389,77 @@ export async function getApplications(params?: {
 }
 
 /**
+ * List applications for a specific org/environment without mutating the active app headers.
+ * Used by cross-environment comparison features.
+ */
+export async function getApplicationsForEnvironment(
+  organizationId: string,
+  environmentId: string,
+  params?: {
+    offset?: number;
+    limit?: number;
+  },
+): Promise<Application[]> {
+  const errors: string[] = [];
+  const scopedHeaders = {
+    'X-ANYPNT-ORG-ID': organizationId,
+    'X-ANYPNT-ENV-ID': environmentId,
+  };
+
+  let ch1Apps: Application[] = [];
+  try {
+    const { data } = await api.get(`${CLOUDHUB_BASE}/applications`, {
+      params,
+      headers: scopedHeaders,
+    });
+    if (Array.isArray(data)) ch1Apps = data;
+    else if (data && typeof data === 'object') {
+      const d = data as any;
+      ch1Apps = d.data ?? d.applications ?? d.items ?? [];
+    }
+  } catch (err: any) {
+    errors.push(`CH1: ${err?.response?.status ?? 'ERR'} ${err?.response?.data?.message ?? err?.message ?? ''}`);
+  }
+
+  let ch2Apps: Application[] = [];
+  try {
+    const { data } = await api.get(
+      `${AMC_BASE}/organizations/${organizationId}/environments/${environmentId}/deployments`,
+    );
+    const items = Array.isArray(data) ? data : (data?.items ?? data?.data ?? []);
+    ch2Apps = items.map(normalizeDeployment);
+  } catch (err: any) {
+    errors.push(`CH2: ${err?.response?.status ?? 'ERR'} ${err?.response?.data?.message ?? err?.message ?? ''}`);
+  }
+
+  if (ch1Apps.length === 0 && ch2Apps.length === 0) {
+    try {
+      const { data } = await api.get(`${HYBRID_BASE}/applications`, { headers: scopedHeaders });
+      const items = Array.isArray(data) ? data : (data?.data ?? data?.items ?? []);
+      if (items.length > 0) return items;
+    } catch (err: any) {
+      errors.push(`Hybrid: ${err?.response?.status ?? 'ERR'}`);
+    }
+  }
+
+  if (ch1Apps.length === 0 && ch2Apps.length === 0 && errors.length > 0) {
+    throw new Error(`Failed to load applications: ${errors.join(' | ')}`);
+  }
+
+  if (ch2Apps.length > 0 && ch1Apps.length > 0) {
+    const ch1Domains = new Set(ch1Apps.map((a: any) => a.domain ?? a.name));
+    for (const ch2App of ch2Apps) {
+      if (!ch1Domains.has(ch2App.domain) && !ch1Domains.has(ch2App.name)) {
+        ch1Apps.push(ch2App);
+      }
+    }
+    return ch1Apps;
+  }
+
+  return ch1Apps.length > 0 ? ch1Apps : ch2Apps;
+}
+
+/**
  * Get details for a specific application by domain name.
  * Tries CloudHub 1.0 first, then CloudHub 2.0.
  */

@@ -18,6 +18,19 @@ import type {
 import { useNotificationStore } from './notificationStore';
 import { useRuntimeTransitionStore } from './runtimeTransitionStore';
 
+export interface RememberedAccountSession {
+  accountId: string;
+  user: User;
+  tokens: AuthTokens;
+  isAuthenticated: boolean;
+  selectedRegion: ControlPlaneRegionId;
+  currentOrganization: Organization | null;
+  currentEnvironment: Environment | null;
+  organizations: Organization[];
+  environments: Environment[];
+  updatedAt: string;
+}
+
 export interface AuthState {
   user: User | null;
   tokens: AuthTokens | null;
@@ -29,6 +42,7 @@ export interface AuthState {
   currentEnvironment: Environment | null;
   organizations: Organization[];
   environments: Environment[];
+  rememberedAccounts: Record<string, RememberedAccountSession>;
 }
 
 export interface AuthActions {
@@ -46,6 +60,8 @@ export interface AuthActions {
   setOrganizations: (organizations: Organization[]) => void;
   setEnvironments: (environments: Environment[]) => void;
   setIsLoading: (isLoading: boolean) => void;
+  useRememberedAccount: (accountId: string) => void;
+  removeRememberedAccount: (accountId: string) => void;
 }
 
 const initialState: AuthState = {
@@ -59,6 +75,7 @@ const initialState: AuthState = {
   currentEnvironment: null,
   organizations: [],
   environments: [],
+  rememberedAccounts: {},
 };
 
 function resetSessionScopedState(previousUserId?: string | null, nextUserId?: string | null) {
@@ -97,6 +114,62 @@ function buildFreshSessionState(
   };
 }
 
+function buildRememberedAccountSnapshot(
+  state: Pick<
+    AuthState,
+    | 'user'
+    | 'tokens'
+    | 'isAuthenticated'
+    | 'selectedRegion'
+    | 'currentOrganization'
+    | 'currentEnvironment'
+    | 'organizations'
+    | 'environments'
+  >,
+): RememberedAccountSession | null {
+  if (!state.user || !state.tokens) {
+    return null;
+  }
+
+  return {
+    accountId: state.user.id,
+    user: state.user,
+    tokens: state.tokens,
+    isAuthenticated: state.isAuthenticated,
+    selectedRegion: state.selectedRegion,
+    currentOrganization: state.currentOrganization,
+    currentEnvironment: state.currentEnvironment,
+    organizations: state.organizations,
+    environments: state.environments,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function syncRememberedAccounts(
+  state: AuthState,
+  overrides?: Partial<AuthState>,
+): Record<string, RememberedAccountSession> {
+  const rememberedAccounts = { ...state.rememberedAccounts };
+  const nextState = { ...state, ...overrides } as AuthState;
+  const activeAccountId = nextState.user?.id;
+
+  if (!activeAccountId) {
+    return rememberedAccounts;
+  }
+
+  if (!nextState.rememberSession) {
+    delete rememberedAccounts[activeAccountId];
+    return rememberedAccounts;
+  }
+
+  const snapshot = buildRememberedAccountSnapshot(nextState);
+  if (snapshot) {
+    rememberedAccounts[activeAccountId] = snapshot;
+  }
+
+  return rememberedAccounts;
+}
+
 export const useAuthStore = create<AuthState & AuthActions>()(
   persist(
     (set) => ({
@@ -105,33 +178,66 @@ export const useAuthStore = create<AuthState & AuthActions>()(
       login: (user, tokens) =>
         set((state) => {
           resetSessionScopedState(state.user?.id, user.id);
-          return buildFreshSessionState(user, tokens, true);
+          const nextState = {
+            ...state,
+            ...buildFreshSessionState(user, tokens, true),
+          };
+          return {
+            ...buildFreshSessionState(user, tokens, true),
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       loginPending: (user, tokens) =>
         set((state) => {
           resetSessionScopedState(state.user?.id, user.id);
-          return buildFreshSessionState(user, tokens, false);
+          const nextState = {
+            ...state,
+            ...buildFreshSessionState(user, tokens, false),
+          };
+          return {
+            ...buildFreshSessionState(user, tokens, false),
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       completeLogin: () =>
-        set({
-          isAuthenticated: true,
+        set((state) => {
+          const nextState = {
+            ...state,
+            isAuthenticated: true,
+          };
+          return {
+            isAuthenticated: true,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       logout: () =>
         set((state) => {
+          const nextRememberedAccounts = { ...state.rememberedAccounts };
+          if (state.user?.id) {
+            delete nextRememberedAccounts[state.user.id];
+          }
           resetSessionScopedState(state.user?.id, null);
           return {
             ...initialState,
             rememberSession: state.rememberSession,
             selectedRegion: state.selectedRegion,
+            rememberedAccounts: nextRememberedAccounts,
           };
         }),
 
       refreshToken: (tokens) =>
-        set({
-          tokens,
+        set((state) => {
+          const nextState = {
+            ...state,
+            tokens,
+          };
+          return {
+            tokens,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       setRememberSession: (rememberSession) =>
@@ -140,47 +246,136 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         }),
 
       setSelectedRegion: (region) =>
-        set({
-          selectedRegion: region,
+        set((state) => {
+          const nextState = {
+            ...state,
+            selectedRegion: region,
+          };
+          return {
+            selectedRegion: region,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       switchOrganization: (organization) =>
-        set({
-          currentOrganization: organization,
-          currentEnvironment: null,
-          environments: [],
+        set((state) => {
+          const nextState = {
+            ...state,
+            currentOrganization: organization,
+            currentEnvironment: null,
+            environments: [],
+          };
+          return {
+            currentOrganization: organization,
+            currentEnvironment: null,
+            environments: [],
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       switchEnvironment: (environment) =>
-        set({
-          currentEnvironment: environment,
+        set((state) => {
+          const nextState = {
+            ...state,
+            currentEnvironment: environment,
+          };
+          return {
+            currentEnvironment: environment,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       loadSession: (user, tokens) =>
         set((state) => {
           resetSessionScopedState(state.user?.id, user.id);
-          return buildFreshSessionState(user, tokens, true);
+          const nextState = {
+            ...state,
+            ...buildFreshSessionState(user, tokens, true),
+          };
+          return {
+            ...buildFreshSessionState(user, tokens, true),
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       setUser: (user) =>
         set((state) => {
           resetSessionScopedState(state.user?.id, user.id);
-          return { user };
+          const nextState = {
+            ...state,
+            user,
+          };
+          return {
+            user,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       setOrganizations: (organizations) =>
-        set({
-          organizations,
+        set((state) => {
+          const nextState = {
+            ...state,
+            organizations,
+          };
+          return {
+            organizations,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       setEnvironments: (environments) =>
-        set({
-          environments,
+        set((state) => {
+          const nextState = {
+            ...state,
+            environments,
+          };
+          return {
+            environments,
+            rememberedAccounts: syncRememberedAccounts(nextState),
+          };
         }),
 
       setIsLoading: (isLoading) =>
         set({
           isLoading,
+        }),
+
+      useRememberedAccount: (accountId) =>
+        set((state) => {
+          const rememberedAccount = state.rememberedAccounts[accountId];
+          if (!rememberedAccount) {
+            return {};
+          }
+
+          resetSessionScopedState(state.user?.id, rememberedAccount.user.id);
+          return {
+            user: rememberedAccount.user,
+            tokens: rememberedAccount.tokens,
+            isAuthenticated: rememberedAccount.isAuthenticated,
+            isLoading: false,
+            rememberSession: true,
+            selectedRegion: rememberedAccount.selectedRegion,
+            currentOrganization: rememberedAccount.currentOrganization,
+            currentEnvironment: rememberedAccount.currentEnvironment,
+            organizations: rememberedAccount.organizations,
+            environments: rememberedAccount.environments,
+            rememberedAccounts: {
+              ...state.rememberedAccounts,
+              [accountId]: {
+                ...rememberedAccount,
+                updatedAt: new Date().toISOString(),
+              },
+            },
+          };
+        }),
+
+      removeRememberedAccount: (accountId) =>
+        set((state) => {
+          const rememberedAccounts = { ...state.rememberedAccounts };
+          delete rememberedAccounts[accountId];
+          return {
+            rememberedAccounts,
+          };
         }),
     }),
     {
@@ -190,6 +385,7 @@ export const useAuthStore = create<AuthState & AuthActions>()(
         const baseState = {
           selectedRegion: state.selectedRegion,
           rememberSession: state.rememberSession,
+          rememberedAccounts: state.rememberedAccounts,
         };
 
         if (!state.rememberSession) {
