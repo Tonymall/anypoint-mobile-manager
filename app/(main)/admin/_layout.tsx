@@ -15,6 +15,9 @@ export default function AdminLayout() {
       <Stack.Screen name="users" />
       <Stack.Screen name="user-detail" />
       <Stack.Screen name="teams" />
+      <Stack.Screen name="governance" />
+      <Stack.Screen name="environment-comparison" />
+      <Stack.Screen name="platform-activity" />
       <Stack.Screen name="connected-apps" />
       <Stack.Screen name="permissions" />
       <Stack.Screen name="business-groups" />

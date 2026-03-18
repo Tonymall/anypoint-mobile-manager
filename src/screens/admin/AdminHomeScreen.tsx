@@ -49,6 +49,30 @@ const ADMIN_FEATURES: AdminFeature[] = [
     iconColor: anypointColors.accent,
     route: '/(main)/admin/connected-apps',
   },
+  {
+    id: 'governance',
+    title: 'API Governance',
+    subtitle: 'Profiles, rulesets, and conformance status',
+    icon: 'shield-check-outline',
+    iconColor: anypointColors.warning,
+    route: '/(main)/admin/governance',
+  },
+  {
+    id: 'environment-comparison',
+    title: 'Environment Comparison',
+    subtitle: 'Compare runtime and API drift between envs',
+    icon: 'source-branch',
+    iconColor: anypointColors.info,
+    route: '/(main)/admin/environment-comparison',
+  },
+  {
+    id: 'platform-activity',
+    title: 'Platform Activity',
+    subtitle: 'MQ and Object Store audit activity',
+    icon: 'database-outline',
+    iconColor: anypointColors.secondary,
+    route: '/(main)/admin/platform-activity',
+  },
   // Permissions card hidden until `/accounts/api/cs/.../permissions/products`
   // response shape is validated and PermissionsScreen is updated to match.
   // {
