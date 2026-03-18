@@ -11,6 +11,7 @@ import type {
   SLALimit,
   APIContract,
   APIAlert,
+  PolicyConfigField,
   PaginatedResponse,
 } from '../types';
 
@@ -29,6 +30,7 @@ export interface APIPolicyTemplate {
   providedCharacteristics: string[];
   requiredCharacteristics: string[];
   isSlaBased: boolean;
+  configurationFields: PolicyConfigField[];
 }
 
 export interface APIAssetSummary {
@@ -65,6 +67,67 @@ function normalizeContracts(
     offset: params?.offset ?? 0,
     limit: params?.limit ?? items.length,
   };
+}
+
+function normalizeFieldType(value: unknown): PolicyConfigField['type'] {
+  const raw = String(value ?? 'string').toLowerCase();
+  if (raw === 'int' || raw === 'integer' || raw === 'number') return 'int';
+  if (raw === 'boolean' || raw === 'bool') return 'boolean';
+  if (raw === 'array' || raw === 'list') return 'array';
+  if (raw === 'expression') return 'expression';
+  return 'string';
+}
+
+function mapConfigField(input: any, fallbackName?: string): PolicyConfigField | null {
+  const propertyName = toStringValue(input?.propertyName)
+    ?? toStringValue(input?.name)
+    ?? toStringValue(fallbackName);
+  if (!propertyName) return null;
+
+  return {
+    propertyName,
+    name: toStringValue(input?.title) ?? toStringValue(input?.displayName) ?? propertyName,
+    description: toStringValue(input?.description) ?? '',
+    type: normalizeFieldType(input?.type),
+    defaultValue: input?.defaultValue ?? input?.default,
+    optional: Boolean(input?.optional ?? !input?.required),
+    sensitive: Boolean(input?.sensitive),
+    allowMultiple: Boolean(input?.allowMultiple),
+  };
+}
+
+function parsePolicyConfigFields(entry: any): PolicyConfigField[] {
+  const arrayCandidates = [
+    entry?.configuration,
+    entry?.configurationFields,
+    entry?.fields,
+    entry?.schema?.fields,
+  ];
+
+  for (const candidate of arrayCandidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+        .map((field) => mapConfigField(field))
+        .filter((field): field is PolicyConfigField => !!field);
+    }
+  }
+
+  const objectCandidates = [
+    entry?.properties,
+    entry?.jsonSchema?.properties,
+    entry?.schema?.properties,
+    entry?.configurationSchema?.properties,
+  ];
+
+  for (const candidate of objectCandidates) {
+    if (candidate && typeof candidate === 'object') {
+      return Object.entries(candidate)
+        .map(([key, value]) => mapConfigField(value, key))
+        .filter((field): field is PolicyConfigField => !!field);
+    }
+  }
+
+  return [];
 }
 
 // ---------- Managed APIs ----------
@@ -308,6 +371,9 @@ export async function getPolicyTemplates(
   organizationId: string,
   environmentId: string,
   apiId: number,
+  options?: {
+    includeConfiguration?: boolean;
+  },
 ): Promise<APIPolicyTemplate[]> {
   const { data } = await api.get(
     `${API_MANAGER_XAPI_BASE}/organizations/${organizationId}/exchange-policy-templates`,
@@ -317,7 +383,7 @@ export async function getPolicyTemplates(
         splitModel: true,
         latest: true,
         apiInstanceId: apiId,
-        includeConfiguration: false,
+        includeConfiguration: options?.includeConfiguration ?? false,
         automatedOnly: false,
         injectionPoint: 'inbound',
       },
@@ -340,6 +406,7 @@ export async function getPolicyTemplates(
       ? entry.requiredCharacteristics.map((value: unknown) => String(value))
       : [],
     isSlaBased: Boolean(entry.isSlaBased),
+    configurationFields: parsePolicyConfigFields(entry),
   }));
 }
 

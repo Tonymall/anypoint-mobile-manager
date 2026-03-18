@@ -255,4 +255,7 @@ export const FALLBACK_API_POLICY_CATALOG: APIPolicyTemplate[] = [
     requiredCharacteristics: [],
     isSlaBased: false,
   },
-];
+].map((template) => ({
+  ...template,
+  configurationFields: [],
+}));

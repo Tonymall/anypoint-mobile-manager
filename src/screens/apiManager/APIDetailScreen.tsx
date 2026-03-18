@@ -46,6 +46,14 @@ type TierDraft = {
   autoApprove: boolean;
 };
 
+type PolicyDialogState = {
+  visible: boolean;
+  loading: boolean;
+  submitting: boolean;
+  template: apiManagerService.APIPolicyTemplate | null;
+  values: Record<string, string | boolean>;
+};
+
 function normalizePolicyKey(value?: string | null): string {
   return (value ?? '')
     .toLowerCase()
@@ -78,6 +86,13 @@ const APIDetailScreen: React.FC = () => {
   });
   const [tierSubmitting, setTierSubmitting] = useState(false);
   const [policyApplyBusyId, setPolicyApplyBusyId] = useState<string | null>(null);
+  const [policyDialog, setPolicyDialog] = useState<PolicyDialogState>({
+    visible: false,
+    loading: false,
+    submitting: false,
+    template: null,
+    values: {},
+  });
 
   const { data: api, isLoading } = useManagedAPI(apiId);
   const { data: policies } = useAPIPolicies(apiId);
@@ -188,11 +203,14 @@ const APIDetailScreen: React.FC = () => {
     }
   };
 
-  const handleQuickApplyPolicy = async (template: apiManagerService.APIPolicyTemplate) => {
-    if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
+  const applyPolicyWithConfiguration = async (
+    template: apiManagerService.APIPolicyTemplate,
+    configuration: Record<string, unknown>,
+  ): Promise<boolean> => {
+    if (!currentOrg?.id || !currentEnv?.id || !apiId) return false;
     if (!template.groupId || !template.assetId || !template.assetVersion) {
       hapticError();
-      return;
+      return false;
     }
 
     setPolicyApplyBusyId(template.id);
@@ -202,17 +220,133 @@ const APIDetailScreen: React.FC = () => {
         groupId: template.groupId,
         assetId: template.assetId,
         assetVersion: template.assetVersion,
-        configuration: {},
+        configuration,
         order: nextPolicyOrder,
       });
       await queryClient.invalidateQueries({
         queryKey: apiManagerKeys.policies(currentOrg.id, currentEnv.id, apiId),
       });
       hapticSuccess();
+      return true;
     } catch {
+      hapticError();
+      return false;
+    } finally {
+      setPolicyApplyBusyId(null);
+    }
+  };
+
+  const handleOpenPolicyDialog = async (template: apiManagerService.APIPolicyTemplate) => {
+    if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
+    if (!template.groupId || !template.assetId || !template.assetVersion) {
+      hapticError();
+      return;
+    }
+
+    setPolicyApplyBusyId(template.id);
+    setPolicyDialog({
+      visible: true,
+      loading: true,
+      submitting: false,
+      template,
+      values: {},
+    });
+
+    try {
+      const templates = await apiManagerService.getPolicyTemplates(currentOrg.id, currentEnv.id, apiId, {
+        includeConfiguration: true,
+      });
+      const detailedTemplate = templates.find((entry) => String(entry.id) === String(template.id)) ?? template;
+      if ((detailedTemplate.configurationFields?.length ?? 0) === 0) {
+        setPolicyDialog({
+          visible: false,
+          loading: false,
+          submitting: false,
+          template: null,
+          values: {},
+        });
+        await applyPolicyWithConfiguration(detailedTemplate, {});
+        return;
+      }
+
+      const values = Object.fromEntries(
+        detailedTemplate.configurationFields.map((field) => [
+          field.propertyName,
+          field.type === 'boolean'
+            ? Boolean(field.defaultValue)
+            : field.defaultValue == null
+              ? ''
+              : String(field.defaultValue),
+        ]),
+      );
+
+      setPolicyDialog({
+        visible: true,
+        loading: false,
+        submitting: false,
+        template: detailedTemplate,
+        values,
+      });
+    } catch {
+      setPolicyDialog({
+        visible: false,
+        loading: false,
+        submitting: false,
+        template: null,
+        values: {},
+      });
       hapticError();
     } finally {
       setPolicyApplyBusyId(null);
+    }
+  };
+
+  const handleSubmitConfiguredPolicy = async () => {
+    const template = policyDialog.template;
+    if (!template) return;
+
+    const config: Record<string, unknown> = {};
+    for (const field of template.configurationFields) {
+      const raw = policyDialog.values[field.propertyName];
+      if (!field.optional && (raw === '' || raw == null)) {
+        hapticError();
+        return;
+      }
+      if (raw === '' || raw == null) continue;
+
+      if (field.type === 'boolean') {
+        config[field.propertyName] = Boolean(raw);
+      } else if (field.type === 'int') {
+        const numeric = Number(raw);
+        if (!Number.isFinite(numeric)) {
+          hapticError();
+          return;
+        }
+        config[field.propertyName] = numeric;
+      } else if (field.type === 'array') {
+        config[field.propertyName] = String(raw)
+          .split(',')
+          .map((value) => value.trim())
+          .filter(Boolean);
+      } else {
+        config[field.propertyName] = raw;
+      }
+    }
+
+    setPolicyDialog((current) => ({ ...current, submitting: true }));
+    try {
+      const success = await applyPolicyWithConfiguration(template, config);
+      if (success) {
+        setPolicyDialog({
+          visible: false,
+          loading: false,
+          submitting: false,
+          template: null,
+          values: {},
+        });
+      }
+    } finally {
+      setPolicyDialog((current) => ({ ...current, submitting: false }));
     }
   };
 
@@ -337,7 +471,7 @@ const APIDetailScreen: React.FC = () => {
               const applied =
                 appliedPolicyKeys.has(normalizePolicyKey(template.id))
                 || appliedPolicyKeys.has(normalizePolicyKey(template.name));
-              const canQuickApply = !applied && !template.isSlaBased && !!template.groupId && !!template.assetId && !!template.assetVersion;
+              const canConfigure = !applied && !!template.groupId && !!template.assetId && !!template.assetVersion;
 
               return (
                 <View key={template.id} style={[styles.policyCard, { borderColor: theme.colors.outlineVariant }]}>
@@ -355,8 +489,8 @@ const APIDetailScreen: React.FC = () => {
                     {template.isSlaBased ? (
                       <Text style={[styles.metaChip, { color: anypointColors.warning }]}>SLA based</Text>
                     ) : null}
-                    {!canQuickApply && !applied ? (
-                      <Text style={styles.metaChip}>Config needed</Text>
+                    {!canConfigure && !applied ? (
+                      <Text style={styles.metaChip}>Read only</Text>
                     ) : null}
                     {template.providedCharacteristics.slice(0, 2).map((value) => (
                       <Text key={value} style={styles.metaChip}>
@@ -365,14 +499,14 @@ const APIDetailScreen: React.FC = () => {
                     ))}
                   </View>
                   <View style={styles.templateActions}>
-                    {canQuickApply ? (
+                    {canConfigure ? (
                       <Button
                         compact
                         mode="contained-tonal"
-                        onPress={() => void handleQuickApplyPolicy(template)}
+                        onPress={() => void handleOpenPolicyDialog(template)}
                         loading={policyApplyBusyId === template.id}
                       >
-                        Quick apply
+                        Configure
                       </Button>
                     ) : null}
                     {template.docsUrl ? (
@@ -538,6 +672,111 @@ const APIDetailScreen: React.FC = () => {
             <Button onPress={() => setTierDialogVisible(false)}>Cancel</Button>
             <Button onPress={() => void handleCreateTier()} loading={tierSubmitting}>
               Create
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        <Dialog
+          visible={policyDialog.visible}
+          onDismiss={() =>
+            setPolicyDialog({
+              visible: false,
+              loading: false,
+              submitting: false,
+              template: null,
+              values: {},
+            })
+          }
+        >
+          <Dialog.Title>{policyDialog.template?.name ?? 'Configure policy'}</Dialog.Title>
+          <Dialog.Content>
+            {policyDialog.loading ? (
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                Loading policy configuration...
+              </Text>
+            ) : (
+              <>
+                <Text variant="bodySmall" style={styles.dialogHelp}>
+                  {policyDialog.template?.description ?? 'Set policy values before applying it to this API.'}
+                </Text>
+                {(policyDialog.template?.configurationFields ?? []).map((field) => {
+                  const value = policyDialog.values[field.propertyName];
+                  if (field.type === 'boolean') {
+                    return (
+                      <View key={field.propertyName} style={styles.autoApproveRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
+                            {field.name}
+                          </Text>
+                          {field.description ? (
+                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                              {field.description}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Button
+                          compact
+                          mode="text"
+                          onPress={() =>
+                            setPolicyDialog((current) => ({
+                              ...current,
+                              values: {
+                                ...current.values,
+                                [field.propertyName]: !value,
+                              },
+                            }))
+                          }
+                        >
+                          {value ? 'On' : 'Off'}
+                        </Button>
+                      </View>
+                    );
+                  }
+
+                  return (
+                    <TextInput
+                      key={field.propertyName}
+                      mode="outlined"
+                      label={field.name}
+                      value={String(value ?? '')}
+                      secureTextEntry={field.sensitive}
+                      keyboardType={field.type === 'int' ? 'number-pad' : 'default'}
+                      onChangeText={(nextValue) =>
+                        setPolicyDialog((current) => ({
+                          ...current,
+                          values: {
+                            ...current.values,
+                            [field.propertyName]: nextValue,
+                          },
+                        }))
+                      }
+                      style={styles.dialogInput}
+                    />
+                  );
+                })}
+              </>
+            )}
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button
+              onPress={() =>
+                setPolicyDialog({
+                  visible: false,
+                  loading: false,
+                  submitting: false,
+                  template: null,
+                  values: {},
+                })
+              }
+            >
+              Cancel
+            </Button>
+            <Button
+              onPress={() => void handleSubmitConfiguredPolicy()}
+              loading={policyDialog.submitting}
+              disabled={policyDialog.loading}
+            >
+              Apply
             </Button>
           </Dialog.Actions>
         </Dialog>
@@ -726,6 +965,11 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   },
   dialogInput: {
     marginBottom: 10,
+  },
+  dialogHelp: {
+    color: theme.colors.onSurfaceVariant,
+    marginBottom: 12,
+    lineHeight: 18,
   },
   autoApproveRow: {
     flexDirection: 'row',
