@@ -28,6 +28,10 @@ function summarize(applications: any[], apis: any[]): CompareSummary {
   };
 }
 
+function apiLabel(api: any): string {
+  return api.instanceLabel || api.assetId || String(api.id);
+}
+
 const EnvironmentComparisonScreen: React.FC = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -77,10 +81,29 @@ const EnvironmentComparisonScreen: React.FC = () => {
   const baselineSummary = useMemo(() => summarize(baselineApps, baselineApis), [baselineApps, baselineApis]);
   const targetSummary = useMemo(() => summarize(targetApps, targetApis), [targetApps, targetApis]);
 
-  const baselineAppNames = new Set(baselineApps.map((app) => getAppName(app)));
-  const targetAppNames = new Set(targetApps.map((app) => getAppName(app)));
-  const onlyInBaseline = Array.from(baselineAppNames).filter((name) => !targetAppNames.has(name)).slice(0, 5);
-  const onlyInTarget = Array.from(targetAppNames).filter((name) => !baselineAppNames.has(name)).slice(0, 5);
+  const baselineAppMap = useMemo(
+    () => new Map(baselineApps.map((app) => [getAppName(app), app])),
+    [baselineApps],
+  );
+  const targetAppMap = useMemo(
+    () => new Map(targetApps.map((app) => [getAppName(app), app])),
+    [targetApps],
+  );
+  const baselineApiNames = new Set(baselineApis.map(apiLabel));
+  const targetApiNames = new Set(targetApis.map(apiLabel));
+
+  const onlyInBaselineApps = Array.from(baselineAppMap.keys()).filter((name) => !targetAppMap.has(name));
+  const onlyInTargetApps = Array.from(targetAppMap.keys()).filter((name) => !baselineAppMap.has(name));
+  const statusDriftApps = Array.from(baselineAppMap.keys())
+    .filter((name) => targetAppMap.has(name) && baselineAppMap.get(name)?.status !== targetAppMap.get(name)?.status)
+    .map((name) => ({
+      name,
+      baselineStatus: baselineAppMap.get(name)?.status ?? 'UNKNOWN',
+      targetStatus: targetAppMap.get(name)?.status ?? 'UNKNOWN',
+    }));
+
+  const onlyInBaselineApis = Array.from(baselineApiNames).filter((name) => !targetApiNames.has(name));
+  const onlyInTargetApis = Array.from(targetApiNames).filter((name) => !baselineApiNames.has(name));
 
   return (
     <View style={styles.container}>
@@ -96,7 +119,7 @@ const EnvironmentComparisonScreen: React.FC = () => {
               Compare environments
             </Text>
             <Text variant="bodySmall" style={styles.sectionSubtitle}>
-              See runtime and API drift between environments without changing the active session.
+              See runtime, API, and operational drift without changing the active environment selection.
             </Text>
 
             <View style={styles.selectorRow}>
@@ -194,10 +217,10 @@ const EnvironmentComparisonScreen: React.FC = () => {
         <Card style={styles.card}>
           <Card.Content>
             <Text variant="titleMedium" style={styles.sectionTitle}>
-              Differences
+              Application drift
             </Text>
             <Text variant="bodySmall" style={styles.sectionSubtitle}>
-              A quick read on which applications appear only on one side.
+              Unique apps and status mismatches show where environments may be out of sync.
             </Text>
 
             <View style={styles.diffColumns}>
@@ -205,8 +228,8 @@ const EnvironmentComparisonScreen: React.FC = () => {
                 <Text style={[styles.diffTitle, { color: theme.colors.primary }]}>
                   Only in {baselineEnv?.name ?? 'baseline'}
                 </Text>
-                {onlyInBaseline.length > 0 ? onlyInBaseline.map((name) => (
-                  <Text key={`baseline-${name}`} style={styles.diffItem}>{name}</Text>
+                {onlyInBaselineApps.length > 0 ? onlyInBaselineApps.slice(0, 8).map((name) => (
+                  <Text key={`baseline-app-${name}`} style={styles.diffItem}>{name}</Text>
                 )) : <Text style={styles.emptyCopy}>No unique applications found.</Text>}
               </View>
 
@@ -214,9 +237,53 @@ const EnvironmentComparisonScreen: React.FC = () => {
                 <Text style={[styles.diffTitle, { color: anypointColors.secondary }]}>
                   Only in {targetEnv?.name ?? 'compare'}
                 </Text>
-                {onlyInTarget.length > 0 ? onlyInTarget.map((name) => (
-                  <Text key={`target-${name}`} style={styles.diffItem}>{name}</Text>
+                {onlyInTargetApps.length > 0 ? onlyInTargetApps.slice(0, 8).map((name) => (
+                  <Text key={`target-app-${name}`} style={styles.diffItem}>{name}</Text>
                 )) : <Text style={styles.emptyCopy}>No unique applications found.</Text>}
+              </View>
+            </View>
+
+            <Text variant="titleSmall" style={styles.subSectionTitle}>
+              Status mismatches
+            </Text>
+            {statusDriftApps.length > 0 ? statusDriftApps.slice(0, 8).map((item) => (
+              <View key={item.name} style={[styles.driftRow, { borderTopColor: theme.colors.outlineVariant }]}>
+                <Text style={styles.driftName}>{item.name}</Text>
+                <Text style={[styles.driftStatus, { color: theme.colors.primary }]}>{item.baselineStatus}</Text>
+                <Text style={[styles.driftStatus, { color: anypointColors.secondary }]}>{item.targetStatus}</Text>
+              </View>
+            )) : (
+              <Text style={styles.emptyCopy}>Shared applications are aligned on status.</Text>
+            )}
+          </Card.Content>
+        </Card>
+
+        <Card style={styles.card}>
+          <Card.Content>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              API surface drift
+            </Text>
+            <Text variant="bodySmall" style={styles.sectionSubtitle}>
+              Compare managed API presence between the two environments.
+            </Text>
+
+            <View style={styles.diffColumns}>
+              <View style={styles.diffColumn}>
+                <Text style={[styles.diffTitle, { color: theme.colors.primary }]}>
+                  APIs only in {baselineEnv?.name ?? 'baseline'}
+                </Text>
+                {onlyInBaselineApis.length > 0 ? onlyInBaselineApis.slice(0, 8).map((name) => (
+                  <Text key={`baseline-api-${name}`} style={styles.diffItem}>{name}</Text>
+                )) : <Text style={styles.emptyCopy}>No unique APIs found.</Text>}
+              </View>
+
+              <View style={styles.diffColumn}>
+                <Text style={[styles.diffTitle, { color: anypointColors.secondary }]}>
+                  APIs only in {targetEnv?.name ?? 'compare'}
+                </Text>
+                {onlyInTargetApis.length > 0 ? onlyInTargetApis.slice(0, 8).map((name) => (
+                  <Text key={`target-api-${name}`} style={styles.diffItem}>{name}</Text>
+                )) : <Text style={styles.emptyCopy}>No unique APIs found.</Text>}
               </View>
             </View>
           </Card.Content>
@@ -332,6 +399,30 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   emptyCopy: {
     color: theme.colors.onSurfaceVariant,
     fontSize: 12,
+  },
+  subSectionTitle: {
+    marginTop: 16,
+    marginBottom: 6,
+    color: theme.colors.onSurface,
+    fontWeight: '700',
+  },
+  driftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  driftName: {
+    flex: 1,
+    color: theme.colors.onSurface,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  driftStatus: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });
 

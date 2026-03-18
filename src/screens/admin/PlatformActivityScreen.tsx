@@ -39,10 +39,22 @@ const PlatformActivityScreen: React.FC = () => {
 
   const { data: auditLogs, isLoading } = useAuditLogs({
     platforms,
-    limit: 25,
+    limit: 30,
   });
 
   const entries = auditLogs?.data ?? [];
+  const mqCount = entries.filter((entry) => /mq/i.test(entry.objectType ?? '') || /mq/i.test(entry.objectId ?? '')).length;
+  const objectStoreCount = entries.filter((entry) => /object/i.test(entry.objectType ?? '') || /object/i.test(entry.objectId ?? '')).length;
+  const uniqueUsers = new Set(entries.map((entry) => entry.userId || entry.userName).filter(Boolean)).size;
+
+  const topActions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+      const key = entry.action || 'Unknown';
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((left, right) => right[1] - left[1]).slice(0, 6);
+  }, [entries]);
 
   return (
     <View style={styles.container}>
@@ -96,6 +108,50 @@ const PlatformActivityScreen: React.FC = () => {
           </Card.Content>
         </Card>
 
+        <View style={styles.statsRow}>
+          <View style={[styles.statCard, { backgroundColor: theme.colors.primary + '12' }]}>
+            <Text style={[styles.statValue, { color: theme.colors.primary }]}>{entries.length}</Text>
+            <Text style={styles.statLabel}>Events</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: anypointColors.secondary + '12' }]}>
+            <Text style={[styles.statValue, { color: anypointColors.secondary }]}>{mqCount}</Text>
+            <Text style={styles.statLabel}>MQ</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: anypointColors.warning + '12' }]}>
+            <Text style={[styles.statValue, { color: anypointColors.warning }]}>{objectStoreCount}</Text>
+            <Text style={styles.statLabel}>Object Store</Text>
+          </View>
+          <View style={[styles.statCard, { backgroundColor: anypointColors.success + '12' }]}>
+            <Text style={[styles.statValue, { color: anypointColors.success }]}>{uniqueUsers}</Text>
+            <Text style={styles.statLabel}>Actors</Text>
+          </View>
+        </View>
+
+        <Card style={styles.card}>
+          <Card.Content>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              Action summary
+            </Text>
+            <Text variant="bodySmall" style={styles.sectionSubtitle}>
+              Useful for seeing whether the feed is dominated by updates, reads, or destructive operations.
+            </Text>
+
+            <View style={styles.actionWrap}>
+              {topActions.length > 0 ? topActions.map(([action, count]) => (
+                <View key={action} style={[styles.actionPill, { backgroundColor: theme.colors.primary + '12' }]}>
+                  <Text style={[styles.actionText, { color: theme.colors.primary }]}>
+                    {action} - {count}
+                  </Text>
+                </View>
+              )) : (
+                <Text variant="bodySmall" style={styles.emptyCopy}>
+                  No actions available yet for the selected filter.
+                </Text>
+              )}
+            </View>
+          </Card.Content>
+        </Card>
+
         <Card style={styles.card}>
           <Card.Content>
             <Text variant="titleMedium" style={styles.sectionTitle}>
@@ -114,25 +170,44 @@ const PlatformActivityScreen: React.FC = () => {
               </Text>
             ) : null}
 
-            {entries.map((entry) => (
-              <View key={entry.id} style={[styles.eventRow, { borderTopColor: theme.colors.outlineVariant }]}>
-                <View style={[styles.iconWrap, { backgroundColor: theme.colors.primary + '12' }]}>
-                  <Icon name="database-outline" size={18} color={theme.colors.primary} />
+            {entries.map((entry) => {
+              const payloadKeys = Object.keys(entry.payload ?? {});
+
+              return (
+                <View key={entry.id} style={[styles.eventCard, { borderColor: theme.colors.outlineVariant }]}>
+                  <View style={styles.eventHeader}>
+                    <View style={[styles.iconWrap, { backgroundColor: theme.colors.primary + '12' }]}>
+                      <Icon name="database-outline" size={18} color={theme.colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.eventTitle}>
+                        {entry.action} {entry.objectType || 'resource'}
+                      </Text>
+                      <Text style={styles.eventMeta}>
+                        {entry.objectId || 'Unknown object'}
+                      </Text>
+                    </View>
+                    <Text style={styles.eventTime}>{formatRelativeTime(entry.timestamp)}</Text>
+                  </View>
+
+                  <View style={styles.metaRow}>
+                    <Text style={styles.metaPill}>{entry.userName || 'Unknown user'}</Text>
+                    {entry.environmentName ? (
+                      <Text style={styles.metaPill}>{entry.environmentName}</Text>
+                    ) : null}
+                    {payloadKeys.length > 0 ? (
+                      <Text style={styles.metaPill}>{payloadKeys.length} payload field{payloadKeys.length === 1 ? '' : 's'}</Text>
+                    ) : null}
+                  </View>
+
+                  {payloadKeys.length > 0 ? (
+                    <Text style={styles.payloadPreview}>
+                      {payloadKeys.slice(0, 4).join(', ')}
+                    </Text>
+                  ) : null}
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.eventTitle}>
-                    {entry.action} {entry.objectType || 'resource'}
-                  </Text>
-                  <Text style={styles.eventMeta}>
-                    {entry.objectId || 'Unknown object'}
-                  </Text>
-                  <Text style={styles.eventMeta}>
-                    {entry.userName || 'Unknown user'}
-                  </Text>
-                </View>
-                <Text style={styles.eventTime}>{formatRelativeTime(entry.timestamp)}</Text>
-              </View>
-            ))}
+              );
+            })}
           </Card.Content>
         </Card>
       </ScrollView>
@@ -177,12 +252,51 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  eventRow: {
+  statsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 18,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+  },
+  statValue: {
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.8,
+  },
+  statLabel: {
+    marginTop: 4,
+    color: theme.colors.onSurfaceVariant,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  actionWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  actionPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  actionText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  eventCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 12,
+    marginTop: 10,
+  },
+  eventHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
   },
   iconWrap: {
     width: 38,
@@ -205,6 +319,27 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     color: theme.colors.onSurfaceVariant,
     fontSize: 11,
     fontWeight: '600',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  metaPill: {
+    color: theme.colors.primary,
+    backgroundColor: theme.colors.primary + '12',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: 'hidden',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  payloadPreview: {
+    color: theme.colors.onSurfaceVariant,
+    fontSize: 12,
+    marginTop: 10,
   },
   emptyCopy: {
     color: theme.colors.onSurfaceVariant,
