@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Appbar, Button, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
+import { Appbar, Button, Card, Switch, Text, TextInput, useTheme, type MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
@@ -65,6 +65,21 @@ function buildCsv(section: UsageReportSection): string {
   return lines.join('\n');
 }
 
+function buildSummaryCsv(sections: UsageReportSection[]): string {
+  const lines = ['category,summary_metric,summary_value,detail_rows,last_updated_at'];
+  for (const section of sections) {
+    const value = findPrimaryMetric(section.aggregate.data[0] ?? {}, section.category.summaryMetric);
+    lines.push([
+      escapeCsvValue(section.category.title),
+      escapeCsvValue(section.category.summaryMetric),
+      escapeCsvValue(value),
+      escapeCsvValue(section.detail.data.length),
+      escapeCsvValue(section.aggregate.metadata.lastUpdatedAt),
+    ].join(','));
+  }
+  return lines.join('\n');
+}
+
 const UsageReportsScreen: React.FC = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -73,6 +88,8 @@ const UsageReportsScreen: React.FC = () => {
   const [range, setRange] = useState<RangeOption>('30d');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('runtime-messages');
   const [isExporting, setIsExporting] = useState(false);
+  const [detailFilter, setDetailFilter] = useState('');
+  const [showOnlyWithData, setShowOnlyWithData] = useState(false);
 
   const bounds = useMemo(() => getRangeBounds(range), [range]);
   const categories = useMemo(() => getUsageReportCategories(), []);
@@ -87,10 +104,22 @@ const UsageReportsScreen: React.FC = () => {
     queryFn: () => getUsageReportBundle(bounds.from, bounds.to),
   });
 
-  const selectedSection = useMemo(
-    () => bundle?.find((section) => section.category.id === selectedCategoryId) ?? bundle?.[0] ?? null,
-    [bundle, selectedCategoryId],
+  const visibleSections = useMemo(
+    () => showOnlyWithData ? (bundle ?? []).filter((section) => section.detail.data.length > 0 || section.aggregate.data.length > 0) : (bundle ?? []),
+    [bundle, showOnlyWithData],
   );
+  const selectedSection = useMemo(
+    () => visibleSections.find((section) => section.category.id === selectedCategoryId) ?? visibleSections[0] ?? null,
+    [selectedCategoryId, visibleSections],
+  );
+  const filteredDetailRows = useMemo(() => {
+    if (!selectedSection) return [];
+    if (!detailFilter.trim()) return selectedSection.detail.data;
+    const needle = detailFilter.trim().toLowerCase();
+    return selectedSection.detail.data.filter((row) =>
+      Object.values(row).some((value) => String(value ?? '').toLowerCase().includes(needle)),
+    );
+  }, [detailFilter, selectedSection]);
 
   const descriptorCount = useMemo(() => {
     if (!descriptors || !selectedSection) return 0;
@@ -119,6 +148,26 @@ const UsageReportsScreen: React.FC = () => {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'text/csv',
           dialogTitle: `${selectedSection.category.title} CSV`,
+        });
+      }
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportSummary = async () => {
+    if (visibleSections.length === 0) return;
+    setIsExporting(true);
+    try {
+      const csv = buildSummaryCsv(visibleSections);
+      const fileUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}muleops-usage-summary-${range}.csv`;
+      await FileSystem.writeAsStringAsync(fileUri, csv, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'text/csv',
+          dialogTitle: 'Usage summary CSV',
         });
       }
     } finally {
@@ -158,11 +207,17 @@ const UsageReportsScreen: React.FC = () => {
                 );
               })}
             </View>
+            <View style={styles.toggleRow}>
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
+                Show only categories with data
+              </Text>
+              <Switch value={showOnlyWithData} onValueChange={setShowOnlyWithData} />
+            </View>
           </Card.Content>
         </Card>
 
         <View style={styles.categoryGrid}>
-          {bundle?.map((section, index) => {
+          {visibleSections.map((section, index) => {
             const value = findPrimaryMetric(section.aggregate.data[0] ?? {}, section.category.summaryMetric);
             const selected = section.category.id === selectedCategoryId;
             const accent = [
@@ -203,6 +258,19 @@ const UsageReportsScreen: React.FC = () => {
                 Export CSV
               </Button>
             </View>
+            <View style={styles.sectionHeaderActions}>
+              <Button mode="outlined" onPress={() => void handleExportSummary()} loading={isExporting}>
+                Export summary
+              </Button>
+              <TextInput
+                mode="outlined"
+                dense
+                placeholder="Filter rows"
+                value={detailFilter}
+                onChangeText={setDetailFilter}
+                style={styles.filterInput}
+              />
+            </View>
 
             {isLoading || !selectedSection ? (
               <Text variant="bodySmall" style={styles.emptyCopy}>
@@ -225,7 +293,7 @@ const UsageReportsScreen: React.FC = () => {
                   </View>
                   <View style={[styles.statCard, { backgroundColor: anypointColors.accent + '12' }]}>
                     <Text style={[styles.statValue, { color: anypointColors.accent }]}>
-                      {selectedSection.detail.data.length}
+                      {filteredDetailRows.length}
                     </Text>
                     <Text style={styles.statLabel}>Detail rows</Text>
                   </View>
@@ -239,12 +307,12 @@ const UsageReportsScreen: React.FC = () => {
                   </View>
                 </View>
 
-                {selectedSection.detail.data.length === 0 ? (
+                {filteredDetailRows.length === 0 ? (
                   <Text variant="bodySmall" style={styles.emptyCopy}>
-                    No rows returned for this time window. The metering endpoint is live, but this tenant did not return detail rows for the current range.
+                    No rows match the current filter. Try clearing the filter or a broader time range.
                   </Text>
                 ) : (
-                  selectedSection.detail.data.slice(0, 20).map((row, index) => (
+                  filteredDetailRows.slice(0, 20).map((row, index) => (
                     <View
                       key={`${selectedSection.category.id}-${index}`}
                       style={[styles.rowCard, { borderColor: theme.colors.outlineVariant }]}
@@ -303,6 +371,12 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     gap: 10,
     marginTop: 14,
   },
+  toggleRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   categoryGrid: {
     gap: 10,
   },
@@ -317,6 +391,12 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 12,
   },
   sectionTitle: {
@@ -353,6 +433,9 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     padding: 12,
     marginTop: 10,
     gap: 8,
+  },
+  filterInput: {
+    flex: 1,
   },
   rowItem: {
     gap: 2,

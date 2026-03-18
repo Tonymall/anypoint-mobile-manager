@@ -22,6 +22,9 @@ export interface APIPolicyTemplate {
   name: string;
   description: string;
   category: string;
+  groupId: string | null;
+  assetId: string | null;
+  assetVersion: string | null;
   docsUrl?: string | null;
   providedCharacteristics: string[];
   requiredCharacteristics: string[];
@@ -326,6 +329,9 @@ export async function getPolicyTemplates(
     name: toStringValue(entry.name) ?? toStringValue(entry.assetId) ?? 'Policy template',
     description: toStringValue(entry.description) ?? '',
     category: toStringValue(entry.category) ?? 'Other',
+    groupId: toStringValue(entry.groupId),
+    assetId: toStringValue(entry.assetId),
+    assetVersion: toStringValue(entry.version),
     docsUrl: toStringValue(entry.docsUrl) ?? null,
     providedCharacteristics: Array.isArray(entry.providedCharacteristics)
       ? entry.providedCharacteristics.map((value: unknown) => String(value))

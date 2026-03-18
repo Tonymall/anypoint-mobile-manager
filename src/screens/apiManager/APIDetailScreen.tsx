@@ -7,7 +7,10 @@ import {
   Button,
   Card,
   Divider,
+  Dialog,
+  Portal,
   Text,
+  TextInput,
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
@@ -35,6 +38,14 @@ type ContractActionState = {
   action: 'approve' | 'reject' | null;
 };
 
+type TierDraft = {
+  name: string;
+  description: string;
+  maximumRequests: string;
+  periodSeconds: string;
+  autoApprove: boolean;
+};
+
 function normalizePolicyKey(value?: string | null): string {
   return (value ?? '')
     .toLowerCase()
@@ -57,6 +68,16 @@ const APIDetailScreen: React.FC = () => {
     contractId: null,
     action: null,
   });
+  const [tierDialogVisible, setTierDialogVisible] = useState(false);
+  const [tierDraft, setTierDraft] = useState<TierDraft>({
+    name: '',
+    description: '',
+    maximumRequests: '1000',
+    periodSeconds: '60',
+    autoApprove: true,
+  });
+  const [tierSubmitting, setTierSubmitting] = useState(false);
+  const [policyApplyBusyId, setPolicyApplyBusyId] = useState<string | null>(null);
 
   const { data: api, isLoading } = useManagedAPI(apiId);
   const { data: policies } = useAPIPolicies(apiId);
@@ -99,6 +120,49 @@ const APIDetailScreen: React.FC = () => {
 
   const contracts = contractsResponse?.data ?? [];
   const pendingContracts = contracts.filter((contract) => contract.status === 'PENDING');
+  const nextPolicyOrder = (policies?.length ?? 0) + 1;
+
+  const handleCreateTier = async () => {
+    if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
+    const maximumRequests = Number(tierDraft.maximumRequests);
+    const periodSeconds = Number(tierDraft.periodSeconds);
+    if (!tierDraft.name.trim() || !Number.isFinite(maximumRequests) || !Number.isFinite(periodSeconds)) {
+      hapticError();
+      return;
+    }
+
+    setTierSubmitting(true);
+    try {
+      await apiManagerService.createSLATier(currentOrg.id, currentEnv.id, apiId, {
+        name: tierDraft.name.trim(),
+        description: tierDraft.description.trim(),
+        autoApprove: tierDraft.autoApprove,
+        limits: [
+          {
+            maximumRequests,
+            timePeriodInMilliseconds: periodSeconds * 1000,
+            visible: true,
+          },
+        ],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: apiManagerKeys.slaTiers(currentOrg.id, currentEnv.id, apiId),
+      });
+      setTierDialogVisible(false);
+      setTierDraft({
+        name: '',
+        description: '',
+        maximumRequests: '1000',
+        periodSeconds: '60',
+        autoApprove: true,
+      });
+      hapticSuccess();
+    } catch {
+      hapticError();
+    } finally {
+      setTierSubmitting(false);
+    }
+  };
 
   const handleContractAction = async (
     contractId: number,
@@ -121,6 +185,34 @@ const APIDetailScreen: React.FC = () => {
       hapticError();
     } finally {
       setContractAction({ contractId: null, action: null });
+    }
+  };
+
+  const handleQuickApplyPolicy = async (template: apiManagerService.APIPolicyTemplate) => {
+    if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
+    if (!template.groupId || !template.assetId || !template.assetVersion) {
+      hapticError();
+      return;
+    }
+
+    setPolicyApplyBusyId(template.id);
+    try {
+      await apiManagerService.applyPolicy(currentOrg.id, currentEnv.id, apiId, {
+        policyTemplateId: template.id,
+        groupId: template.groupId,
+        assetId: template.assetId,
+        assetVersion: template.assetVersion,
+        configuration: {},
+        order: nextPolicyOrder,
+      });
+      await queryClient.invalidateQueries({
+        queryKey: apiManagerKeys.policies(currentOrg.id, currentEnv.id, apiId),
+      });
+      hapticSuccess();
+    } catch {
+      hapticError();
+    } finally {
+      setPolicyApplyBusyId(null);
     }
   };
 
@@ -230,17 +322,22 @@ const APIDetailScreen: React.FC = () => {
 
         <Card style={styles.card}>
           <Card.Content>
-            <Text variant="titleMedium" style={styles.sectionTitle}>
-              Policy catalog
-            </Text>
-            <Text variant="bodySmall" style={styles.sectionSubtitle}>
-              This catalog includes the policy set you called out, with live template metadata when the control plane exposes it.
-            </Text>
+            <View style={styles.sectionHeaderInline}>
+              <View style={{ flex: 1 }}>
+                <Text variant="titleMedium" style={styles.sectionTitle}>
+                  Policy catalog
+                </Text>
+                <Text variant="bodySmall" style={styles.sectionSubtitle}>
+                  This catalog includes the policy set you called out, with live template metadata when the control plane exposes it.
+                </Text>
+              </View>
+            </View>
 
             {mergedPolicyTemplates.map((template) => {
               const applied =
                 appliedPolicyKeys.has(normalizePolicyKey(template.id))
                 || appliedPolicyKeys.has(normalizePolicyKey(template.name));
+              const canQuickApply = !applied && !template.isSlaBased && !!template.groupId && !!template.assetId && !!template.assetVersion;
 
               return (
                 <View key={template.id} style={[styles.policyCard, { borderColor: theme.colors.outlineVariant }]}>
@@ -258,22 +355,37 @@ const APIDetailScreen: React.FC = () => {
                     {template.isSlaBased ? (
                       <Text style={[styles.metaChip, { color: anypointColors.warning }]}>SLA based</Text>
                     ) : null}
+                    {!canQuickApply && !applied ? (
+                      <Text style={styles.metaChip}>Config needed</Text>
+                    ) : null}
                     {template.providedCharacteristics.slice(0, 2).map((value) => (
                       <Text key={value} style={styles.metaChip}>
                         {value}
                       </Text>
                     ))}
                   </View>
-                  {template.docsUrl ? (
-                    <Button
-                      compact
-                      mode="text"
-                      onPress={() => void openDocs(template.docsUrl)}
-                      style={styles.inlineButton}
-                    >
-                      Learn more
-                    </Button>
-                  ) : null}
+                  <View style={styles.templateActions}>
+                    {canQuickApply ? (
+                      <Button
+                        compact
+                        mode="contained-tonal"
+                        onPress={() => void handleQuickApplyPolicy(template)}
+                        loading={policyApplyBusyId === template.id}
+                      >
+                        Quick apply
+                      </Button>
+                    ) : null}
+                    {template.docsUrl ? (
+                      <Button
+                        compact
+                        mode="text"
+                        onPress={() => void openDocs(template.docsUrl)}
+                        style={styles.inlineButton}
+                      >
+                        Learn more
+                      </Button>
+                    ) : null}
+                  </View>
                 </View>
               );
             })}
@@ -282,9 +394,16 @@ const APIDetailScreen: React.FC = () => {
 
         <Card style={styles.card}>
           <Card.Content>
-            <Text variant="titleMedium" style={styles.sectionTitle}>
-              SLA tiers
-            </Text>
+            <View style={styles.sectionHeaderInline}>
+              <View style={{ flex: 1 }}>
+                <Text variant="titleMedium" style={styles.sectionTitle}>
+                  SLA tiers
+                </Text>
+              </View>
+              <Button mode="contained-tonal" compact onPress={() => setTierDialogVisible(true)}>
+                Add tier
+              </Button>
+            </View>
             {(slaTiers ?? []).length > 0 ? (
               (slaTiers ?? []).map((tier) => (
                 <View key={tier.id} style={[styles.row, { borderTopColor: theme.colors.outlineVariant }]}>
@@ -365,6 +484,64 @@ const APIDetailScreen: React.FC = () => {
           </Card.Content>
         </Card>
       </ScrollView>
+
+      <Portal>
+        <Dialog visible={tierDialogVisible} onDismiss={() => setTierDialogVisible(false)}>
+          <Dialog.Title>Create SLA tier</Dialog.Title>
+          <Dialog.Content>
+            <TextInput
+              mode="outlined"
+              label="Tier name"
+              value={tierDraft.name}
+              onChangeText={(value) => setTierDraft((current) => ({ ...current, name: value }))}
+              style={styles.dialogInput}
+            />
+            <TextInput
+              mode="outlined"
+              label="Description"
+              value={tierDraft.description}
+              onChangeText={(value) => setTierDraft((current) => ({ ...current, description: value }))}
+              style={styles.dialogInput}
+            />
+            <TextInput
+              mode="outlined"
+              label="Max requests"
+              value={tierDraft.maximumRequests}
+              onChangeText={(value) => setTierDraft((current) => ({ ...current, maximumRequests: value }))}
+              keyboardType="number-pad"
+              style={styles.dialogInput}
+            />
+            <TextInput
+              mode="outlined"
+              label="Period (seconds)"
+              value={tierDraft.periodSeconds}
+              onChangeText={(value) => setTierDraft((current) => ({ ...current, periodSeconds: value }))}
+              keyboardType="number-pad"
+              style={styles.dialogInput}
+            />
+            <View style={styles.autoApproveRow}>
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
+                {tierDraft.autoApprove ? 'Auto-approve applications' : 'Manual approval required'}
+              </Text>
+              <Button
+                compact
+                mode="text"
+                onPress={() =>
+                  setTierDraft((current) => ({ ...current, autoApprove: !current.autoApprove }))
+                }
+              >
+                Toggle
+              </Button>
+            </View>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setTierDialogVisible(false)}>Cancel</Button>
+            <Button onPress={() => void handleCreateTier()} loading={tierSubmitting}>
+              Create
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 };
@@ -449,6 +626,11 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     color: theme.colors.onSurfaceVariant,
     marginBottom: 10,
   },
+  sectionHeaderInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   infoList: {
     gap: 10,
   },
@@ -520,6 +702,12 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     alignSelf: 'flex-start',
     marginTop: 4,
   },
+  templateActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
   tierLimit: {
     color: theme.colors.onSurfaceVariant,
     fontSize: 12,
@@ -535,6 +723,15 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginTop: 12,
+  },
+  dialogInput: {
+    marginBottom: 10,
+  },
+  autoApproveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
   },
 });
 
