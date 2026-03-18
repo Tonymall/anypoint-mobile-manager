@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { useAuthStore } from '../../stores/authStore';
 import * as governanceService from '../../services/governanceService';
+import * as controlPlaneInsightsService from '../../services/controlPlaneInsightsService';
 import { anypointColors } from '../../theme';
 
 function formatValidatedAt(raw?: string): string {
@@ -43,6 +44,18 @@ const GovernanceOverviewScreen: React.FC = () => {
   const { data: reports, isLoading: reportsLoading } = useQuery({
     queryKey: ['admin-governance', 'reports', currentOrg?.id],
     queryFn: () => governanceService.getConformanceReports(currentOrg!.id, { limit: 20 }),
+    enabled: !!currentOrg?.id,
+  });
+
+  const { data: tenantDashboard } = useQuery({
+    queryKey: ['admin-governance', 'tenant-dashboard', currentOrg?.id],
+    queryFn: () => controlPlaneInsightsService.getGovernanceTenantDashboard(currentOrg!.id),
+    enabled: !!currentOrg?.id,
+  });
+
+  const { data: tenantLimit } = useQuery({
+    queryKey: ['admin-governance', 'tenant-limit', currentOrg?.id],
+    queryFn: () => controlPlaneInsightsService.getGovernanceTenantLimit(currentOrg!.id),
     enabled: !!currentOrg?.id,
   });
 
@@ -130,6 +143,61 @@ const GovernanceOverviewScreen: React.FC = () => {
             <Text style={styles.statLabel}>Violations</Text>
           </View>
         </View>
+
+        {(tenantDashboard || tenantLimit) ? (
+          <Card style={styles.card}>
+            <Card.Content>
+              <Text variant="titleMedium" style={styles.sectionTitle}>
+                Tenant governance health
+              </Text>
+              <Text variant="bodySmall" style={styles.sectionSubtitle}>
+                These metrics come from the richer governance xAPI surfaces used by the web control plane.
+              </Text>
+
+              <View style={styles.splitRow}>
+                <View style={[styles.chipStat, { backgroundColor: theme.colors.primary + '12' }]}>
+                  <Text style={[styles.chipValue, { color: theme.colors.primary }]}>
+                    {tenantDashboard?.activeProfiles ?? '—'}
+                  </Text>
+                  <Text style={styles.chipLabel}>Active profiles</Text>
+                </View>
+                <View style={[styles.chipStat, { backgroundColor: anypointColors.success + '12' }]}>
+                  <Text style={[styles.chipValue, { color: anypointColors.success }]}>
+                    {tenantDashboard?.conformantApis ?? '—'}
+                  </Text>
+                  <Text style={styles.chipLabel}>Conformant APIs</Text>
+                </View>
+                <View style={[styles.chipStat, { backgroundColor: anypointColors.warning + '12' }]}>
+                  <Text style={[styles.chipValue, { color: anypointColors.warning }]}>
+                    {tenantDashboard?.nonConformantApis ?? '—'}
+                  </Text>
+                  <Text style={styles.chipLabel}>Non-conformant</Text>
+                </View>
+              </View>
+
+              <View style={styles.splitRow}>
+                <View style={[styles.chipStat, { backgroundColor: anypointColors.error + '12' }]}>
+                  <Text style={[styles.chipValue, { color: anypointColors.error }]}>
+                    {tenantDashboard?.violations ?? '—'}
+                  </Text>
+                  <Text style={styles.chipLabel}>Open violations</Text>
+                </View>
+                <View style={[styles.chipStat, { backgroundColor: anypointColors.mulePurple + '12' }]}>
+                  <Text style={[styles.chipValue, { color: anypointColors.mulePurple }]}>
+                    {tenantLimit?.used ?? '—'}
+                  </Text>
+                  <Text style={styles.chipLabel}>Entitlement used</Text>
+                </View>
+                <View style={[styles.chipStat, { backgroundColor: theme.colors.onSurfaceVariant + '12' }]}>
+                  <Text style={[styles.chipValue, { color: theme.colors.onSurfaceVariant }]}>
+                    {tenantLimit?.remaining ?? '—'}
+                  </Text>
+                  <Text style={styles.chipLabel}>Remaining</Text>
+                </View>
+              </View>
+            </Card.Content>
+          </Card>
+        ) : null}
 
         <Card style={styles.card}>
           <Card.Content>

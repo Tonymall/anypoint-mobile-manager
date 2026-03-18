@@ -73,6 +73,46 @@ const ADMIN_FEATURES: AdminFeature[] = [
     iconColor: anypointColors.secondary,
     route: '/(main)/admin/platform-activity',
   },
+  {
+    id: 'visualizer-topology',
+    title: 'Visualizer',
+    subtitle: 'Application topology and service graph',
+    icon: 'graph-outline',
+    iconColor: anypointColors.info,
+    route: '/(main)/admin/visualizer-topology',
+  },
+  {
+    id: 'runtime-fabric',
+    title: 'Runtime Fabric',
+    subtitle: 'Private spaces, fabrics, and targets',
+    icon: 'kubernetes',
+    iconColor: anypointColors.mulePurple,
+    route: '/(main)/admin/runtime-fabric',
+  },
+  {
+    id: 'cloud-network',
+    title: 'Cloud Network',
+    subtitle: 'VPCs, load balancers, and tunnels',
+    icon: 'cloud-braces',
+    iconColor: anypointColors.primary,
+    route: '/(main)/admin/cloud-network',
+  },
+  {
+    id: 'cloudhub-notifications',
+    title: 'CloudHub Inbox',
+    subtitle: 'Native platform notifications',
+    icon: 'bell-badge-outline',
+    iconColor: anypointColors.warning,
+    route: '/(main)/admin/cloudhub-notifications',
+  },
+  {
+    id: 'api-control-plane',
+    title: 'API Control Plane',
+    subtitle: 'Managed service APIs and gateway permissions',
+    icon: 'api',
+    iconColor: anypointColors.accent,
+    route: '/(main)/admin/api-control-plane',
+  },
   // Permissions card hidden until `/accounts/api/cs/.../permissions/products`
   // response shape is validated and PermissionsScreen is updated to match.
   // {
