@@ -46,6 +46,54 @@ function formatMegabytes(value: number | null | undefined): string {
   return `${Math.round(mb)} MB`;
 }
 
+function formatDisplayValue(value: unknown): string {
+  if (value == null) return '--';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    const items = value.map((entry) => formatDisplayValue(entry)).filter((entry) => entry !== '--');
+    return items.length > 0 ? items.join(', ') : '--';
+  }
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const preferred = [
+      record.name,
+      record.label,
+      record.title,
+      record.version,
+      record.updateVersion,
+      record.releaseChannel,
+      record.javaVersion,
+    ].map((entry) => formatDisplayValue(entry)).filter((entry) => entry !== '--');
+    if (preferred.length > 0) {
+      return preferred.join(' • ');
+    }
+    try {
+      return JSON.stringify(record);
+    } catch {
+      return '--';
+    }
+  }
+  return '--';
+}
+
+function getAppLabel(app: any): string {
+  return formatDisplayValue(app?.name ?? app?.domain ?? app?.instanceLabel);
+}
+
+function getAppDomain(app: any): string {
+  return formatDisplayValue(app?.domain ?? app?.name ?? app?.instanceLabel);
+}
+
+function getAppRuntimeLabel(app: any): string {
+  return formatDisplayValue(app?.muleVersion);
+}
+
+function getAppSelectionKey(app: any): string {
+  return formatDisplayValue(app?.domain ?? app?.name ?? app?.instanceLabel);
+}
+
 function buildSparklinePath(points: TrendPoint[], width: number, height: number): string {
   if (points.length === 0) return '';
   const values = points.map((point) => point.value);
@@ -96,14 +144,14 @@ const MonitoringDeepDiveScreen: React.FC = () => {
   );
 
   const effectiveSelectedDomain = useMemo(() => {
-    if (selectedDomain && runningApps.some((app: any) => (app.domain ?? app.name) === selectedDomain)) {
+    if (selectedDomain && runningApps.some((app: any) => getAppSelectionKey(app) === selectedDomain)) {
       return selectedDomain;
     }
-    return runningApps[0]?.domain ?? runningApps[0]?.name ?? null;
+    return runningApps[0] ? getAppSelectionKey(runningApps[0]) : null;
   }, [runningApps, selectedDomain]);
 
   const selectedApp = useMemo(
-    () => applications.find((app: any) => (app.domain ?? app.name) === effectiveSelectedDomain) ?? null,
+    () => applications.find((app: any) => getAppSelectionKey(app) === effectiveSelectedDomain) ?? null,
     [applications, effectiveSelectedDomain],
   );
 
@@ -231,7 +279,7 @@ const MonitoringDeepDiveScreen: React.FC = () => {
             <Text variant="titleMedium" style={styles.sectionTitle}>App selection</Text>
             <View style={styles.chipWrap}>
               {runningApps.slice(0, 12).map((app: any) => {
-                const domain = app.domain ?? app.name;
+                const domain = getAppSelectionKey(app);
                 const selected = domain === effectiveSelectedDomain;
                 return (
                   <Pressable
@@ -246,7 +294,7 @@ const MonitoringDeepDiveScreen: React.FC = () => {
                     ]}
                   >
                     <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurface }}>
-                      {app.name}
+                      {getAppLabel(app)}
                     </Text>
                   </Pressable>
                 );
@@ -289,13 +337,13 @@ const MonitoringDeepDiveScreen: React.FC = () => {
             {selectedApp ? (
               <View style={styles.selectedAppWrap}>
                 <View>
-                  <Text style={styles.selectedAppName}>{selectedApp.name}</Text>
+                  <Text style={styles.selectedAppName}>{getAppLabel(selectedApp)}</Text>
                   <Text style={styles.selectedAppMeta}>
-                    {selectedApp.domain} • {selectedApp.muleVersion || 'Unknown runtime'} • {selectedApp.region || 'Unknown region'}
+                    {getAppDomain(selectedApp)} • {getAppRuntimeLabel(selectedApp)} • {formatDisplayValue(selectedApp.region)}
                   </Text>
                 </View>
                 <Text style={[styles.statusBadge, { color: anypointColors.success, borderColor: anypointColors.success + '44' }]}>
-                  {selectedApp.status}
+                  {formatDisplayValue(selectedApp.status)}
                 </Text>
               </View>
             ) : (
