@@ -9,6 +9,7 @@ export default function AdminLayout() {
         headerShown: false,
         contentStyle: { backgroundColor: theme.colors.background },
         animation: 'slide_from_right',
+        gestureEnabled: false,
       }}
     >
       <Stack.Screen name="index" />

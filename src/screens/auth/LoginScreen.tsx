@@ -3,6 +3,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -83,6 +84,7 @@ const LoginScreen: React.FC = () => {
 
   const currentRegion = getRegionById(selectedRegion);
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
+  const isAddAccountMode = fromSettings === '1';
 
   const handleRegionSelect = useCallback(
     async (regionId: ControlPlaneRegionId) => {
@@ -289,8 +291,8 @@ const LoginScreen: React.FC = () => {
     >
       <AnimatedBackground />
 
-      <View
-        style={[
+      <ScrollView
+        contentContainerStyle={[
           styles.contentContainer,
           {
             paddingTop: insets.top + (isTabletLandscape ? 24 : isLandscape ? 16 : 0),
@@ -298,9 +300,11 @@ const LoginScreen: React.FC = () => {
             paddingHorizontal: horizontalPadding,
           },
         ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <View style={[styles.innerContent, isTabletLandscape && styles.innerContentLandscape]}>
-          {fromSettings === '1' ? (
+          {isAddAccountMode ? (
             <View style={styles.authNavRow}>
               <Pressable
                 onPress={handleReturnFromAddAccount}
@@ -559,7 +563,7 @@ const LoginScreen: React.FC = () => {
                   Sign in with SSO
                 </Button>
 
-                {rememberedAccounts.length > 0 ? (
+                {!isAddAccountMode && rememberedAccounts.length > 0 ? (
                   <>
                     <View style={styles.dividerRow}>
                       <Divider style={styles.dividerLine} />
@@ -678,7 +682,7 @@ const LoginScreen: React.FC = () => {
             </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
 
       {isLoading ? (
         <View
