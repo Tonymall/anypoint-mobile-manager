@@ -74,6 +74,14 @@ const ADMIN_FEATURES: AdminFeature[] = [
     route: '/(main)/admin/platform-activity',
   },
   {
+    id: 'usage-reports',
+    title: 'Usage Reports',
+    subtitle: 'Metering, CSV export, and platform consumption',
+    icon: 'file-chart-outline',
+    iconColor: anypointColors.accent,
+    route: '/(main)/admin/usage-reports',
+  },
+  {
     id: 'monitoring-deep-dive',
     title: 'Monitoring Deep Dive',
     subtitle: 'JVM, traffic, and time-series diagnostics',

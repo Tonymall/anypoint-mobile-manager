@@ -6,7 +6,9 @@
 
 import React, { useState, useMemo } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl, Pressable } from 'react-native';
+import { useRouter } from 'expo-router';
 import {
+  Button,
   Searchbar,
   Text,
   useTheme,
@@ -50,7 +52,7 @@ const technologyLabel = (tech: string): string => {
 
 // ── API Card Component ──────────────────────────────────────
 
-const APICard: React.FC<{ item: ManagedAPI; theme: MD3Theme }> = ({ item, theme }) => {
+const APICard: React.FC<{ item: ManagedAPI; theme: MD3Theme; onPress: () => void }> = ({ item, theme, onPress }) => {
   const api = item as any;
   const label = api.instanceLabel ?? api.assetId ?? `API ${api.id ?? ''}`;
   const assetInfo = [api.assetId, api.assetVersion].filter(Boolean).join(' v');
@@ -62,8 +64,10 @@ const APICard: React.FC<{ item: ManagedAPI; theme: MD3Theme }> = ({ item, theme 
   const isActive = status === 'active';
 
   return (
-    <View
+    <Pressable
+      onPress={onPress}
       accessibilityLabel={`API: ${label}, status ${String(status).toLowerCase()}`}
+      accessibilityRole="button"
       style={[
         cardStyles.card,
         {
@@ -178,7 +182,7 @@ const APICard: React.FC<{ item: ManagedAPI; theme: MD3Theme }> = ({ item, theme 
           </Text>
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 };
 
@@ -267,6 +271,7 @@ const cardStyles = StyleSheet.create({
 const APIListScreen: React.FC = () => {
   const theme = useTheme<MD3Theme>();
   const isFocused = useIsFocused();
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const debouncedSearch = useDebounce(searchQuery, 300);
@@ -303,12 +308,24 @@ const APIListScreen: React.FC = () => {
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: 12 }]}>
-        <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, fontWeight: '700', letterSpacing: -0.3 }}>
-          API Manager
-        </Text>
-        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
-          {allApis.length} managed {allApis.length === 1 ? 'instance' : 'instances'}
-        </Text>
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, fontWeight: '700', letterSpacing: -0.3 }}>
+              API Manager
+            </Text>
+            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+              {allApis.length} managed {allApis.length === 1 ? 'instance' : 'instances'}
+            </Text>
+          </View>
+          <Button
+            compact
+            mode="outlined"
+            icon="file-chart-outline"
+            onPress={() => router.push('/(main)/admin/usage-reports' as any)}
+          >
+            Usage
+          </Button>
+        </View>
       </View>
 
       {/* Search */}
@@ -366,7 +383,18 @@ const APIListScreen: React.FC = () => {
       <FlatList
         data={filteredAPIs}
         keyExtractor={(item: any, index) => String(item.id ?? item.apiId ?? index)}
-        renderItem={({ item }) => <APICard item={item} theme={theme} />}
+        renderItem={({ item }) => (
+          <APICard
+            item={item}
+            theme={theme}
+            onPress={() =>
+              router.push({
+                pathname: '/(main)/apis/api-detail' as any,
+                params: { apiId: String((item as any).id ?? (item as any).apiId) },
+              })
+            }
+          />
+        )}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
@@ -395,6 +423,11 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: 20,
     marginBottom: 4,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   searchbar: {
     marginHorizontal: 16,

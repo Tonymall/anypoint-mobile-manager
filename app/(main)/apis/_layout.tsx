@@ -12,6 +12,7 @@ export default function APIsLayout() {
       }}
     >
       <Stack.Screen name="index" />
+      <Stack.Screen name="api-detail" />
       <Stack.Screen name="asset-detail" />
       <Stack.Screen name="project-detail" />
     </Stack>

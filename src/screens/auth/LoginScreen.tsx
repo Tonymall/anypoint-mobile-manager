@@ -95,7 +95,7 @@ const LoginScreen: React.FC = () => {
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
   const isAddAccountMode = fromSettings === '1';
   const visibleRememberedAccounts = useMemo(
-    () => showAllRememberedAccounts ? rememberedAccounts : rememberedAccounts.slice(0, 2),
+    () => showAllRememberedAccounts ? rememberedAccounts : rememberedAccounts.slice(0, 1),
     [rememberedAccounts, showAllRememberedAccounts],
   );
 
@@ -627,8 +627,10 @@ const LoginScreen: React.FC = () => {
                         ].filter(Boolean).join(' • ');
 
                         return (
-                          <View
+                          <Pressable
                             key={account.accountId}
+                            onPress={() => void handleRememberedAccountLogin(account.accountId)}
+                            disabled={isLoading || !!switchingAccountId}
                             style={[
                               styles.savedAccountCard,
                               {
@@ -674,7 +676,10 @@ const LoginScreen: React.FC = () => {
                                 <Button
                                   compact
                                   mode="text"
-                                  onPress={() => handleForgetRememberedAccount(account.accountId)}
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    handleForgetRememberedAccount(account.accountId);
+                                  }}
                                   disabled={isLoading || !!switchingAccountId}
                                   textColor={theme.colors.onSurfaceVariant}
                                   style={styles.savedAccountForgetButton}
@@ -684,21 +689,24 @@ const LoginScreen: React.FC = () => {
                                 <Button
                                   compact
                                   mode="contained-tonal"
-                                  onPress={() => void handleRememberedAccountLogin(account.accountId)}
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    void handleRememberedAccountLogin(account.accountId);
+                                  }}
                                   loading={isSwitching}
                                   disabled={isLoading || !!switchingAccountId}
                                   contentStyle={styles.savedAccountContinueContent}
                                   labelStyle={styles.savedAccountContinueLabel}
                                 >
-                                  Continue
+                                  Open
                                 </Button>
                               </View>
                             </View>
-                          </View>
+                          </Pressable>
                         );
                       })}
 
-                      {rememberedAccounts.length > 2 ? (
+                      {rememberedAccounts.length > 1 ? (
                         <Button
                           compact
                           mode="text"
@@ -707,7 +715,7 @@ const LoginScreen: React.FC = () => {
                         >
                           {showAllRememberedAccounts
                             ? 'Show fewer accounts'
-                            : `Show ${rememberedAccounts.length - 2} more account${rememberedAccounts.length - 2 === 1 ? '' : 's'}`}
+                            : `Show ${rememberedAccounts.length - 1} more account${rememberedAccounts.length - 1 === 1 ? '' : 's'}`}
                         </Button>
                       ) : null}
                     </View>
@@ -914,26 +922,26 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   savedAccountsSection: {
-    gap: 8,
+    gap: 6,
   },
   savedAccountCard: {
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   savedAccountHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 42,
+    minHeight: 36,
   },
   savedAccountAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 8,
   },
   savedAccountText: {
     flex: 1,
@@ -941,17 +949,17 @@ const styles = StyleSheet.create({
   savedAccountActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 6,
     gap: 4,
   },
   savedAccountForgetButton: {
     minWidth: 0,
   },
   savedAccountContinueContent: {
-    minHeight: 34,
+    minHeight: 30,
   },
   savedAccountContinueLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   savedAccountsToggle: {
