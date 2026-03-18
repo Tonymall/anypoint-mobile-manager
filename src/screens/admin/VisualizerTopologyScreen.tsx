@@ -4,13 +4,13 @@ import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper'
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg, { Circle, G, Line, Rect, Text as SvgText } from 'react-native-svg';
 
 import { useEnvironments } from '../../hooks/queries';
+import * as runtimeService from '../../services/runtimeService';
+import * as visualizerService from '../../services/visualizerService';
 import { useAuthStore } from '../../stores/authStore';
 import { anypointColors } from '../../theme';
-import * as visualizerService from '../../services/visualizerService';
 
 type GraphNode = {
   id: string;
@@ -31,6 +31,8 @@ type GraphEdge = {
   id: string;
   sourceId: string;
   targetId: string;
+  sourceName: string;
+  targetName: string;
   protocol: string | null;
   requestCount: number | null;
 };
@@ -43,11 +45,22 @@ function getStatusColor(status: string | null): string {
   return anypointColors.info;
 }
 
+function normalizeIdentifier(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.toLowerCase() : null;
+}
+
+function truncateLabel(value: string, maxLength = 12): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
 function buildGraph(
   apps: visualizerService.VisualizerAppNode[],
   edges: visualizerService.VisualizerEdge[],
   width: number,
   height: number,
+  labelResolver: Map<string, string>,
 ): { nodes: GraphNode[]; graphEdges: GraphEdge[] } {
   const nodeMap = new Map<string, GraphNode>();
   const connectionCounts = new Map<string, number>();
@@ -59,9 +72,12 @@ function buildGraph(
 
   for (const app of apps) {
     const key = app.id || app.name;
+    const resolvedName = labelResolver.get(normalizeIdentifier(key) ?? '')
+      ?? labelResolver.get(normalizeIdentifier(app.name) ?? '')
+      ?? app.name;
     nodeMap.set(key, {
       id: key,
-      name: app.name,
+      name: resolvedName,
       x: 0,
       y: 0,
       radius: 24,
@@ -76,10 +92,17 @@ function buildGraph(
   }
 
   for (const edge of edges) {
+    const sourceName = edge.sourceLabel
+      ?? labelResolver.get(normalizeIdentifier(edge.source) ?? '')
+      ?? edge.source;
+    const targetName = edge.targetLabel
+      ?? labelResolver.get(normalizeIdentifier(edge.target) ?? '')
+      ?? edge.target;
+
     if (!nodeMap.has(edge.source)) {
       nodeMap.set(edge.source, {
         id: edge.source,
-        name: edge.source,
+        name: sourceName,
         x: 0,
         y: 0,
         radius: 20,
@@ -95,7 +118,7 @@ function buildGraph(
     if (!nodeMap.has(edge.target)) {
       nodeMap.set(edge.target, {
         id: edge.target,
-        name: edge.target,
+        name: targetName,
         x: 0,
         y: 0,
         radius: 20,
@@ -120,6 +143,8 @@ function buildGraph(
       id: edge.id,
       sourceId: edge.source,
       targetId: edge.target,
+      sourceName: edge.sourceLabel ?? labelResolver.get(normalizeIdentifier(edge.source) ?? '') ?? edge.source,
+      targetName: edge.targetLabel ?? labelResolver.get(normalizeIdentifier(edge.target) ?? '') ?? edge.target,
       protocol: edge.protocol ?? edge.connectionType,
       requestCount: edge.requestCount,
     }));
@@ -187,20 +212,65 @@ const VisualizerTopologyScreen: React.FC = () => {
     enabled: !!currentOrg?.id && effectiveEnvIds.length > 0,
   });
 
+  const runtimeAppsQuery = useQuery({
+    queryKey: ['admin-visualizer', 'runtime-apps', currentOrg?.id, effectiveEnvIds],
+    queryFn: async () => {
+      const results = await Promise.all(
+        effectiveEnvIds.map((environmentId) => runtimeService.getApplicationsForEnvironment(currentOrg!.id, environmentId)),
+      );
+      return results.flat();
+    },
+    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0,
+  });
+
   const layers = layersQuery.data ?? [];
   const views = viewsQuery.data ?? [];
   const apps = appsQuery.data ?? [];
   const edges = networkQuery.data ?? [];
+  const runtimeApps = runtimeAppsQuery.data ?? [];
   const highlights = useMemo(
     () => visualizerService.deriveVisualizerHighlights(apps, edges),
     [apps, edges],
   );
 
+  const labelResolver = useMemo(() => {
+    const resolver = new Map<string, string>();
+    const remember = (key: string | null | undefined, label: string | null | undefined) => {
+      const normalizedKey = normalizeIdentifier(key);
+      if (!normalizedKey || !label?.trim()) return;
+      if (!resolver.has(normalizedKey)) {
+        resolver.set(normalizedKey, label.trim());
+      }
+    };
+
+    for (const app of apps) {
+      remember(app.id, app.name);
+      remember(app.name, app.name);
+    }
+
+    for (const edge of edges) {
+      remember(edge.source, edge.sourceLabel ?? edge.source);
+      remember(edge.target, edge.targetLabel ?? edge.target);
+    }
+
+    for (const app of runtimeApps) {
+      const fullDomain = (app as any).fullDomain as string | undefined;
+      remember(app.id, app.name);
+      remember(app.name, app.name);
+      remember(app.domain, app.name);
+      remember(fullDomain, app.name);
+      remember(`${app.domain}.cloudhub.io`, app.name);
+      remember(`${app.name}.cloudhub.io`, app.name);
+    }
+
+    return resolver;
+  }, [apps, edges, runtimeApps]);
+
   const graphWidth = Math.max(windowWidth - 32, 720);
   const graphHeight = 420;
   const graph = useMemo(
-    () => buildGraph(apps, edges, graphWidth, graphHeight),
-    [apps, edges, graphHeight, graphWidth],
+    () => buildGraph(apps, edges, graphWidth, graphHeight, labelResolver),
+    [apps, edges, graphHeight, graphWidth, labelResolver],
   );
   const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId) ?? graph.nodes[0] ?? null;
   const topConnections = graph.graphEdges
@@ -228,7 +298,7 @@ const VisualizerTopologyScreen: React.FC = () => {
           <Card.Content>
             <Text variant="titleLarge" style={styles.sectionTitle}>Application topology</Text>
             <Text variant="bodySmall" style={styles.sectionSubtitle}>
-              Real dependency graph for the selected environments, backed by the same Visualizer network endpoints captured in the HAR.
+              Real dependency graph for the selected environments, with runtime metadata used to resolve app labels when Visualizer only returns identifiers.
             </Text>
 
             <View style={styles.chipWrap}>
@@ -345,7 +415,7 @@ const VisualizerTopologyScreen: React.FC = () => {
                           fill={theme.colors.onSurface}
                           textAnchor="middle"
                         >
-                          {node.name.length > 10 ? `${node.name.slice(0, 10)}…` : node.name}
+                          {truncateLabel(node.name, 10)}
                         </SvgText>
                       </G>
                     );
@@ -402,7 +472,7 @@ const VisualizerTopologyScreen: React.FC = () => {
 
             {topConnections.length > 0 ? topConnections.map((edge) => (
               <View key={edge.id} style={[styles.connectionCard, { borderColor: theme.colors.outlineVariant }]}>
-                <Text style={styles.rowTitle}>{edge.sourceId} → {edge.targetId}</Text>
+                <Text style={styles.rowTitle}>{edge.sourceName}{' -> '}{edge.targetName}</Text>
                 <Text style={styles.rowMeta}>
                   {edge.protocol ?? 'Unlabeled'}{edge.requestCount != null ? ` • ${edge.requestCount} requests` : ''}
                 </Text>

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useAuditLogs } from '../../hooks/queries';
+import type { AuditLogEntry } from '../../types';
 import { anypointColors } from '../../theme';
 
 type PlatformFilter = 'all' | 'mq' | 'object-store';
@@ -24,6 +25,42 @@ function formatRelativeTime(raw?: string): string {
   return `${Math.round(diffHours / 24)}d ago`;
 }
 
+function stringifyPayload(payload?: Record<string, unknown>): string {
+  if (!payload) return '';
+  try {
+    return JSON.stringify(payload).toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function matchesPlatform(entry: AuditLogEntry, filter: PlatformFilter): boolean {
+  if (filter === 'all') return true;
+
+  const haystack = [
+    entry.platform,
+    entry.objectType,
+    entry.objectId,
+    entry.action,
+    stringifyPayload(entry.payload),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (filter === 'mq') {
+    return /anypoint mq|mq\b|queue|exchange|message/.test(haystack);
+  }
+
+  return /object store|objectstore|osv2|key-value|keyvalue|bucket|object/.test(haystack);
+}
+
+function detectKind(entry: AuditLogEntry): 'mq' | 'object-store' | 'other' {
+  if (matchesPlatform(entry, 'mq')) return 'mq';
+  if (matchesPlatform(entry, 'object-store')) return 'object-store';
+  return 'other';
+}
+
 const PlatformActivityScreen: React.FC = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -31,20 +68,18 @@ const PlatformActivityScreen: React.FC = () => {
   const styles = useMemo(() => createStyles(theme), [theme]);
   const [filter, setFilter] = useState<PlatformFilter>('all');
 
-  const platforms = filter === 'mq'
-    ? ['Anypoint MQ']
-    : filter === 'object-store'
-      ? ['Object Store']
-      : ['Anypoint MQ', 'Object Store'];
-
   const { data: auditLogs, isLoading } = useAuditLogs({
-    platforms,
-    limit: 30,
+    limit: 80,
   });
 
-  const entries = auditLogs?.data ?? [];
-  const mqCount = entries.filter((entry) => /mq/i.test(entry.objectType ?? '') || /mq/i.test(entry.objectId ?? '')).length;
-  const objectStoreCount = entries.filter((entry) => /object/i.test(entry.objectType ?? '') || /object/i.test(entry.objectId ?? '')).length;
+  const allEntries = auditLogs?.data ?? [];
+  const entries = useMemo(
+    () => allEntries.filter((entry) => matchesPlatform(entry, filter)),
+    [allEntries, filter],
+  );
+
+  const mqCount = allEntries.filter((entry) => matchesPlatform(entry, 'mq')).length;
+  const objectStoreCount = allEntries.filter((entry) => matchesPlatform(entry, 'object-store')).length;
   const uniqueUsers = new Set(entries.map((entry) => entry.userId || entry.userName).filter(Boolean)).size;
 
   const topActions = useMemo(() => {
@@ -70,7 +105,7 @@ const PlatformActivityScreen: React.FC = () => {
               MQ and Object Store activity
             </Text>
             <Text variant="bodySmall" style={styles.sectionSubtitle}>
-              Audit-backed activity feed for recent events touching Anypoint MQ and Object Store.
+              Audit-backed activity feed. The page now matches against platform, object type, object id, and payload fields so tenant-specific audit shapes do not disappear just because the server-side platform label changes.
             </Text>
 
             <View style={styles.filterRow}>
@@ -111,11 +146,11 @@ const PlatformActivityScreen: React.FC = () => {
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: theme.colors.primary + '12' }]}>
             <Text style={[styles.statValue, { color: theme.colors.primary }]}>{entries.length}</Text>
-            <Text style={styles.statLabel}>Events</Text>
+            <Text style={styles.statLabel}>Visible events</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: anypointColors.secondary + '12' }]}>
             <Text style={[styles.statValue, { color: anypointColors.secondary }]}>{mqCount}</Text>
-            <Text style={styles.statLabel}>MQ</Text>
+            <Text style={styles.statLabel}>MQ matches</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: anypointColors.warning + '12' }]}>
             <Text style={[styles.statValue, { color: anypointColors.warning }]}>{objectStoreCount}</Text>
@@ -166,18 +201,25 @@ const PlatformActivityScreen: React.FC = () => {
 
             {!isLoading && entries.length === 0 ? (
               <Text variant="bodySmall" style={styles.emptyCopy}>
-                No recent activity was returned for the selected filter.
+                No recent MQ or Object Store activity matched the selected filter. If your tenant uses different audit labels, this page now falls back to payload and object matching, so a truly empty state usually means the audit stream did not include those events in the current time window.
               </Text>
             ) : null}
 
             {entries.map((entry) => {
               const payloadKeys = Object.keys(entry.payload ?? {});
+              const kind = detectKind(entry);
+              const chipColor = kind === 'mq'
+                ? anypointColors.secondary
+                : kind === 'object-store'
+                  ? anypointColors.warning
+                  : theme.colors.primary;
+              const chipLabel = kind === 'mq' ? 'MQ' : kind === 'object-store' ? 'Object Store' : 'Activity';
 
               return (
                 <View key={entry.id} style={[styles.eventCard, { borderColor: theme.colors.outlineVariant }]}>
                   <View style={styles.eventHeader}>
-                    <View style={[styles.iconWrap, { backgroundColor: theme.colors.primary + '12' }]}>
-                      <Icon name="database-outline" size={18} color={theme.colors.primary} />
+                    <View style={[styles.iconWrap, { backgroundColor: chipColor + '12' }]}>
+                      <Icon name={kind === 'mq' ? 'message-processing-outline' : 'database-outline'} size={18} color={chipColor} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.eventTitle}>
@@ -191,12 +233,13 @@ const PlatformActivityScreen: React.FC = () => {
                   </View>
 
                   <View style={styles.metaRow}>
+                    <Text style={[styles.metaPill, { color: chipColor, backgroundColor: chipColor + '12' }]}>{chipLabel}</Text>
                     <Text style={styles.metaPill}>{entry.userName || 'Unknown user'}</Text>
                     {entry.environmentName ? (
                       <Text style={styles.metaPill}>{entry.environmentName}</Text>
                     ) : null}
-                    {payloadKeys.length > 0 ? (
-                      <Text style={styles.metaPill}>{payloadKeys.length} payload field{payloadKeys.length === 1 ? '' : 's'}</Text>
+                    {entry.platform ? (
+                      <Text style={styles.metaPill}>{entry.platform}</Text>
                     ) : null}
                   </View>
 

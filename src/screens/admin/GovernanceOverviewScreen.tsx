@@ -6,9 +6,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useQuery } from '@tanstack/react-query';
 
-import { useAuthStore } from '../../stores/authStore';
-import * as governanceService from '../../services/governanceService';
 import * as controlPlaneInsightsService from '../../services/controlPlaneInsightsService';
+import * as governanceService from '../../services/governanceService';
+import { useAuthStore } from '../../stores/authStore';
 import { anypointColors } from '../../theme';
 
 function formatValidatedAt(raw?: string): string {
@@ -59,9 +59,22 @@ const GovernanceOverviewScreen: React.FC = () => {
     enabled: !!currentOrg?.id,
   });
 
+  const { data: tenantStats } = useQuery({
+    queryKey: ['admin-governance', 'tenant-stats', currentOrg?.id],
+    queryFn: () => controlPlaneInsightsService.getGovernanceTenantStats(currentOrg!.id),
+    enabled: !!currentOrg?.id,
+  });
+
+  const { data: tenantProfileStats } = useQuery({
+    queryKey: ['admin-governance', 'tenant-profile-stats', currentOrg?.id],
+    queryFn: () => controlPlaneInsightsService.getGovernanceTenantProfileStats(currentOrg!.id),
+    enabled: !!currentOrg?.id,
+  });
+
   const profileItems = profiles?.data ?? [];
   const rulesetItems = rulesets?.data ?? [];
   const reportItems = reports?.data ?? [];
+  const effectiveProfileRows = tenantProfileStats ?? [];
 
   const profileCounts = useMemo(() => ({
     active: profileItems.filter((profile) => profile.status === 'active').length,
@@ -98,6 +111,16 @@ const GovernanceOverviewScreen: React.FC = () => {
     return Array.from(counts.entries()).sort((left, right) => right[1] - left[1]);
   }, [rulesetItems]);
 
+  const hasAnyGovernanceData = Boolean(
+    tenantDashboard
+    || tenantLimit
+    || tenantStats
+    || effectiveProfileRows.length > 0
+    || profileItems.length > 0
+    || rulesetItems.length > 0
+    || reportItems.length > 0,
+  );
+
   return (
     <View style={styles.container}>
       <Appbar.Header style={{ backgroundColor: theme.colors.background }} statusBarHeight={insets.top}>
@@ -120,56 +143,56 @@ const GovernanceOverviewScreen: React.FC = () => {
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: theme.colors.primary + '12' }]}>
             <Text style={[styles.statValue, { color: theme.colors.primary }]}>
-              {profilesLoading ? '...' : profileItems.length}
+              {profilesLoading ? '...' : (profileItems.length || tenantStats?.totalProfiles || 0)}
             </Text>
             <Text style={styles.statLabel}>Profiles</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: anypointColors.mulePurple + '12' }]}>
             <Text style={[styles.statValue, { color: anypointColors.mulePurple }]}>
-              {rulesetsLoading ? '...' : rulesetItems.length}
+              {rulesetsLoading ? '...' : (rulesetItems.length || tenantStats?.totalRulesets || 0)}
             </Text>
             <Text style={styles.statLabel}>Rulesets</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: anypointColors.warning + '12' }]}>
             <Text style={[styles.statValue, { color: anypointColors.warning }]}>
-              {reportsLoading ? '...' : nonConformantReports.length}
+              {reportsLoading ? '...' : (nonConformantReports.length || tenantStats?.nonConformantApis || 0)}
             </Text>
             <Text style={styles.statLabel}>Non-conformant</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: anypointColors.error + '12' }]}>
             <Text style={[styles.statValue, { color: anypointColors.error }]}>
-              {reportsLoading ? '...' : violationSummary.total}
+              {reportsLoading ? '...' : (violationSummary.total || tenantStats?.totalViolations || tenantDashboard?.violations || 0)}
             </Text>
             <Text style={styles.statLabel}>Violations</Text>
           </View>
         </View>
 
-        {(tenantDashboard || tenantLimit) ? (
+        {(tenantDashboard || tenantLimit || tenantStats) ? (
           <Card style={styles.card}>
             <Card.Content>
               <Text variant="titleMedium" style={styles.sectionTitle}>
                 Tenant governance health
               </Text>
               <Text variant="bodySmall" style={styles.sectionSubtitle}>
-                These metrics come from the richer governance xAPI surfaces used by the web control plane.
+                These metrics come from the same governance xAPI surfaces the web control plane used in your HAR.
               </Text>
 
               <View style={styles.splitRow}>
                 <View style={[styles.chipStat, { backgroundColor: theme.colors.primary + '12' }]}>
                   <Text style={[styles.chipValue, { color: theme.colors.primary }]}>
-                    {tenantDashboard?.activeProfiles ?? '—'}
+                    {tenantDashboard?.activeProfiles ?? tenantStats?.totalProfiles ?? '--'}
                   </Text>
-                  <Text style={styles.chipLabel}>Active profiles</Text>
+                  <Text style={styles.chipLabel}>Profiles</Text>
                 </View>
                 <View style={[styles.chipStat, { backgroundColor: anypointColors.success + '12' }]}>
                   <Text style={[styles.chipValue, { color: anypointColors.success }]}>
-                    {tenantDashboard?.conformantApis ?? '—'}
+                    {tenantDashboard?.conformantApis ?? tenantStats?.conformantApis ?? '--'}
                   </Text>
                   <Text style={styles.chipLabel}>Conformant APIs</Text>
                 </View>
                 <View style={[styles.chipStat, { backgroundColor: anypointColors.warning + '12' }]}>
                   <Text style={[styles.chipValue, { color: anypointColors.warning }]}>
-                    {tenantDashboard?.nonConformantApis ?? '—'}
+                    {tenantDashboard?.nonConformantApis ?? tenantStats?.nonConformantApis ?? '--'}
                   </Text>
                   <Text style={styles.chipLabel}>Non-conformant</Text>
                 </View>
@@ -178,23 +201,50 @@ const GovernanceOverviewScreen: React.FC = () => {
               <View style={styles.splitRow}>
                 <View style={[styles.chipStat, { backgroundColor: anypointColors.error + '12' }]}>
                   <Text style={[styles.chipValue, { color: anypointColors.error }]}>
-                    {tenantDashboard?.violations ?? '—'}
+                    {tenantDashboard?.violations ?? tenantStats?.totalViolations ?? '--'}
                   </Text>
                   <Text style={styles.chipLabel}>Open violations</Text>
                 </View>
                 <View style={[styles.chipStat, { backgroundColor: anypointColors.mulePurple + '12' }]}>
                   <Text style={[styles.chipValue, { color: anypointColors.mulePurple }]}>
-                    {tenantLimit?.used ?? '—'}
+                    {tenantLimit?.used ?? tenantStats?.totalRulesets ?? '--'}
                   </Text>
-                  <Text style={styles.chipLabel}>Entitlement used</Text>
+                  <Text style={styles.chipLabel}>{tenantLimit ? 'Entitlement used' : 'Rulesets'}</Text>
                 </View>
                 <View style={[styles.chipStat, { backgroundColor: theme.colors.onSurfaceVariant + '12' }]}>
                   <Text style={[styles.chipValue, { color: theme.colors.onSurfaceVariant }]}>
-                    {tenantLimit?.remaining ?? '—'}
+                    {tenantLimit?.remaining ?? tenantStats?.notValidatedApis ?? '--'}
                   </Text>
-                  <Text style={styles.chipLabel}>Remaining</Text>
+                  <Text style={styles.chipLabel}>{tenantLimit ? 'Remaining' : 'Not validated'}</Text>
                 </View>
               </View>
+            </Card.Content>
+          </Card>
+        ) : null}
+
+        {effectiveProfileRows.length > 0 ? (
+          <Card style={styles.card}>
+            <Card.Content>
+              <Text variant="titleMedium" style={styles.sectionTitle}>
+                Tenant profile coverage
+              </Text>
+              <Text variant="bodySmall" style={styles.sectionSubtitle}>
+                Profile-level rollup from the governance xAPI stats endpoint, used as a reliable fallback when the classic APIs return little or no detail.
+              </Text>
+
+              {effectiveProfileRows.slice(0, 8).map((profile) => (
+                <View key={profile.id} style={[styles.listRow, { borderTopColor: theme.colors.outlineVariant }]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowTitle}>{profile.name}</Text>
+                    <Text style={styles.rowMeta}>
+                      {(profile.apiCount ?? 0)} APIs • {(profile.conformantApis ?? 0)} conformant • {(profile.nonConformantApis ?? 0)} non-conformant
+                    </Text>
+                  </View>
+                  <Text style={[styles.statusText, { color: anypointColors.warning }]}>
+                    {profile.violations ?? 0} violations
+                  </Text>
+                </View>
+              ))}
             </Card.Content>
           </Card>
         ) : null}
@@ -223,7 +273,7 @@ const GovernanceOverviewScreen: React.FC = () => {
               </View>
             </View>
 
-            {(profileItems.length > 0 ? profileItems : []).map((profile) => (
+            {profileItems.map((profile) => (
               <View key={profile.id} style={[styles.listRow, { borderTopColor: theme.colors.outlineVariant }]}>
                 <View style={[styles.iconWrap, { backgroundColor: theme.colors.primary + '12' }]}>
                   <Icon name="shield-check-outline" size={18} color={theme.colors.primary} />
@@ -231,7 +281,7 @@ const GovernanceOverviewScreen: React.FC = () => {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle}>{profile.name}</Text>
                   <Text style={styles.rowMeta}>
-                    {(profile.rulesets?.length ?? 0)} ruleset{(profile.rulesets?.length ?? 0) === 1 ? '' : 's'} - {profile.status}
+                    {(profile.rulesets?.length ?? 0)} ruleset{(profile.rulesets?.length ?? 0) === 1 ? '' : 's'} • {profile.status}
                   </Text>
                 </View>
                 <Text style={[styles.statusText, { color: profile.status === 'active' ? anypointColors.success : anypointColors.warning }]}>
@@ -242,7 +292,9 @@ const GovernanceOverviewScreen: React.FC = () => {
 
             {profileItems.length === 0 ? (
               <Text variant="bodySmall" style={styles.emptyState}>
-                No governance profiles were returned.
+                {effectiveProfileRows.length > 0
+                  ? 'The classic profiles endpoint returned no rows, but tenant profile stats are shown above.'
+                  : 'No governance profiles were returned.'}
               </Text>
             ) : null}
           </Card.Content>
@@ -267,7 +319,7 @@ const GovernanceOverviewScreen: React.FC = () => {
               ))}
             </View>
 
-            {(rulesetItems.slice(0, 8)).map((ruleset) => (
+            {rulesetItems.slice(0, 8).map((ruleset) => (
               <View key={ruleset.id} style={[styles.listRow, { borderTopColor: theme.colors.outlineVariant }]}>
                 <View style={[styles.iconWrap, { backgroundColor: anypointColors.mulePurple + '12' }]}>
                   <Icon name="book-open-variant" size={18} color={anypointColors.mulePurple} />
@@ -275,11 +327,17 @@ const GovernanceOverviewScreen: React.FC = () => {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowTitle}>{ruleset.name}</Text>
                   <Text style={styles.rowMeta}>
-                    {ruleset.category} - {(ruleset.rules?.length ?? 0)} rule{(ruleset.rules?.length ?? 0) === 1 ? '' : 's'}
+                    {ruleset.category} • {(ruleset.rules?.length ?? 0)} rule{(ruleset.rules?.length ?? 0) === 1 ? '' : 's'}
                   </Text>
                 </View>
               </View>
             ))}
+
+            {rulesetItems.length === 0 && tenantStats ? (
+              <Text variant="bodySmall" style={styles.emptyState}>
+                The richer tenant stats endpoint reports {tenantStats.totalRulesets ?? 0} rulesets, but the classic ruleset listing endpoint did not return item details for this org.
+              </Text>
+            ) : null}
           </Card.Content>
         </Card>
 
@@ -327,7 +385,7 @@ const GovernanceOverviewScreen: React.FC = () => {
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.rowTitle}>{report.apiName}</Text>
-                      <Text style={styles.rowMeta}>{report.profileName} - {formatValidatedAt(report.validatedAt)}</Text>
+                      <Text style={styles.rowMeta}>{report.profileName} • {formatValidatedAt(report.validatedAt)}</Text>
                     </View>
                     <Text style={[styles.statusText, { color }]}>{report.status}</Text>
                   </View>
@@ -344,11 +402,24 @@ const GovernanceOverviewScreen: React.FC = () => {
               );
             }) : (
               <Text variant="bodySmall" style={styles.emptyState}>
-                No conformance reports returned yet for this organization.
+                {tenantStats?.nonConformantApis || tenantStats?.conformantApis || tenantStats?.notValidatedApis
+                  ? 'The detailed conformance report endpoint returned no rows, but the tenant stats above still confirm governance activity for this organization.'
+                  : 'No conformance reports returned yet for this organization.'}
               </Text>
             )}
           </Card.Content>
         </Card>
+
+        {!hasAnyGovernanceData ? (
+          <Card style={styles.card}>
+            <Card.Content>
+              <Text variant="titleMedium" style={styles.sectionTitle}>No governance data returned</Text>
+              <Text variant="bodySmall" style={styles.emptyState}>
+                This tenant did not return data from either the classic governance APIs or the governance xAPI endpoints captured in the HAR. That usually means governance is not enabled for this org or the current user does not have access to it.
+              </Text>
+            </Card.Content>
+          </Card>
+        ) : null}
       </ScrollView>
     </View>
   );

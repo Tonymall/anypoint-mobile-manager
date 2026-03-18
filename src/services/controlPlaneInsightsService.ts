@@ -18,6 +18,25 @@ export interface GovernanceTenantDashboard {
   violations: number | null;
 }
 
+export interface GovernanceTenantStats {
+  totalApis: number | null;
+  totalProfiles: number | null;
+  totalRulesets: number | null;
+  totalViolations: number | null;
+  conformantApis: number | null;
+  nonConformantApis: number | null;
+  notValidatedApis: number | null;
+}
+
+export interface GovernanceTenantProfileStat {
+  id: string;
+  name: string;
+  apiCount: number | null;
+  conformantApis: number | null;
+  nonConformantApis: number | null;
+  violations: number | null;
+}
+
 export interface GovernanceTenantLimit {
   limit: number | null;
   used: number | null;
@@ -74,6 +93,46 @@ export async function getGovernanceTenantLimit(
       remaining: limit != null && used != null ? Math.max(0, limit - used) : null,
     };
   }, null);
+}
+
+export async function getGovernanceTenantStats(
+  organizationId: string,
+): Promise<GovernanceTenantStats | null> {
+  return withOptionalFallback(async () => {
+    const { data } = await api.get(`${GOVERNANCE_XAPI_BASE}/stats/tenant`, {
+      params: { organization: organizationId },
+    });
+    return {
+      totalApis: toNumber(findNestedValue(data, ['totalApis', 'apiCount', 'apis', 'totalApiCount'])),
+      totalProfiles: toNumber(findNestedValue(data, ['totalProfiles', 'profileCount', 'profiles'])),
+      totalRulesets: toNumber(findNestedValue(data, ['totalRulesets', 'rulesetCount', 'rulesets'])),
+      totalViolations: toNumber(findNestedValue(data, ['totalViolations', 'violationCount', 'violations'])),
+      conformantApis: toNumber(findNestedValue(data, ['conformantApis', 'conformantApiCount'])),
+      nonConformantApis: toNumber(findNestedValue(data, ['nonConformantApis', 'nonConformantApiCount'])),
+      notValidatedApis: toNumber(findNestedValue(data, ['notValidatedApis', 'pendingApis', 'notValidatedApiCount'])),
+    };
+  }, null);
+}
+
+export async function getGovernanceTenantProfileStats(
+  organizationId: string,
+): Promise<GovernanceTenantProfileStat[]> {
+  return withOptionalFallback(async () => {
+    const { data } = await api.get(`${GOVERNANCE_XAPI_BASE}/stats/tenant/profiles`, {
+      params: { organization: organizationId },
+    });
+    return unwrapCollection(data, ['profiles', 'items', 'data']).map((entry: unknown) => {
+      const item = asRecord(entry);
+      return {
+        id: toStringValue(item.id) ?? toStringValue(item.profileId) ?? toStringValue(item.name) ?? `profile-${Math.random()}`,
+        name: toStringValue(item.name) ?? toStringValue(item.profileName) ?? 'Governance profile',
+        apiCount: toNumber(findNestedValue(item, ['apiCount', 'apis', 'apiTotal', 'totalApis'])),
+        conformantApis: toNumber(findNestedValue(item, ['conformantApis', 'conformantApiCount'])),
+        nonConformantApis: toNumber(findNestedValue(item, ['nonConformantApis', 'nonConformantApiCount'])),
+        violations: toNumber(findNestedValue(item, ['violations', 'violationCount', 'totalViolations'])),
+      };
+    });
+  }, []);
 }
 
 export async function getManagedServiceApis(

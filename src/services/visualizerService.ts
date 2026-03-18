@@ -41,6 +41,8 @@ export interface VisualizerEdge {
   id: string;
   source: string;
   target: string;
+  sourceLabel?: string | null;
+  targetLabel?: string | null;
   connectionType: string | null;
   protocol: string | null;
   requestCount: number | null;
@@ -107,6 +109,16 @@ function normalizeEdge(raw: unknown): VisualizerEdge {
     id: toStringValue(item.id) ?? `${source}->${target}`,
     source,
     target,
+    sourceLabel: toStringValue(item.sourceName)
+      ?? toStringValue(item.sourceApplicationName)
+      ?? toStringValue(item.sourceDisplayName)
+      ?? toStringValue(item.sourceLabel)
+      ?? toStringValue(item.originName),
+    targetLabel: toStringValue(item.targetName)
+      ?? toStringValue(item.targetApplicationName)
+      ?? toStringValue(item.targetDisplayName)
+      ?? toStringValue(item.targetLabel)
+      ?? toStringValue(item.destinationName),
     connectionType: toStringValue(item.connectionType) ?? toStringValue(item.type),
     protocol: toStringValue(item.protocol) ?? toStringValue(item.transport),
     requestCount: toNumber(item.requestCount) ?? toNumber(item.calls) ?? toNumber(item.volume),

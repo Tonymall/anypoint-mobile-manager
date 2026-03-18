@@ -547,6 +547,7 @@ export interface ConnectedApp {
 export interface AuditLogEntry {
   id: string;
   action: string;
+  platform?: string;
   objectType: string;
   objectId: string;
   userName: string;

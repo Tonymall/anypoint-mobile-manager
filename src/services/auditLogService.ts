@@ -151,6 +151,7 @@ function normalizeEntry(raw: any): AuditLogEntry {
   return {
     id: raw.id ?? raw.auditId ?? fallbackIdSeed,
     action: raw.action ?? raw.actionName ?? 'Unknown',
+    platform: raw.platform ?? raw.platformName ?? raw.product ?? raw.platformType ?? '',
     objectType: raw.objectType ?? raw.type ?? '',
     objectId: raw.objectId ?? raw.objectName ?? '',
     userName: raw.userName ?? raw.userEmail ?? raw.user?.name ?? raw.user?.email ?? '',

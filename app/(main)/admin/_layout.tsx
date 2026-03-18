@@ -19,6 +19,7 @@ export default function AdminLayout() {
       <Stack.Screen name="governance" />
       <Stack.Screen name="environment-comparison" />
       <Stack.Screen name="platform-activity" />
+      <Stack.Screen name="monitoring-deep-dive" />
       <Stack.Screen name="visualizer-topology" />
       <Stack.Screen name="runtime-fabric" />
       <Stack.Screen name="cloud-network" />

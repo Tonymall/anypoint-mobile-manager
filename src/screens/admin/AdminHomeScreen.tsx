@@ -74,6 +74,14 @@ const ADMIN_FEATURES: AdminFeature[] = [
     route: '/(main)/admin/platform-activity',
   },
   {
+    id: 'monitoring-deep-dive',
+    title: 'Monitoring Deep Dive',
+    subtitle: 'JVM, traffic, and time-series diagnostics',
+    icon: 'chart-line-variant',
+    iconColor: anypointColors.success,
+    route: '/(main)/admin/monitoring-deep-dive',
+  },
+  {
     id: 'visualizer-topology',
     title: 'Visualizer',
     subtitle: 'Application topology and service graph',
