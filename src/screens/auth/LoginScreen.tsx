@@ -60,6 +60,7 @@ const LoginScreen: React.FC = () => {
   const [regionMenuVisible, setRegionMenuVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [switchingAccountId, setSwitchingAccountId] = useState<string | null>(null);
+  const [showAllRememberedAccounts, setShowAllRememberedAccounts] = useState(false);
 
   const selectedRegion = useAuthStore((state) => state.selectedRegion);
   const setSelectedRegion = useAuthStore((state) => state.setSelectedRegion);
@@ -85,6 +86,10 @@ const LoginScreen: React.FC = () => {
   const currentRegion = getRegionById(selectedRegion);
   const isFormValid = username.trim().length > 0 && password.trim().length > 0;
   const isAddAccountMode = fromSettings === '1';
+  const visibleRememberedAccounts = useMemo(
+    () => showAllRememberedAccounts ? rememberedAccounts : rememberedAccounts.slice(0, 2),
+    [rememberedAccounts, showAllRememberedAccounts],
+  );
 
   const handleRegionSelect = useCallback(
     async (regionId: ControlPlaneRegionId) => {
@@ -577,10 +582,14 @@ const LoginScreen: React.FC = () => {
                     </View>
 
                     <View style={styles.savedAccountsSection}>
-                      {rememberedAccounts.map((account) => {
+                      {visibleRememberedAccounts.map((account) => {
                         const isSwitching = switchingAccountId === account.accountId;
                         const fullName =
                           `${account.user.firstName ?? ''} ${account.user.lastName ?? ''}`.trim();
+                        const metaLine = [
+                          account.currentOrganization?.name ?? account.user.organizationName,
+                          getRegionById(account.selectedRegion).label,
+                        ].filter(Boolean).join(' • ');
 
                         return (
                           <View
@@ -623,49 +632,49 @@ const LoginScreen: React.FC = () => {
                                   style={{ color: theme.colors.onSurfaceVariant }}
                                   numberOfLines={1}
                                 >
-                                  {account.user.email || account.user.username}
+                                  {metaLine || account.user.email || account.user.username}
                                 </Text>
                               </View>
-                            </View>
-
-                            <View style={styles.savedAccountMeta}>
-                              <Text
-                                variant="bodySmall"
-                                style={{ color: theme.colors.onSurfaceVariant }}
-                                numberOfLines={1}
-                              >
-                                {account.currentOrganization?.name ?? account.user.organizationName}
-                              </Text>
-                              <Text
-                                variant="bodySmall"
-                                style={{ color: theme.colors.onSurfaceVariant }}
-                                numberOfLines={1}
-                              >
-                                {getRegionById(account.selectedRegion).label}
-                              </Text>
-                            </View>
-
-                            <View style={styles.savedAccountActions}>
-                              <Button
-                                mode="text"
-                                onPress={() => handleForgetRememberedAccount(account.accountId)}
-                                disabled={isLoading || !!switchingAccountId}
-                                textColor={theme.colors.onSurfaceVariant}
-                              >
-                                Forget
-                              </Button>
-                              <Button
-                                mode="contained-tonal"
-                                onPress={() => void handleRememberedAccountLogin(account.accountId)}
-                                loading={isSwitching}
-                                disabled={isLoading || !!switchingAccountId}
-                              >
-                                Continue
-                              </Button>
+                              <View style={styles.savedAccountActions}>
+                                <Button
+                                  compact
+                                  mode="text"
+                                  onPress={() => handleForgetRememberedAccount(account.accountId)}
+                                  disabled={isLoading || !!switchingAccountId}
+                                  textColor={theme.colors.onSurfaceVariant}
+                                  style={styles.savedAccountForgetButton}
+                                >
+                                  Forget
+                                </Button>
+                                <Button
+                                  compact
+                                  mode="contained-tonal"
+                                  onPress={() => void handleRememberedAccountLogin(account.accountId)}
+                                  loading={isSwitching}
+                                  disabled={isLoading || !!switchingAccountId}
+                                  contentStyle={styles.savedAccountContinueContent}
+                                  labelStyle={styles.savedAccountContinueLabel}
+                                >
+                                  Continue
+                                </Button>
+                              </View>
                             </View>
                           </View>
                         );
                       })}
+
+                      {rememberedAccounts.length > 2 ? (
+                        <Button
+                          compact
+                          mode="text"
+                          onPress={() => setShowAllRememberedAccounts((current) => !current)}
+                          style={styles.savedAccountsToggle}
+                        >
+                          {showAllRememberedAccounts
+                            ? 'Show fewer accounts'
+                            : `Show ${rememberedAccounts.length - 2} more account${rememberedAccounts.length - 2 === 1 ? '' : 's'}`}
+                        </Button>
+                      ) : null}
                     </View>
                   </>
                 ) : null}
@@ -870,37 +879,48 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   savedAccountsSection: {
-    gap: 12,
+    gap: 8,
   },
   savedAccountCard: {
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   savedAccountHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 42,
   },
   savedAccountAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   savedAccountText: {
     flex: 1,
   },
-  savedAccountMeta: {
-    marginTop: 10,
-    gap: 2,
-  },
   savedAccountActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    marginLeft: 8,
+    gap: 4,
+  },
+  savedAccountForgetButton: {
+    minWidth: 0,
+  },
+  savedAccountContinueContent: {
+    minHeight: 34,
+  },
+  savedAccountContinueLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  savedAccountsToggle: {
+    alignSelf: 'flex-start',
   },
   footer: {
     alignItems: 'center',
