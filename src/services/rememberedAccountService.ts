@@ -91,7 +91,13 @@ export async function activateRememberedAccount(accountId: string): Promise<void
 
     if (status === 401 || status === 403) {
       useAuthStore.getState().removeRememberedAccount(accountId);
-      throw new Error('Saved session expired. Please sign in again.');
+      throw Object.assign(new Error('Saved session expired. Please sign in again.'), {
+        code: 'REMEMBERED_ACCOUNT_EXPIRED',
+        accountId,
+        username: rememberedAccount.user.username,
+        email: rememberedAccount.user.email,
+        selectedRegion: rememberedAccount.selectedRegion,
+      });
     }
 
     throw new Error('Unable to switch accounts right now. Please try again.');

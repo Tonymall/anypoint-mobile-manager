@@ -41,7 +41,15 @@ const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 const LoginScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
-  const { fromSettings } = useLocalSearchParams<{ fromSettings?: string }>();
+  const {
+    fromSettings,
+    rememberedUsername,
+    rememberedRegion,
+  } = useLocalSearchParams<{
+    fromSettings?: string;
+    rememberedUsername?: string;
+    rememberedRegion?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
@@ -54,7 +62,7 @@ const LoginScreen: React.FC = () => {
   const logoCircleSize = isTabletLandscape ? 100 : isTablet ? 88 : 76;
   const horizontalPadding = isTabletLandscape ? 40 : isTablet ? 40 : 24;
 
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(rememberedUsername ?? '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [regionMenuVisible, setRegionMenuVisible] = useState(false);
@@ -99,6 +107,22 @@ const LoginScreen: React.FC = () => {
     },
     [setSelectedRegion],
   );
+
+  React.useEffect(() => {
+    if (rememberedUsername && typeof rememberedUsername === 'string') {
+      setUsername(rememberedUsername);
+    }
+  }, [rememberedUsername]);
+
+  React.useEffect(() => {
+    if (
+      rememberedRegion &&
+      typeof rememberedRegion === 'string' &&
+      CONTROL_PLANE_REGIONS.some((region) => region.id === rememberedRegion)
+    ) {
+      void handleRegionSelect(rememberedRegion as ControlPlaneRegionId);
+    }
+  }, [handleRegionSelect, rememberedRegion]);
 
   const handleLogin = useCallback(async () => {
     if (!username.trim() || !password.trim()) {
@@ -269,6 +293,17 @@ const LoginScreen: React.FC = () => {
           router.replace('/(auth)/select-org' as any);
         }
       } catch (error: any) {
+        if (error?.code === 'REMEMBERED_ACCOUNT_EXPIRED') {
+          router.push({
+            pathname: '/(auth)/login' as any,
+            params: {
+              fromSettings: '1',
+              rememberedUsername: error.username ?? error.email ?? '',
+              rememberedRegion: error.selectedRegion ?? selectedRegion,
+            },
+          });
+          return;
+        }
         showError({
           title: 'Unable to continue',
           message: error?.message ?? 'Saved session could not be restored.',
