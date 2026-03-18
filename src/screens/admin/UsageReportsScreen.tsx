@@ -52,8 +52,7 @@ function escapeCsvValue(value: unknown): string {
   return text;
 }
 
-function buildCsv(section: UsageReportSection): string {
-  const rows = section.detail.data;
+function buildCsv(section: UsageReportSection, rows: Array<Record<string, unknown>>): string {
   const headers = ['timestamp', ...section.category.detailColumns];
   const lines = [headers.join(',')];
 
@@ -139,7 +138,7 @@ const UsageReportsScreen: React.FC = () => {
     if (!selectedSection) return;
     setIsExporting(true);
     try {
-      const csv = buildCsv(selectedSection);
+      const csv = buildCsv(selectedSection, filteredDetailRows as Array<Record<string, unknown>>);
       const fileUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}muleops-${selectedSection.category.id}-${range}.csv`;
       await FileSystem.writeAsStringAsync(fileUri, csv, {
         encoding: FileSystem.EncodingType.UTF8,
