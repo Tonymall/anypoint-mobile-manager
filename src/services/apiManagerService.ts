@@ -84,12 +84,27 @@ function mapConfigField(input: any, fallbackName?: string): PolicyConfigField | 
     ?? toStringValue(fallbackName);
   if (!propertyName) return null;
 
+  const enumCandidates = [
+    input?.enum,
+    input?.allowedValues,
+    input?.options,
+    input?.schema?.enum,
+    input?.items?.enum,
+    Array.isArray(input?.oneOf) ? input.oneOf.map((entry: any) => entry?.const ?? entry?.value ?? entry?.title) : null,
+    Array.isArray(input?.anyOf) ? input.anyOf.map((entry: any) => entry?.const ?? entry?.value ?? entry?.title) : null,
+  ];
+  const enumValues = enumCandidates
+    .find((candidate) => Array.isArray(candidate))
+    ?.map((value: unknown) => toStringValue(value))
+    .filter((value): value is string => !!value);
+
   return {
     propertyName,
     name: toStringValue(input?.title) ?? toStringValue(input?.displayName) ?? propertyName,
     description: toStringValue(input?.description) ?? '',
     type: normalizeFieldType(input?.type),
     defaultValue: input?.defaultValue ?? input?.default,
+    enumValues,
     optional: Boolean(input?.optional ?? !input?.required),
     sensitive: Boolean(input?.sensitive),
     allowMultiple: Boolean(input?.allowMultiple),
@@ -363,6 +378,56 @@ export async function getAlerts(
     `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/alerts`,
   );
   return data;
+}
+
+/**
+ * Update an existing SLA tier for a managed API.
+ */
+export async function updateSLATier(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+  tierId: number,
+  tier: {
+    name: string;
+    description: string;
+    autoApprove: boolean;
+    status?: 'ACTIVE' | 'DEPRECATED';
+    limits: SLALimit[];
+  },
+): Promise<SLATier> {
+  try {
+    const { data } = await api.put<SLATier>(
+      `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers/${tierId}`,
+      tier,
+    );
+    return data;
+  } catch (error) {
+    const status = getStatusCode(error);
+    if (status !== 403 && status !== 404 && status !== 405) {
+      throw error;
+    }
+
+    const { data } = await api.patch<SLATier>(
+      `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers/${tierId}`,
+      tier,
+    );
+    return data;
+  }
+}
+
+/**
+ * Delete or retire an SLA tier for a managed API.
+ */
+export async function deleteSLATier(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+  tierId: number,
+): Promise<void> {
+  await api.delete(
+    `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers/${tierId}`,
+  );
 }
 
 // ---------- xAPI detail helpers ----------

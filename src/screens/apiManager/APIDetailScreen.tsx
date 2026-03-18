@@ -44,6 +44,13 @@ type TierDraft = {
   maximumRequests: string;
   periodSeconds: string;
   autoApprove: boolean;
+  status: 'ACTIVE' | 'DEPRECATED';
+};
+
+type TierDialogState = {
+  visible: boolean;
+  mode: 'create' | 'edit';
+  tierId: number | null;
 };
 
 type PolicyDialogState = {
@@ -76,16 +83,23 @@ const APIDetailScreen: React.FC = () => {
     contractId: null,
     action: null,
   });
-  const [tierDialogVisible, setTierDialogVisible] = useState(false);
   const [tierDraft, setTierDraft] = useState<TierDraft>({
     name: '',
     description: '',
     maximumRequests: '1000',
     periodSeconds: '60',
     autoApprove: true,
+    status: 'ACTIVE',
+  });
+  const [tierDialog, setTierDialog] = useState<TierDialogState>({
+    visible: false,
+    mode: 'create',
+    tierId: null,
   });
   const [tierSubmitting, setTierSubmitting] = useState(false);
+  const [tierDeleteBusyId, setTierDeleteBusyId] = useState<number | null>(null);
   const [policyApplyBusyId, setPolicyApplyBusyId] = useState<string | null>(null);
+  const [policyRemoveBusyId, setPolicyRemoveBusyId] = useState<number | null>(null);
   const [policyDialog, setPolicyDialog] = useState<PolicyDialogState>({
     visible: false,
     loading: false,
@@ -137,7 +151,53 @@ const APIDetailScreen: React.FC = () => {
   const pendingContracts = contracts.filter((contract) => contract.status === 'PENDING');
   const nextPolicyOrder = (policies?.length ?? 0) + 1;
 
-  const handleCreateTier = async () => {
+  const resetTierDraft = () => {
+    setTierDraft({
+      name: '',
+      description: '',
+      maximumRequests: '1000',
+      periodSeconds: '60',
+      autoApprove: true,
+      status: 'ACTIVE',
+    });
+  };
+
+  const openCreateTierDialog = () => {
+    resetTierDraft();
+    setTierDialog({
+      visible: true,
+      mode: 'create',
+      tierId: null,
+    });
+  };
+
+  const openEditTierDialog = (tier: NonNullable<typeof slaTiers>[number]) => {
+    const firstLimit = tier.limits?.[0];
+    setTierDraft({
+      name: tier.name,
+      description: tier.description ?? '',
+      maximumRequests: firstLimit ? String(firstLimit.maximumRequests) : '1000',
+      periodSeconds: firstLimit ? String(Math.round(firstLimit.timePeriodInMilliseconds / 1000)) : '60',
+      autoApprove: tier.autoApprove,
+      status: tier.status,
+    });
+    setTierDialog({
+      visible: true,
+      mode: 'edit',
+      tierId: tier.id,
+    });
+  };
+
+  const closeTierDialog = () => {
+    setTierDialog({
+      visible: false,
+      mode: 'create',
+      tierId: null,
+    });
+    resetTierDraft();
+  };
+
+  const handleSubmitTier = async () => {
     if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
     const maximumRequests = Number(tierDraft.maximumRequests);
     const periodSeconds = Number(tierDraft.periodSeconds);
@@ -148,10 +208,11 @@ const APIDetailScreen: React.FC = () => {
 
     setTierSubmitting(true);
     try {
-      await apiManagerService.createSLATier(currentOrg.id, currentEnv.id, apiId, {
+      const payload = {
         name: tierDraft.name.trim(),
         description: tierDraft.description.trim(),
         autoApprove: tierDraft.autoApprove,
+        status: tierDraft.status,
         limits: [
           {
             maximumRequests,
@@ -159,23 +220,37 @@ const APIDetailScreen: React.FC = () => {
             visible: true,
           },
         ],
-      });
+      };
+      if (tierDialog.mode === 'edit' && tierDialog.tierId) {
+        await apiManagerService.updateSLATier(currentOrg.id, currentEnv.id, apiId, tierDialog.tierId, payload);
+      } else {
+        await apiManagerService.createSLATier(currentOrg.id, currentEnv.id, apiId, payload);
+      }
       await queryClient.invalidateQueries({
         queryKey: apiManagerKeys.slaTiers(currentOrg.id, currentEnv.id, apiId),
       });
-      setTierDialogVisible(false);
-      setTierDraft({
-        name: '',
-        description: '',
-        maximumRequests: '1000',
-        periodSeconds: '60',
-        autoApprove: true,
-      });
+      closeTierDialog();
       hapticSuccess();
     } catch {
       hapticError();
     } finally {
       setTierSubmitting(false);
+    }
+  };
+
+  const handleDeleteTier = async (tierId: number) => {
+    if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
+    setTierDeleteBusyId(tierId);
+    try {
+      await apiManagerService.deleteSLATier(currentOrg.id, currentEnv.id, apiId, tierId);
+      await queryClient.invalidateQueries({
+        queryKey: apiManagerKeys.slaTiers(currentOrg.id, currentEnv.id, apiId),
+      });
+      hapticSuccess();
+    } catch {
+      hapticError();
+    } finally {
+      setTierDeleteBusyId(null);
     }
   };
 
@@ -236,6 +311,22 @@ const APIDetailScreen: React.FC = () => {
     }
   };
 
+  const handleRemovePolicy = async (policyId: number) => {
+    if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
+    setPolicyRemoveBusyId(policyId);
+    try {
+      await apiManagerService.removePolicy(currentOrg.id, currentEnv.id, apiId, policyId);
+      await queryClient.invalidateQueries({
+        queryKey: apiManagerKeys.policies(currentOrg.id, currentEnv.id, apiId),
+      });
+      hapticSuccess();
+    } catch {
+      hapticError();
+    } finally {
+      setPolicyRemoveBusyId(null);
+    }
+  };
+
   const handleOpenPolicyDialog = async (template: apiManagerService.APIPolicyTemplate) => {
     if (!currentOrg?.id || !currentEnv?.id || !apiId) return;
     if (!template.groupId || !template.assetId || !template.assetVersion) {
@@ -274,6 +365,8 @@ const APIDetailScreen: React.FC = () => {
           field.propertyName,
           field.type === 'boolean'
             ? Boolean(field.defaultValue)
+            : field.enumValues?.[0] && field.defaultValue == null
+              ? field.enumValues[0]
             : field.defaultValue == null
               ? ''
               : String(field.defaultValue),
@@ -440,6 +533,15 @@ const APIDetailScreen: React.FC = () => {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowTitle}>{policy.assetId || policy.policyTemplateId}</Text>
+                    <Button
+                      compact
+                      mode="text"
+                      onPress={() => void handleRemovePolicy(policy.id)}
+                      loading={policyRemoveBusyId === policy.id}
+                      style={styles.inlineButton}
+                    >
+                      Remove
+                    </Button>
                     <Text style={styles.rowMeta}>
                       order {policy.order} • {policy.disabled ? 'disabled' : 'active'}
                     </Text>
@@ -534,7 +636,7 @@ const APIDetailScreen: React.FC = () => {
                   SLA tiers
                 </Text>
               </View>
-              <Button mode="contained-tonal" compact onPress={() => setTierDialogVisible(true)}>
+              <Button mode="contained-tonal" compact onPress={openCreateTierDialog}>
                 Add tier
               </Button>
             </View>
@@ -554,6 +656,20 @@ const APIDetailScreen: React.FC = () => {
                         {limit.maximumRequests.toLocaleString()} requests / {Math.round(limit.timePeriodInMilliseconds / 1000)}s
                       </Text>
                     ))}
+                    <View style={styles.tierActions}>
+                      <Button compact mode="text" onPress={() => openEditTierDialog(tier)}>
+                        Edit
+                      </Button>
+                      <Button
+                        compact
+                        mode="text"
+                        textColor={anypointColors.warning}
+                        onPress={() => void handleDeleteTier(tier.id)}
+                        loading={tierDeleteBusyId === tier.id}
+                      >
+                        Delete
+                      </Button>
+                    </View>
                   </View>
                 </View>
               ))
@@ -620,8 +736,8 @@ const APIDetailScreen: React.FC = () => {
       </ScrollView>
 
       <Portal>
-        <Dialog visible={tierDialogVisible} onDismiss={() => setTierDialogVisible(false)}>
-          <Dialog.Title>Create SLA tier</Dialog.Title>
+        <Dialog visible={tierDialog.visible} onDismiss={closeTierDialog}>
+          <Dialog.Title>{tierDialog.mode === 'edit' ? 'Edit SLA tier' : 'Create SLA tier'}</Dialog.Title>
           <Dialog.Content>
             <TextInput
               mode="outlined"
@@ -667,11 +783,28 @@ const APIDetailScreen: React.FC = () => {
                 Toggle
               </Button>
             </View>
+            <View style={styles.autoApproveRow}>
+              <Text variant="bodyMedium" style={{ color: theme.colors.onSurface }}>
+                {tierDraft.status === 'ACTIVE' ? 'Tier is active' : 'Tier is deprecated'}
+              </Text>
+              <Button
+                compact
+                mode="text"
+                onPress={() =>
+                  setTierDraft((current) => ({
+                    ...current,
+                    status: current.status === 'ACTIVE' ? 'DEPRECATED' : 'ACTIVE',
+                  }))
+                }
+              >
+                Toggle
+              </Button>
+            </View>
           </Dialog.Content>
           <Dialog.Actions>
-            <Button onPress={() => setTierDialogVisible(false)}>Cancel</Button>
-            <Button onPress={() => void handleCreateTier()} loading={tierSubmitting}>
-              Create
+            <Button onPress={closeTierDialog}>Cancel</Button>
+            <Button onPress={() => void handleSubmitTier()} loading={tierSubmitting}>
+              {tierDialog.mode === 'edit' ? 'Save' : 'Create'}
             </Button>
           </Dialog.Actions>
         </Dialog>
@@ -729,6 +862,45 @@ const APIDetailScreen: React.FC = () => {
                         >
                           {value ? 'On' : 'Off'}
                         </Button>
+                      </View>
+                    );
+                  }
+
+                  if ((field.enumValues?.length ?? 0) > 0) {
+                    return (
+                      <View key={field.propertyName} style={styles.dialogInput}>
+                        <Text variant="bodyMedium" style={{ color: theme.colors.onSurface, marginBottom: 4 }}>
+                          {field.name}
+                        </Text>
+                        {field.description ? (
+                          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
+                            {field.description}
+                          </Text>
+                        ) : null}
+                        <View style={styles.optionRow}>
+                          {field.enumValues?.map((option) => {
+                            const selected = String(value ?? '') === option;
+                            return (
+                              <Button
+                                key={`${field.propertyName}-${option}`}
+                                compact
+                                mode={selected ? 'contained-tonal' : 'outlined'}
+                                onPress={() =>
+                                  setPolicyDialog((current) => ({
+                                    ...current,
+                                    values: {
+                                      ...current.values,
+                                      [field.propertyName]: option,
+                                    },
+                                  }))
+                                }
+                                style={styles.optionButton}
+                              >
+                                {option}
+                              </Button>
+                            );
+                          })}
+                        </View>
                       </View>
                     );
                   }
@@ -966,6 +1138,14 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
   dialogInput: {
     marginBottom: 10,
   },
+  optionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  optionButton: {
+    marginBottom: 4,
+  },
   dialogHelp: {
     color: theme.colors.onSurfaceVariant,
     marginBottom: 12,
@@ -976,6 +1156,11 @@ const createStyles = (theme: MD3Theme) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 6,
+  },
+  tierActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
   },
 });
 
