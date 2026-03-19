@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useEnvironments } from '../../hooks/queries';
@@ -15,6 +16,7 @@ const APIControlPlaneScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const currentOrg = useAuthStore((state) => state.currentOrganization);
   const currentEnv = useAuthStore((state) => state.currentEnvironment);
   const { data: environments = [] } = useEnvironments(currentOrg?.id);
@@ -25,13 +27,13 @@ const APIControlPlaneScreen: React.FC = () => {
   const managedApisQuery = useQuery({
     queryKey: ['admin-api-control-plane', 'managed-service-apis', currentOrg?.id, effectiveEnvId],
     queryFn: () => controlPlaneInsightsService.getManagedServiceApis(currentOrg!.id, effectiveEnvId!),
-    enabled: !!currentOrg?.id && !!effectiveEnvId,
+    enabled: !!currentOrg?.id && !!effectiveEnvId && isFocused,
   });
 
   const permissionsQuery = useQuery({
     queryKey: ['admin-api-control-plane', 'gateway-permissions', currentOrg?.id, effectiveEnvId],
     queryFn: () => controlPlaneInsightsService.getGatewayPermissions(currentOrg!.id, effectiveEnvId!),
-    enabled: !!currentOrg?.id && !!effectiveEnvId,
+    enabled: !!currentOrg?.id && !!effectiveEnvId && isFocused,
   });
 
   const managedApis = managedApisQuery.data ?? [];

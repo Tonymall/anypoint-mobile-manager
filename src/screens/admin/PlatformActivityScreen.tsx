@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -66,11 +67,12 @@ const PlatformActivityScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const [filter, setFilter] = useState<PlatformFilter>('all');
 
   const { data: auditLogs, isLoading } = useAuditLogs({
     limit: 80,
-  });
+  }, { enabled: isFocused });
 
   const allEntries = auditLogs?.data ?? [];
   const entries = useMemo(

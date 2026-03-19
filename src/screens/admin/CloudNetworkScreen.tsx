@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -15,27 +16,28 @@ const CloudNetworkScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const currentOrg = useAuthStore((state) => state.currentOrganization);
 
   const vpcsQuery = useQuery({
     queryKey: ['admin-cloud-network', 'vpcs', currentOrg?.id],
     queryFn: () => cloudHubInfraService.getVpcs(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const loadBalancersQuery = useQuery({
     queryKey: ['admin-cloud-network', 'load-balancers', currentOrg?.id],
     queryFn: () => cloudHubInfraService.getLoadBalancers(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const gatewaysQuery = useQuery({
     queryKey: ['admin-cloud-network', 'tgws', currentOrg?.id],
     queryFn: () => cloudHubInfraService.getTransitGateways(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const legacyQuery = useQuery({
     queryKey: ['admin-cloud-network', 'legacy-ipsec', currentOrg?.id],
     queryFn: () => cloudHubInfraService.getLegacyIpSecTunnels(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const vpcs = vpcsQuery.data ?? [];
@@ -43,7 +45,7 @@ const CloudNetworkScreen: React.FC = () => {
     queries: vpcs.map((vpc) => ({
       queryKey: ['admin-cloud-network', 'vpc-ipsec', currentOrg?.id, vpc.id],
       queryFn: () => cloudHubInfraService.getVpcIpSecTunnels(currentOrg!.id, vpc.id),
-      enabled: !!currentOrg?.id,
+      enabled: !!currentOrg?.id && isFocused,
     })),
   });
 

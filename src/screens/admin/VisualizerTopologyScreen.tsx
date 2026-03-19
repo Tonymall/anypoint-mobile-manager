@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 're
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, G, Line, Rect, Text as SvgText } from 'react-native-svg';
 
@@ -175,6 +176,7 @@ const VisualizerTopologyScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const { width: windowWidth } = useWindowDimensions();
+  const isFocused = useIsFocused();
   const currentOrg = useAuthStore((state) => state.currentOrganization);
   const currentEnv = useAuthStore((state) => state.currentEnvironment);
   const { data: environments = [] } = useEnvironments(currentOrg?.id);
@@ -191,25 +193,25 @@ const VisualizerTopologyScreen: React.FC = () => {
   const layersQuery = useQuery({
     queryKey: ['admin-visualizer', 'layers', currentOrg?.id],
     queryFn: () => visualizerService.getLayers(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const viewsQuery = useQuery({
     queryKey: ['admin-visualizer', 'views', currentOrg?.id],
     queryFn: () => visualizerService.getViews(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const appsQuery = useQuery({
     queryKey: ['admin-visualizer', 'apps', currentOrg?.id, effectiveEnvIds],
     queryFn: () => visualizerService.getApplicationsInfo(currentOrg!.id, effectiveEnvIds),
-    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0,
+    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0 && isFocused,
   });
 
   const networkQuery = useQuery({
     queryKey: ['admin-visualizer', 'network', currentOrg?.id, effectiveEnvIds],
     queryFn: () => visualizerService.getApplicationsNetwork(currentOrg!.id, effectiveEnvIds),
-    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0,
+    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0 && isFocused,
   });
 
   const runtimeAppsQuery = useQuery({
@@ -220,7 +222,7 @@ const VisualizerTopologyScreen: React.FC = () => {
       );
       return results.flat();
     },
-    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0,
+    enabled: !!currentOrg?.id && effectiveEnvIds.length > 0 && isFocused,
   });
 
   const layers = layersQuery.data ?? [];

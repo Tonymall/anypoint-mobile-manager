@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -27,11 +28,13 @@ const CloudHubNotificationsScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const [filter, setFilter] = useState<NotificationFilter>('all');
 
   const countQuery = useQuery({
     queryKey: ['admin-cloudhub-notifications', 'count'],
     queryFn: () => cloudHubNotificationService.getNotificationCount('unread'),
+    enabled: isFocused,
   });
 
   const notificationsQuery = useQuery({
@@ -40,6 +43,7 @@ const CloudHubNotificationsScreen: React.FC = () => {
       status: filter === 'unread' ? 'unread' : undefined,
       limit: 40,
     }),
+    enabled: isFocused,
   });
 
   const notifications = notificationsQuery.data ?? [];

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useQuery } from '@tanstack/react-query';
@@ -27,48 +28,49 @@ const GovernanceOverviewScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const currentOrg = useAuthStore((s) => s.currentOrganization);
 
   const { data: profiles, isLoading: profilesLoading } = useQuery({
     queryKey: ['admin-governance', 'profiles', currentOrg?.id],
     queryFn: () => governanceService.getProfiles(currentOrg!.id, { limit: 20 }),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const { data: rulesets, isLoading: rulesetsLoading } = useQuery({
     queryKey: ['admin-governance', 'rulesets', currentOrg?.id],
     queryFn: () => governanceService.getRulesets(currentOrg!.id, { limit: 20 }),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const { data: reports, isLoading: reportsLoading } = useQuery({
     queryKey: ['admin-governance', 'reports', currentOrg?.id],
     queryFn: () => governanceService.getConformanceReports(currentOrg!.id, { limit: 20 }),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const { data: tenantDashboard } = useQuery({
     queryKey: ['admin-governance', 'tenant-dashboard', currentOrg?.id],
     queryFn: () => controlPlaneInsightsService.getGovernanceTenantDashboard(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const { data: tenantLimit } = useQuery({
     queryKey: ['admin-governance', 'tenant-limit', currentOrg?.id],
     queryFn: () => controlPlaneInsightsService.getGovernanceTenantLimit(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const { data: tenantStats } = useQuery({
     queryKey: ['admin-governance', 'tenant-stats', currentOrg?.id],
     queryFn: () => controlPlaneInsightsService.getGovernanceTenantStats(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const { data: tenantProfileStats } = useQuery({
     queryKey: ['admin-governance', 'tenant-profile-stats', currentOrg?.id],
     queryFn: () => controlPlaneInsightsService.getGovernanceTenantProfileStats(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const profileItems = profiles?.data ?? [];

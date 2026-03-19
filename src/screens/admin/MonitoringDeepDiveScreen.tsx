@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Line, Path } from 'react-native-svg';
 
@@ -131,9 +132,10 @@ const MonitoringDeepDiveScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const currentOrg = useAuthStore((state) => state.currentOrganization);
   const currentEnv = useAuthStore((state) => state.currentEnvironment);
-  const { data: applications = [], isLoading: appsLoading } = useApplications();
+  const { data: applications = [], isLoading: appsLoading } = useApplications({ enabled: isFocused });
 
   const [periodMinutes, setPeriodMinutes] = useState<60 | 180 | 720>(180);
   const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
@@ -161,7 +163,7 @@ const MonitoringDeepDiveScreen: React.FC = () => {
       organizationId: currentOrg?.id,
       environmentId: currentEnv?.id,
     }),
-    enabled: !!effectiveSelectedDomain,
+    enabled: !!effectiveSelectedDomain && isFocused,
   });
 
   const dashboardData = dashboardQuery.data as any;

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Button, Card, Switch, Text, TextInput, useTheme, type MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -84,6 +85,7 @@ const UsageReportsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const [range, setRange] = useState<RangeOption>('30d');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('runtime-messages');
   const [isExporting, setIsExporting] = useState(false);
@@ -96,11 +98,13 @@ const UsageReportsScreen: React.FC = () => {
   const { data: descriptors } = useQuery({
     queryKey: ['metering', 'describe'],
     queryFn: getMeterDescriptors,
+    enabled: isFocused,
   });
 
   const { data: bundle, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['metering', 'bundle', bounds.from, bounds.to],
     queryFn: () => getUsageReportBundle(bounds.from, bounds.to),
+    enabled: isFocused,
   });
 
   const visibleSections = useMemo(

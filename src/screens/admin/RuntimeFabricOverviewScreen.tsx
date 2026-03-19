@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -15,37 +16,38 @@ const RuntimeFabricOverviewScreen: React.FC = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const isFocused = useIsFocused();
   const currentOrg = useAuthStore((state) => state.currentOrganization);
 
   const fabricsQuery = useQuery({
     queryKey: ['admin-runtime-fabric', 'fabrics', currentOrg?.id],
     queryFn: () => runtimeFabricService.getFabrics(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const spacesQuery = useQuery({
     queryKey: ['admin-runtime-fabric', 'spaces', currentOrg?.id],
     queryFn: () => runtimeFabricService.getPrivateSpaces(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const statusesQuery = useQuery({
     queryKey: ['admin-runtime-fabric', 'statuses', currentOrg?.id],
     queryFn: () => runtimeFabricService.getPrivateSpaceStatuses(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const windowsQuery = useQuery({
     queryKey: ['admin-runtime-fabric', 'patch', currentOrg?.id],
     queryFn: () => runtimeFabricService.getPrivateSpacePatchWindows(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const targetsQuery = useQuery({
     queryKey: ['admin-runtime-fabric', 'targets', currentOrg?.id],
     queryFn: () => runtimeFabricService.getTargets(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
   const usageQuery = useQuery({
     queryKey: ['admin-runtime-fabric', 'usage', currentOrg?.id],
     queryFn: () => runtimeFabricService.getPrivateSpaceUsage(currentOrg!.id),
-    enabled: !!currentOrg?.id,
+    enabled: !!currentOrg?.id && isFocused,
   });
 
   const fabrics = fabricsQuery.data ?? [];
