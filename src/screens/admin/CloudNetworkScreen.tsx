@@ -2,8 +2,7 @@ import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 

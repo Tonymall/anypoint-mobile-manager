@@ -23,8 +23,7 @@ import {
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
-import { useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
+import { useRouter, useIsFocused } from 'expo-router';
 
 import type { Alert, AlertSeverity } from '../../types';
 import { anypointColors, severityColors } from '../../theme';

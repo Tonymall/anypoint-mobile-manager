@@ -6,7 +6,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useIsFocused } from 'expo-router';
 import {
   Button,
   Searchbar,
@@ -15,7 +15,6 @@ import {
   Icon,
   type MD3Theme,
 } from 'react-native-paper';
-import { useIsFocused } from '@react-navigation/native';
 
 import type { APIStatus, ManagedAPI } from '../../types';
 import { statusColors, anypointColors } from '../../theme';

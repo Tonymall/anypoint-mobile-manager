@@ -1,8 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Button, Card, Switch, Text, TextInput, useTheme, type MD3Theme } from 'react-native-paper';
-import { useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';

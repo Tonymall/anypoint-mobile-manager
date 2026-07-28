@@ -7,9 +7,8 @@ import React, { useMemo, useCallback, useState, useEffect, useRef } from 'react'
 import { View, FlatList, StyleSheet, RefreshControl, useWindowDimensions } from 'react-native';
 import { Text, Card, Chip, useTheme, ProgressBar, Icon, ActivityIndicator, type MD3Theme } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
-import { useIsFocused } from '@react-navigation/native';
 import { useApplications } from '../../hooks/queries';
 import * as runtimeService from '../../services/runtimeService';
 import { isMonitoringUnavailable, resetSessionFlags } from '../../services/runtimeService';

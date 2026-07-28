@@ -27,8 +27,7 @@ import {
   type MD3Theme,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
+import { useRouter, useIsFocused } from 'expo-router';
 
 import type { Application, AppStatus } from '../../types';
 import { anypointColors } from '../../theme';

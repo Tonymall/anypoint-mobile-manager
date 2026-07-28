@@ -863,7 +863,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   webViewLoading: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -871,7 +871,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   extractionOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,

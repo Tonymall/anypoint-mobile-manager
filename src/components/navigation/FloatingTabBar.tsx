@@ -1,6 +1,6 @@
 import React, { memo, useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { Tabs } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text, useTheme, type MD3Theme } from 'react-native-paper';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -115,7 +115,11 @@ const FloatingTabItem = memo(function FloatingTabItem({
   );
 });
 
-export default function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
+type TabBarProps = Parameters<
+  NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>
+>[0];
+
+export default function FloatingTabBar({ state, navigation }: TabBarProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
@@ -166,7 +170,7 @@ export default function FloatingTabBar({ state, navigation }: BottomTabBarProps)
               });
 
               if (!isFocused && !event.defaultPrevented) {
-                const jumpTo = (navigation as BottomTabBarProps['navigation'] & { jumpTo?: (name: string) => void }).jumpTo;
+                const jumpTo = (navigation as TabBarProps['navigation'] & { jumpTo?: (name: string) => void }).jumpTo;
                 if (jumpTo) {
                   jumpTo(route.name);
                 } else {

@@ -2,16 +2,11 @@
   "expo": {
     "name": "MuleOps",
     "slug": "muleops",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "scheme": "muleops",
-    "splash": {
-      "image": "./assets/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#091428"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -24,18 +19,6 @@
         "NSPrivacyTrackingDomains": [],
         "NSPrivacyCollectedDataTypes": [],
         "NSPrivacyAccessedAPITypes": [
-          {
-            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
-            "NSPrivacyAccessedAPITypeReasons": [
-              "CA92.1"
-            ]
-          },
-          {
-            "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
-            "NSPrivacyAccessedAPITypeReasons": [
-              "C617.1"
-            ]
-          },
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
             "NSPrivacyAccessedAPITypeReasons": [
@@ -63,12 +46,6 @@
       "package": "com.muleops.mobile",
       "versionCode": 1,
       "permissions": [
-        "USE_BIOMETRIC",
-        "USE_FINGERPRINT",
-        "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT",
-        "USE_BIOMETRIC",
-        "USE_FINGERPRINT",
         "android.permission.USE_BIOMETRIC",
         "android.permission.USE_FINGERPRINT"
       ]
@@ -82,12 +59,23 @@
       "expo-secure-store",
       "expo-local-authentication",
       [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#091428"
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
           "color": "#00A1E0"
         }
-      ]
+      ],
+      "expo-sharing",
+      "expo-splash-screen",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": true
@@ -99,7 +87,7 @@
         "projectId": "d66e51ed-3908-4f1e-a8df-64216e724408"
       }
     },
-    "runtimeVersion": "1.0.1",
+    "runtimeVersion": "1.0.2",
     "updates": {
       "url": "https://u.expo.dev/d66e51ed-3908-4f1e-a8df-64216e724408"
     }

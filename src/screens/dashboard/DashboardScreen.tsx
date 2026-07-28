@@ -21,9 +21,8 @@ import {
   type MD3Theme,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useIsFocused } from '@react-navigation/native';
 
 import { useAuthStore } from '../../stores/authStore';
 import { getRegionById } from '../../config/regions';
