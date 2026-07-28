@@ -3,6 +3,7 @@
 // ============================================================
 
 import api from './api';
+import { getStatusCode, toStringValue, unwrapCollection } from './controlPlaneCommon';
 import type {
   ManagedAPI,
   APIPolicy,
@@ -10,10 +11,139 @@ import type {
   SLALimit,
   APIContract,
   APIAlert,
+  PolicyConfigField,
   PaginatedResponse,
 } from '../types';
 
 const API_MANAGER_BASE = '/apimanager/api/v1';
+const API_MANAGER_XAPI_BASE = '/apimanager/xapi/v1';
+
+export interface APIPolicyTemplate {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  groupId: string | null;
+  assetId: string | null;
+  assetVersion: string | null;
+  docsUrl?: string | null;
+  providedCharacteristics: string[];
+  requiredCharacteristics: string[];
+  isSlaBased: boolean;
+  configurationFields: PolicyConfigField[];
+}
+
+export interface APIAssetSummary {
+  id: string;
+  name: string;
+  exchangeAssetName: string | null;
+  groupId: string | null;
+  assetId: string | null;
+}
+
+export interface APIGovernanceReportSummary {
+  urn: string | null;
+  status: string | null;
+  instanceAspectNotValidated: boolean;
+  otherInstancesTotal: number;
+  otherUnauthorizedInstances: number;
+}
+
+function normalizeTierList(data: unknown): SLATier[] {
+  if (Array.isArray(data)) return data as SLATier[];
+  const tiers = unwrapCollection<SLATier>(data, ['tiers', 'data', 'items']);
+  return tiers;
+}
+
+function normalizeContracts(
+  data: unknown,
+  params?: { status?: string; offset?: number; limit?: number },
+): PaginatedResponse<APIContract> {
+  const items = unwrapCollection<APIContract>(data, ['contracts', 'data', 'items']);
+  const payload = (data && typeof data === 'object' ? data : {}) as Record<string, any>;
+  return {
+    data: items,
+    total: typeof payload.total === 'number' ? payload.total : items.length,
+    offset: params?.offset ?? 0,
+    limit: params?.limit ?? items.length,
+  };
+}
+
+function normalizeFieldType(value: unknown): PolicyConfigField['type'] {
+  const raw = String(value ?? 'string').toLowerCase();
+  if (raw === 'int' || raw === 'integer' || raw === 'number') return 'int';
+  if (raw === 'boolean' || raw === 'bool') return 'boolean';
+  if (raw === 'array' || raw === 'list') return 'array';
+  if (raw === 'expression') return 'expression';
+  return 'string';
+}
+
+function mapConfigField(input: any, fallbackName?: string): PolicyConfigField | null {
+  const propertyName = toStringValue(input?.propertyName)
+    ?? toStringValue(input?.name)
+    ?? toStringValue(fallbackName);
+  if (!propertyName) return null;
+
+  const enumCandidates = [
+    input?.enum,
+    input?.allowedValues,
+    input?.options,
+    input?.schema?.enum,
+    input?.items?.enum,
+    Array.isArray(input?.oneOf) ? input.oneOf.map((entry: any) => entry?.const ?? entry?.value ?? entry?.title) : null,
+    Array.isArray(input?.anyOf) ? input.anyOf.map((entry: any) => entry?.const ?? entry?.value ?? entry?.title) : null,
+  ];
+  const enumValues = enumCandidates
+    .find((candidate) => Array.isArray(candidate))
+    ?.map((value: unknown) => toStringValue(value))
+    .filter((value): value is string => !!value);
+
+  return {
+    propertyName,
+    name: toStringValue(input?.title) ?? toStringValue(input?.displayName) ?? propertyName,
+    description: toStringValue(input?.description) ?? '',
+    type: normalizeFieldType(input?.type),
+    defaultValue: input?.defaultValue ?? input?.default,
+    enumValues,
+    optional: Boolean(input?.optional ?? !input?.required),
+    sensitive: Boolean(input?.sensitive),
+    allowMultiple: Boolean(input?.allowMultiple),
+  };
+}
+
+function parsePolicyConfigFields(entry: any): PolicyConfigField[] {
+  const arrayCandidates = [
+    entry?.configuration,
+    entry?.configurationFields,
+    entry?.fields,
+    entry?.schema?.fields,
+  ];
+
+  for (const candidate of arrayCandidates) {
+    if (Array.isArray(candidate)) {
+      return candidate
+        .map((field) => mapConfigField(field))
+        .filter((field): field is PolicyConfigField => !!field);
+    }
+  }
+
+  const objectCandidates = [
+    entry?.properties,
+    entry?.jsonSchema?.properties,
+    entry?.schema?.properties,
+    entry?.configurationSchema?.properties,
+  ];
+
+  for (const candidate of objectCandidates) {
+    if (candidate && typeof candidate === 'object') {
+      return Object.entries(candidate)
+        .map(([key, value]) => mapConfigField(value, key))
+        .filter((field): field is PolicyConfigField => !!field);
+    }
+  }
+
+  return [];
+}
 
 // ---------- Managed APIs ----------
 
@@ -136,10 +266,10 @@ export async function getSLATiers(
   environmentId: string,
   apiId: number,
 ): Promise<SLATier[]> {
-  const { data } = await api.get<SLATier[]>(
+  const { data } = await api.get(
     `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers`,
   );
-  return data;
+  return normalizeTierList(data);
 }
 
 /**
@@ -174,11 +304,32 @@ export async function getContracts(
   apiId: number,
   params?: { status?: string; offset?: number; limit?: number },
 ): Promise<PaginatedResponse<APIContract>> {
-  const { data } = await api.get<PaginatedResponse<APIContract>>(
-    `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/contracts`,
-    { params },
-  );
-  return data;
+  try {
+    const { data } = await api.get(
+      `${API_MANAGER_XAPI_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/contracts`,
+      {
+        params: {
+          limit: params?.limit ?? 20,
+          offset: params?.offset ?? 0,
+          sort: 'name',
+          ascending: true,
+          ...(params?.status ? { status: params.status } : {}),
+        },
+      },
+    );
+    return normalizeContracts(data, params);
+  } catch (error) {
+    const status = getStatusCode(error);
+    if (status !== 403 && status !== 404 && status !== 405) {
+      throw error;
+    }
+
+    const { data } = await api.get(
+      `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/contracts`,
+      { params },
+    );
+    return normalizeContracts(data, params);
+  }
 }
 
 /**
@@ -227,6 +378,154 @@ export async function getAlerts(
     `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/alerts`,
   );
   return data;
+}
+
+/**
+ * Update an existing SLA tier for a managed API.
+ */
+export async function updateSLATier(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+  tierId: number,
+  tier: {
+    name: string;
+    description: string;
+    autoApprove: boolean;
+    status?: 'ACTIVE' | 'DEPRECATED';
+    limits: SLALimit[];
+  },
+): Promise<SLATier> {
+  try {
+    const { data } = await api.put<SLATier>(
+      `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers/${tierId}`,
+      tier,
+    );
+    return data;
+  } catch (error) {
+    const status = getStatusCode(error);
+    if (status !== 403 && status !== 404 && status !== 405) {
+      throw error;
+    }
+
+    const { data } = await api.patch<SLATier>(
+      `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers/${tierId}`,
+      tier,
+    );
+    return data;
+  }
+}
+
+/**
+ * Delete or retire an SLA tier for a managed API.
+ */
+export async function deleteSLATier(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+  tierId: number,
+): Promise<void> {
+  await api.delete(
+    `${API_MANAGER_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/tiers/${tierId}`,
+  );
+}
+
+// ---------- xAPI detail helpers ----------
+
+export async function getPolicyTemplates(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+  options?: {
+    includeConfiguration?: boolean;
+  },
+): Promise<APIPolicyTemplate[]> {
+  const { data } = await api.get(
+    `${API_MANAGER_XAPI_BASE}/organizations/${organizationId}/exchange-policy-templates`,
+    {
+      params: {
+        environmentId,
+        splitModel: true,
+        latest: true,
+        apiInstanceId: apiId,
+        includeConfiguration: options?.includeConfiguration ?? false,
+        automatedOnly: false,
+        injectionPoint: 'inbound',
+      },
+    },
+  );
+
+  return unwrapCollection<any>(data).map((entry) => ({
+    id: toStringValue(entry.id) ?? `${entry.groupId ?? 'policy'}:${entry.assetId ?? 'template'}`,
+    name: toStringValue(entry.name) ?? toStringValue(entry.assetId) ?? 'Policy template',
+    description: toStringValue(entry.description) ?? '',
+    category: toStringValue(entry.category) ?? 'Other',
+    groupId: toStringValue(entry.groupId),
+    assetId: toStringValue(entry.assetId),
+    assetVersion: toStringValue(entry.version),
+    docsUrl: toStringValue(entry.docsUrl) ?? null,
+    providedCharacteristics: Array.isArray(entry.providedCharacteristics)
+      ? entry.providedCharacteristics.map((value: unknown) => String(value))
+      : [],
+    requiredCharacteristics: Array.isArray(entry.requiredCharacteristics)
+      ? entry.requiredCharacteristics.map((value: unknown) => String(value))
+      : [],
+    isSlaBased: Boolean(entry.isSlaBased),
+    configurationFields: parsePolicyConfigFields(entry),
+  }));
+}
+
+export async function getApiAssetSummary(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+): Promise<APIAssetSummary | null> {
+  try {
+    const { data } = await api.get(
+      `${API_MANAGER_XAPI_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/apiAsset`,
+    );
+    return {
+      id: toStringValue((data as any)?.id) ?? `${apiId}`,
+      name: toStringValue((data as any)?.name) ?? 'API asset',
+      exchangeAssetName: toStringValue((data as any)?.exchangeAssetName),
+      groupId: toStringValue((data as any)?.groupId),
+      assetId: toStringValue((data as any)?.assetId),
+    };
+  } catch (error) {
+    const status = getStatusCode(error);
+    if (status === 403 || status === 404 || status === 405) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function getApiGovernanceReport(
+  organizationId: string,
+  environmentId: string,
+  apiId: number,
+): Promise<APIGovernanceReportSummary | null> {
+  try {
+    const { data } = await api.get(
+      `${API_MANAGER_XAPI_BASE}/organizations/${organizationId}/environments/${environmentId}/apis/${apiId}/governance-report`,
+      {
+        params: { includeOtherInstances: true },
+      },
+    );
+    return {
+      urn: toStringValue((data as any)?.urn),
+      status: toStringValue((data as any)?.status),
+      instanceAspectNotValidated: Boolean((data as any)?.instanceAspectNotValidated),
+      otherInstancesTotal: Number((data as any)?.otherInstances?.total ?? 0),
+      otherUnauthorizedInstances: Number((data as any)?.otherInstances?.otherUnauthorizedInstances ?? 0),
+    };
+  } catch (error) {
+    const status = getStatusCode(error);
+    if (status === 403 || status === 404 || status === 405) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 // ---------- Promote ----------

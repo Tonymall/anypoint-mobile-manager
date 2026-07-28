@@ -9,13 +9,17 @@ export const auditLogKeys = {
     [...auditLogKeys.all, orgId, params] as const,
 };
 
-export function useAuditLogs(params?: AuditLogQueryParams) {
+export function useAuditLogs(
+  params?: AuditLogQueryParams,
+  options?: { enabled?: boolean },
+) {
   const orgId = useAuthStore((s) => s.currentOrganization?.id);
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isEnabled = options?.enabled ?? true;
 
   return useQuery({
     queryKey: auditLogKeys.query(orgId ?? '', params),
     queryFn: () => auditLogService.queryAuditLogs(orgId!, params),
-    enabled: !!orgId && isAuthenticated,
+    enabled: !!orgId && isAuthenticated && isEnabled,
   });
 }

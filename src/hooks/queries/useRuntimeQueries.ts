@@ -141,13 +141,60 @@ function patchApplicationStatusInCache(
   });
 }
 
+function processApplicationStatusChanges(
+  applications: any[],
+  addNotification: (notification: Omit<import('../../types').AppNotification, 'id' | 'timestamp' | 'read'>) => void,
+) {
+  const now = Date.now();
+  const transitionStore = useRuntimeTransitionStore.getState();
+
+  for (const app of applications) {
+    const appName = app.domain ?? app.name ?? '';
+    const newStatus = app.status ?? '';
+    const oldStatus = _previousStatusMap.get(appName);
+
+    if (oldStatus && oldStatus !== newStatus) {
+      const isNonFinal = NON_FINAL_STATUSES.has(newStatus);
+
+      if (!isNonFinal) {
+        const withinMutationGrace = isWithinMutationGrace(appName);
+        clearMutationGrace(appName);
+        transitionStore.clearTransition(appName);
+
+        const lastNotifiedTime = _lastNotifiedMap.get(appName) ?? 0;
+        const withinCooldown = (now - lastNotifiedTime) < NOTIFICATION_COOLDOWN_MS;
+
+        if (!withinMutationGrace && !withinCooldown) {
+          const statusMsg = FINAL_STATUS_MESSAGES[newStatus];
+          const title = statusMsg?.title ?? `Application ${newStatus}`;
+
+          emitNotification({
+            type: 'deployment',
+            action: 'status_change',
+            title,
+            body: `${appName} â€” ${title.toLowerCase()}`,
+            applicationName: appName,
+            domain: appName,
+          }, addNotification);
+
+          scheduleLocalNotification(title, `${appName} â€” ${title.toLowerCase()}`);
+          _lastNotifiedMap.set(appName, now);
+        }
+      } else {
+        _lastNotifiedMap.delete(appName);
+      }
+    }
+
+    _previousStatusMap.set(appName, newStatus);
+  }
+}
+
 export function useApplications(options?: { enabled?: boolean }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
   const addNotification = useNotificationStore((s) => s.addNotification);
   const hasActiveTransitions = useRuntimeTransitionStore((s) => Object.keys(s.transitions).length > 0);
   const isEnabled = options?.enabled ?? true;
-
-  return useQuery({
+  const query = useQuery({
     queryKey: runtimeKeys.applications(),
     queryFn: () => runtimeService.getApplications(),
     enabled: isAuthenticated && isEnabled,
@@ -155,6 +202,12 @@ export function useApplications(options?: { enabled?: boolean }) {
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     select: (data) => {
+      if (Array.isArray(data)) {
+        processApplicationStatusChanges(data, addNotification);
+      }
+      return data;
+    },
+    /*
       if (Array.isArray(data)) {
         const now = Date.now();
         const transitionStore = useRuntimeTransitionStore.getState();
@@ -201,8 +254,10 @@ export function useApplications(options?: { enabled?: boolean }) {
         }
       }
       return data;
-    },
+    */
   });
+
+  return query;
 }
 
 /**

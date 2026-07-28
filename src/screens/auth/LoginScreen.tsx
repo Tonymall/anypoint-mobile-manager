@@ -1,53 +1,58 @@
-// ============================================================
-// Anypoint Mobile Platform - Login Screen
-// 2026 Modern Dark-First Design with glassmorphic card,
-// animated background, and refined typography.
-// ============================================================
-
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  View,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
   useWindowDimensions,
 } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import Constants from 'expo-constants';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  Text,
-  TextInput,
-  Button,
-  useTheme,
   ActivityIndicator,
+  Button,
+  Checkbox,
   Divider,
   Menu,
-  Checkbox,
+  Text,
+  TextInput,
+  useTheme,
 } from 'react-native-paper';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 
-import { useAuthStore } from '../../stores';
-import * as authService from '../../services/authService';
-import { setRegion, resetApiState } from '../../services/api';
-import { resetSessionFlags } from '../../services/runtimeService';
-import { CONTROL_PLANE_REGIONS, getRegionById, getRegionUrl } from '../../config/regions';
-import type { AuthTokens, User, ControlPlaneRegionId } from '../../types';
 import AnimatedBackground from '../../components/common/AnimatedBackground';
-import { hapticSuccess, hapticError } from '../../utils/haptics';
-import Constants from 'expo-constants';
-import logger from '../../utils/logger';
+import { CONTROL_PLANE_REGIONS, getRegionById, getRegionUrl } from '../../config/regions';
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
+import { useAuthStore } from '../../stores';
+import { resetApiState, setRegion } from '../../services/api';
+import * as authService from '../../services/authService';
+import { activateRememberedAccount } from '../../services/rememberedAccountService';
+import { resetSessionFlags } from '../../services/runtimeService';
+import type { AuthTokens, ControlPlaneRegionId, User } from '../../types';
+import { hapticError, hapticSuccess } from '../../utils/haptics';
+import logger from '../../utils/logger';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 
 const LoginScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
+  const {
+    fromSettings,
+    rememberedUsername,
+    rememberedRegion,
+  } = useLocalSearchParams<{
+    fromSettings?: string;
+    rememberedUsername?: string;
+    rememberedRegion?: string;
+  }>();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
 
-  // ── Responsive breakpoints ──
   const isTablet = Math.min(width, height) >= 768;
   const isLandscape = width > height;
   const isTabletLandscape = isTablet && isLandscape;
@@ -57,29 +62,43 @@ const LoginScreen: React.FC = () => {
   const logoCircleSize = isTabletLandscape ? 100 : isTablet ? 88 : 76;
   const horizontalPadding = isTabletLandscape ? 40 : isTablet ? 40 : 24;
 
-  // --- Form State ---
-  const [username, setUsername] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [username, setUsername] = useState(rememberedUsername ?? '');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [regionMenuVisible, setRegionMenuVisible] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [switchingAccountId, setSwitchingAccountId] = useState<string | null>(null);
+  const [showAllRememberedAccounts, setShowAllRememberedAccounts] = useState(false);
 
-  // --- Region State ---
   const selectedRegion = useAuthStore((state) => state.selectedRegion);
   const setSelectedRegion = useAuthStore((state) => state.setSelectedRegion);
-  const rememberSession = useAuthStore((state) => state.rememberSession);
-  const setRememberSession = useAuthStore((state) => state.setRememberSession);
-  const [regionMenuVisible, setRegionMenuVisible] = useState(false);
-
-  // --- UI State ---
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  // --- Store ---
+  const storedRememberSession = useAuthStore((state) => state.rememberSession);
+  const persistRememberSession = useAuthStore((state) => state.setRememberSession);
+  const rememberedAccountsMap = useAuthStore((state) => state.rememberedAccounts);
+  const removeRememberedAccount = useAuthStore((state) => state.removeRememberedAccount);
   const loginPending = useAuthStore((state) => state.loginPending);
   const setIsLoadingStore = useAuthStore((state) => state.setIsLoading);
   const showError = useErrorDialogStore((state) => state.showError);
+  const queryClient = useQueryClient();
+  const [rememberSession, setRememberSessionState] = useState(storedRememberSession);
 
   const loginInProgressRef = useRef(false);
+  const rememberedAccounts = useMemo(
+    () =>
+      Object.values(rememberedAccountsMap).sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      ),
+    [rememberedAccountsMap],
+  );
 
-  // --- Handlers ---
+  const currentRegion = getRegionById(selectedRegion);
+  const isFormValid = username.trim().length > 0 && password.trim().length > 0;
+  const isAddAccountMode = fromSettings === '1';
+  const visibleRememberedAccounts = useMemo(
+    () => showAllRememberedAccounts ? rememberedAccounts : rememberedAccounts.slice(0, 1),
+    [rememberedAccounts, showAllRememberedAccounts],
+  );
+
   const handleRegionSelect = useCallback(
     async (regionId: ControlPlaneRegionId) => {
       setSelectedRegion(regionId);
@@ -88,6 +107,22 @@ const LoginScreen: React.FC = () => {
     },
     [setSelectedRegion],
   );
+
+  React.useEffect(() => {
+    if (rememberedUsername && typeof rememberedUsername === 'string') {
+      setUsername(rememberedUsername);
+    }
+  }, [rememberedUsername]);
+
+  React.useEffect(() => {
+    if (
+      rememberedRegion &&
+      typeof rememberedRegion === 'string' &&
+      CONTROL_PLANE_REGIONS.some((region) => region.id === rememberedRegion)
+    ) {
+      void handleRegionSelect(rememberedRegion as ControlPlaneRegionId);
+    }
+  }, [handleRegionSelect, rememberedRegion]);
 
   const handleLogin = useCallback(async () => {
     if (!username.trim() || !password.trim()) {
@@ -99,16 +134,16 @@ const LoginScreen: React.FC = () => {
     }
 
     if (loginInProgressRef.current) {
-      logger.log('[Login] Already in progress — ignoring duplicate tap');
+      logger.log('[Login] Already in progress - ignoring duplicate tap');
       return;
     }
-    loginInProgressRef.current = true;
 
+    loginInProgressRef.current = true;
     setIsLoading(true);
     setIsLoadingStore(true);
 
     const regionUrl = getRegionUrl(selectedRegion);
-    setRememberSession(rememberSession);
+    persistRememberSession(rememberSession);
 
     try {
       logger.log('[Login] Starting login flow...');
@@ -124,10 +159,8 @@ const LoginScreen: React.FC = () => {
         regionUrl,
       );
 
-      // If login returned without a token AND without throwing MFARequiredError,
-      // we can't show the MFA dialog (no verification context). Fail cleanly.
       if (!tokens.accessToken) {
-        logger.warn('[Login] No access_token and no MFA context — cannot proceed');
+        logger.warn('[Login] No access_token and no MFA context - cannot proceed');
         showError({
           title: 'Authentication failed',
           message: 'Authentication returned an unexpected response. Please try again.',
@@ -140,16 +173,10 @@ const LoginScreen: React.FC = () => {
 
       let user: User;
       try {
-        user = await authService.getCurrentUser(
-          tokens.accessToken,
-          regionUrl,
-        );
+        user = await authService.getCurrentUser(tokens.accessToken, regionUrl);
       } catch (meError: any) {
-        // If getCurrentUser fails with 401, the token is partial/expired.
-        // Without an MFA verification context we can't show the MFA dialog —
-        // fail cleanly and let the user retry the full login flow.
         if (meError?.response?.status === 401) {
-          logger.warn('[Login] getCurrentUser 401 — token unusable, no MFA context');
+          logger.warn('[Login] getCurrentUser 401 - token unusable, no MFA context');
           showError({
             title: 'Session rejected',
             message: 'Session token was rejected. Please sign in again.',
@@ -160,16 +187,15 @@ const LoginScreen: React.FC = () => {
         }
         throw meError;
       }
-      logger.log('[Login] User fetched:', user.firstName, user.lastName);
 
+      logger.log('[Login] User fetched:', user.firstName, user.lastName);
       loginPending(user, tokens);
       hapticSuccess();
       logger.log('[Login] loginPending called, navigating to select-org');
       router.push('/(auth)/select-org' as any);
     } catch (error: any) {
-      // ── MFA Required — continue login in hosted WebView ──
       if (error instanceof authService.MFARequiredError) {
-        logger.log('[Login] MFA required — opening hosted WebView for Salesforce verification');
+        logger.log('[Login] MFA required - opening hosted WebView for Salesforce verification');
         authService.setPendingMFAChallenge({
           username: username.trim(),
           password,
@@ -184,21 +210,19 @@ const LoginScreen: React.FC = () => {
         return;
       }
 
-      // Log sanitized error — no response bodies or full URLs in production
       const status = error?.response?.status;
       logger.error('[Login] FAILED', { status, message: error?.message });
-      // Detailed debug info only in dev
       logger.log('[Login] Debug:', {
         url: error?.config?.url,
-        responseBody: typeof error?.response?.data === 'object'
-          ? JSON.stringify(error.response.data).slice(0, 500)
-          : String(error?.response?.data ?? '').slice(0, 500),
+        responseBody:
+          typeof error?.response?.data === 'object'
+            ? JSON.stringify(error.response.data).slice(0, 500)
+            : String(error?.response?.data ?? '').slice(0, 500),
       });
 
-      // Fallback MFA detection from error responses — continue in hosted WebView
       const responseData = error?.response?.data;
       if (responseData?.url?.includes('verify.salesforce.com') && responseData?.body?.request) {
-        logger.log('[Login] MFA detected from error response — opening hosted WebView');
+        logger.log('[Login] MFA detected from error response - opening hosted WebView');
         authService.setPendingMFAChallenge({
           username: username.trim(),
           password,
@@ -228,27 +252,87 @@ const LoginScreen: React.FC = () => {
       setIsLoadingStore(false);
       loginInProgressRef.current = false;
     }
-  }, [username, password, selectedRegion, rememberSession, loginPending, setIsLoadingStore, router, setRememberSession, showError]);
+  }, [
+    username,
+    password,
+    selectedRegion,
+    rememberSession,
+    loginPending,
+    router,
+    setIsLoadingStore,
+    persistRememberSession,
+    showError,
+  ]);
 
   const handleSSOLogin = useCallback(() => {
-    setRememberSession(rememberSession);
+    persistRememberSession(rememberSession);
     router.push('/(auth)/sso');
-  }, [rememberSession, router, setRememberSession]);
+  }, [persistRememberSession, rememberSession, router]);
 
-  const isFormValid = username.trim().length > 0 && password.trim().length > 0;
-  const currentRegion = getRegionById(selectedRegion);
+  const handleReturnFromAddAccount = useCallback(() => {
+    router.back();
+  }, [router]);
 
-  // --- Render ---
+  const handleRememberedAccountLogin = useCallback(
+    async (accountId: string) => {
+      setSwitchingAccountId(accountId);
+      setIsLoadingStore(true);
+      queryClient.clear();
+      resetSessionFlags();
+
+      try {
+        await activateRememberedAccount(accountId);
+        hapticSuccess();
+
+        const state = useAuthStore.getState();
+        if (state.currentOrganization && state.currentEnvironment && state.isAuthenticated) {
+          router.replace('/(main)' as any);
+        } else if (state.currentOrganization) {
+          router.replace('/(auth)/select-env' as any);
+        } else {
+          router.replace('/(auth)/select-org' as any);
+        }
+      } catch (error: any) {
+        if (error?.code === 'REMEMBERED_ACCOUNT_EXPIRED') {
+          router.push({
+            pathname: '/(auth)/login' as any,
+            params: {
+              fromSettings: '1',
+              rememberedUsername: error.username ?? error.email ?? '',
+              rememberedRegion: error.selectedRegion ?? selectedRegion,
+            },
+          });
+          return;
+        }
+        showError({
+          title: 'Unable to continue',
+          message: error?.message ?? 'Saved session could not be restored.',
+        });
+        hapticError();
+      } finally {
+        setSwitchingAccountId(null);
+        setIsLoadingStore(false);
+      }
+    },
+    [queryClient, router, setIsLoadingStore, showError],
+  );
+
+  const handleForgetRememberedAccount = useCallback(
+    (accountId: string) => {
+      removeRememberedAccount(accountId);
+    },
+    [removeRememberedAccount],
+  );
+
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: theme.colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      {/* Animated gradient orbs background */}
       <AnimatedBackground />
 
-      <View
-        style={[
+      <ScrollView
+        contentContainerStyle={[
           styles.contentContainer,
           {
             paddingTop: insets.top + (isTabletLandscape ? 24 : isLandscape ? 16 : 0),
@@ -256,14 +340,35 @@ const LoginScreen: React.FC = () => {
             paddingHorizontal: horizontalPadding,
           },
         ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <View
-          style={[
-            styles.innerContent,
-            isTabletLandscape && styles.innerContentLandscape,
-          ]}
-        >
-          {/* ── Branding Area ── */}
+        <View style={[styles.innerContent, isTabletLandscape && styles.innerContentLandscape]}>
+          {isAddAccountMode ? (
+            <View style={styles.authNavRow}>
+              <Pressable
+                onPress={handleReturnFromAddAccount}
+                style={[
+                  styles.backPill,
+                  {
+                    backgroundColor: theme.colors.surface,
+                    borderColor: theme.colors.outlineVariant,
+                  },
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Back to settings"
+              >
+                <Icon name="arrow-left" size={18} color={theme.colors.onSurface} />
+                <Text
+                  variant="bodyMedium"
+                  style={{ color: theme.colors.onSurface, fontWeight: '600' }}
+                >
+                  Back
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <View
             style={[
               styles.brandingContainer,
@@ -298,14 +403,7 @@ const LoginScreen: React.FC = () => {
             </Text>
           </View>
 
-          {/* ── Form + Footer Column ── */}
-          <View
-            style={[
-              styles.formColumn,
-              isTabletLandscape && styles.formColumnLandscape,
-            ]}
-          >
-            {/* Login Form */}
+          <View style={[styles.formColumn, isTabletLandscape && styles.formColumnLandscape]}>
             <View
               style={[
                 styles.formCard,
@@ -316,11 +414,9 @@ const LoginScreen: React.FC = () => {
                 },
               ]}
             >
-              {/* Accent glow */}
               <View style={[styles.formAccent, { backgroundColor: theme.colors.primary }]} />
 
               <View style={styles.formInner}>
-                {/* Region Selector */}
                 <Text
                   variant="labelMedium"
                   style={[styles.fieldLabel, { color: theme.colors.onSurfaceVariant }]}
@@ -333,7 +429,7 @@ const LoginScreen: React.FC = () => {
                   anchor={
                     <Pressable
                       onPress={() => setRegionMenuVisible(true)}
-                      disabled={isLoading}
+                      disabled={isLoading || !!switchingAccountId}
                       accessibilityLabel={`Control plane region: ${currentRegion.label}. Double tap to change.`}
                       accessibilityRole="button"
                     >
@@ -384,9 +480,7 @@ const LoginScreen: React.FC = () => {
                     <Menu.Item
                       key={region.id}
                       title={`${region.label} - ${region.notes}`}
-                      leadingIcon={
-                        selectedRegion === region.id ? 'check-circle' : 'earth'
-                      }
+                      leadingIcon={selectedRegion === region.id ? 'check-circle' : 'earth'}
                       onPress={() => handleRegionSelect(region.id)}
                     />
                   ))}
@@ -403,7 +497,7 @@ const LoginScreen: React.FC = () => {
                   autoCorrect={false}
                   textContentType="username"
                   left={<TextInput.Icon icon="account-outline" />}
-                  disabled={isLoading}
+                  disabled={isLoading || !!switchingAccountId}
                   style={styles.input}
                   returnKeyType="next"
                   outlineStyle={styles.inputOutline}
@@ -426,7 +520,7 @@ const LoginScreen: React.FC = () => {
                       accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
                     />
                   }
-                  disabled={isLoading}
+                  disabled={isLoading || !!switchingAccountId}
                   style={styles.input}
                   returnKeyType="done"
                   onSubmitEditing={handleLogin}
@@ -434,7 +528,7 @@ const LoginScreen: React.FC = () => {
                 />
 
                 <Pressable
-                  onPress={() => setRememberSession(!rememberSession)}
+                  onPress={() => setRememberSessionState(!rememberSession)}
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: rememberSession }}
                   accessibilityLabel="Stay signed in"
@@ -451,9 +545,7 @@ const LoginScreen: React.FC = () => {
                       },
                     ]}
                   >
-                    <Checkbox
-                      status={rememberSession ? 'checked' : 'unchecked'}
-                    />
+                    <Checkbox status={rememberSession ? 'checked' : 'unchecked'} />
                   </View>
                   <View style={styles.rememberTextWrap}>
                     <Text
@@ -471,41 +563,37 @@ const LoginScreen: React.FC = () => {
                   </View>
                 </Pressable>
 
-                {/* Sign In Button */}
                 <Button
                   mode="contained"
                   onPress={handleLogin}
-                  disabled={!isFormValid || isLoading}
+                  disabled={!isFormValid || isLoading || !!switchingAccountId}
                   loading={isLoading}
                   style={styles.signInButton}
                   contentStyle={styles.signInButtonContent}
                   labelStyle={styles.signInButtonLabel}
-                  accessibilityLabel={isLoading ? 'Signing in, please wait' : 'Sign in to Anypoint Platform'}
+                  accessibilityLabel={
+                    isLoading ? 'Signing in, please wait' : 'Sign in to Anypoint Platform'
+                  }
                   accessibilityRole="button"
                 >
                   {isLoading ? 'Signing In...' : 'Sign In'}
                 </Button>
 
-                {/* Divider */}
                 <View style={styles.dividerRow}>
                   <Divider style={styles.dividerLine} />
                   <Text
                     variant="labelMedium"
-                    style={[
-                      styles.dividerText,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
+                    style={[styles.dividerText, { color: theme.colors.onSurfaceVariant }]}
                   >
                     or
                   </Text>
                   <Divider style={styles.dividerLine} />
                 </View>
 
-                {/* SSO Button */}
                 <Button
                   mode="outlined"
                   onPress={handleSSOLogin}
-                  disabled={isLoading}
+                  disabled={isLoading || !!switchingAccountId}
                   icon="shield-key-outline"
                   style={styles.ssoButton}
                   contentStyle={styles.ssoButtonContent}
@@ -515,30 +603,140 @@ const LoginScreen: React.FC = () => {
                   Sign in with SSO
                 </Button>
 
+                {!isAddAccountMode && rememberedAccounts.length > 0 ? (
+                  <>
+                    <View style={styles.dividerRow}>
+                      <Divider style={styles.dividerLine} />
+                      <Text
+                        variant="labelMedium"
+                        style={[styles.dividerText, { color: theme.colors.onSurfaceVariant }]}
+                      >
+                        saved accounts
+                      </Text>
+                      <Divider style={styles.dividerLine} />
+                    </View>
+
+                    <View style={styles.savedAccountsSection}>
+                      {visibleRememberedAccounts.map((account) => {
+                        const isSwitching = switchingAccountId === account.accountId;
+                        const fullName =
+                          `${account.user.firstName ?? ''} ${account.user.lastName ?? ''}`.trim();
+                        const metaLine = [
+                          account.currentOrganization?.name ?? account.user.organizationName,
+                          getRegionById(account.selectedRegion).label,
+                        ].filter(Boolean).join(' • ');
+
+                        return (
+                          <Pressable
+                            key={account.accountId}
+                            onPress={() => void handleRememberedAccountLogin(account.accountId)}
+                            disabled={isLoading || !!switchingAccountId}
+                            style={[
+                              styles.savedAccountCard,
+                              {
+                                backgroundColor: theme.colors.background,
+                                borderColor: theme.colors.outlineVariant,
+                              },
+                            ]}
+                          >
+                            <View style={styles.savedAccountHeader}>
+                              <View
+                                style={[
+                                  styles.savedAccountAvatar,
+                                  { backgroundColor: theme.colors.primary + '14' },
+                                ]}
+                              >
+                                <Text
+                                  variant="labelLarge"
+                                  style={{ color: theme.colors.primary, fontWeight: '700' }}
+                                >
+                                  {(account.user.firstName?.[0] ??
+                                    account.user.username?.[0] ??
+                                    '?'
+                                  ).toUpperCase()}
+                                </Text>
+                              </View>
+                              <View style={styles.savedAccountText}>
+                                <Text
+                                  variant="bodyMedium"
+                                  style={{ color: theme.colors.onSurface, fontWeight: '600' }}
+                                  numberOfLines={1}
+                                >
+                                  {fullName || account.user.username}
+                                </Text>
+                                <Text
+                                  variant="bodySmall"
+                                  style={{ color: theme.colors.onSurfaceVariant }}
+                                  numberOfLines={1}
+                                >
+                                  {metaLine || account.user.email || account.user.username}
+                                </Text>
+                              </View>
+                              <View style={styles.savedAccountActions}>
+                                <Button
+                                  compact
+                                  mode="text"
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    handleForgetRememberedAccount(account.accountId);
+                                  }}
+                                  disabled={isLoading || !!switchingAccountId}
+                                  textColor={theme.colors.onSurfaceVariant}
+                                  style={styles.savedAccountForgetButton}
+                                >
+                                  Forget
+                                </Button>
+                                <Button
+                                  compact
+                                  mode="contained-tonal"
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    void handleRememberedAccountLogin(account.accountId);
+                                  }}
+                                  loading={isSwitching}
+                                  disabled={isLoading || !!switchingAccountId}
+                                  contentStyle={styles.savedAccountContinueContent}
+                                  labelStyle={styles.savedAccountContinueLabel}
+                                >
+                                  Open
+                                </Button>
+                              </View>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+
+                      {rememberedAccounts.length > 1 ? (
+                        <Button
+                          compact
+                          mode="text"
+                          onPress={() => setShowAllRememberedAccounts((current) => !current)}
+                          style={styles.savedAccountsToggle}
+                        >
+                          {showAllRememberedAccounts
+                            ? 'Show fewer accounts'
+                            : `Show ${rememberedAccounts.length - 1} more account${rememberedAccounts.length - 1 === 1 ? '' : 's'}`}
+                        </Button>
+                      ) : null}
+                    </View>
+                  </>
+                ) : null}
               </View>
             </View>
 
-            {/* Footer */}
             <View style={styles.footer}>
-              <Text
-                variant="bodySmall"
-                style={{ color: theme.colors.onSurfaceVariant }}
-              >
-                MuleOps — Mobile Operations Control
+              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                MuleOps - Mobile Operations Control
               </Text>
-              <Text
-                variant="bodySmall"
-                style={{ color: theme.colors.outline, marginTop: 2 }}
-              >
+              <Text variant="bodySmall" style={{ color: theme.colors.outline, marginTop: 2 }}>
                 Version {APP_VERSION}
               </Text>
             </View>
           </View>
         </View>
-      </View>
+      </ScrollView>
 
-      {/* Loading Overlay */}
-      {isLoading && (
+      {isLoading ? (
         <View
           style={[
             styles.loadingOverlay,
@@ -551,13 +749,11 @@ const LoginScreen: React.FC = () => {
         >
           <ActivityIndicator animating size="large" color={theme.colors.primary} />
         </View>
-      )}
-
+      ) : null}
     </KeyboardAvoidingView>
   );
 };
 
-// --- Styles ---
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -567,8 +763,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
-  // ── Inner content layout ──
   innerContent: {
     width: '100%',
     maxWidth: 560,
@@ -582,8 +776,20 @@ const styles = StyleSheet.create({
     maxWidth: 880,
     alignSelf: 'center',
   },
-
-  // ── Branding ──
+  authNavRow: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  backPill: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
   brandingContainer: {
     alignItems: 'center',
     marginBottom: 32,
@@ -612,8 +818,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
     textAlign: 'center',
   },
-
-  // ── Form + Footer column ──
   formColumn: {
     width: '100%',
     alignItems: 'center',
@@ -623,8 +827,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
-  // ── Form card ──
   formCard: {
     width: '100%',
     borderRadius: 22,
@@ -673,6 +875,9 @@ const styles = StyleSheet.create({
   input: {
     marginBottom: 14,
   },
+  inputOutline: {
+    borderRadius: 12,
+  },
   rememberRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -687,9 +892,6 @@ const styles = StyleSheet.create({
   },
   rememberTextWrap: {
     flex: 1,
-  },
-  inputOutline: {
-    borderRadius: 12,
   },
   signInButton: {
     marginBottom: 16,
@@ -719,14 +921,55 @@ const styles = StyleSheet.create({
   ssoButtonContent: {
     paddingVertical: 6,
   },
-  // ── Footer ──
+  savedAccountsSection: {
+    gap: 6,
+  },
+  savedAccountCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  savedAccountHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 36,
+  },
+  savedAccountAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  savedAccountText: {
+    flex: 1,
+  },
+  savedAccountActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 6,
+    gap: 4,
+  },
+  savedAccountForgetButton: {
+    minWidth: 0,
+  },
+  savedAccountContinueContent: {
+    minHeight: 30,
+  },
+  savedAccountContinueLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  savedAccountsToggle: {
+    alignSelf: 'flex-start',
+  },
   footer: {
     alignItems: 'center',
     marginTop: 32,
     width: '100%',
   },
-
-  // ── Overlays ──
   loadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
@@ -735,8 +978,3 @@ const styles = StyleSheet.create({
 });
 
 export default LoginScreen;
-
-
-
-
-

@@ -99,7 +99,11 @@
       "Bash(cat \"/c/Users/xTony/Downloads/MuleSoft Catalyst Knowledge Hub & Others.postman_collection.json\")",
       "Bash(python3:*)",
       "Bash(npm run lint)",
-      "Bash(ls -la \"/c/Users/xTony/Documents/Projects/anypoint-mobile-manager/app/\\(main\\)/\")"
+      "Bash(ls -la \"/c/Users/xTony/Documents/Projects/anypoint-mobile-manager/app/\\(main\\)/\")",
+      "Bash(git -C /Users/tonymall/Documents/Repositories/anypoint-mobile-manager branch -a --sort=-committerdate)",
+      "Bash(git -C /Users/tonymall/Documents/Repositories/anypoint-mobile-manager tag --sort=-creatordate)",
+      "Read(//Users/tonymall/Documents/Repositories/anypoint-mobile-manager/**)",
+      "Bash(git -C /Users/tonymall/Documents/Repositories/anypoint-mobile-manager log --oneline --all --date=short --pretty='%h %ad %d %s')"
     ]
   }
 }

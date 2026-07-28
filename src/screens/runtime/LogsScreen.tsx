@@ -443,7 +443,6 @@ const LogsScreen: React.FC = () => {
     logger.log(`[LogsScreen] appLogs updated: ${count} entries, isFetched=${appLogsFetched}, error=${appLogsError?.message ?? 'none'}`);
     if (count > 0 && appLogs?.[0]) {
       logger.log('[LogsScreen] First entry keys:', Object.keys(appLogs[0]).join(', '));
-      logger.log('[LogsScreen] First entry sample:', JSON.stringify(appLogs[0]).slice(0, 300));
     }
     if (count > 0) {
       setLastUpdated(new Date()); // eslint-disable-line react-hooks/set-state-in-effect -- syncs timestamp from query data

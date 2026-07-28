@@ -182,6 +182,7 @@ export interface PolicyConfigField {
   description: string;
   type: 'string' | 'int' | 'boolean' | 'array' | 'expression';
   defaultValue?: unknown;
+  enumValues?: string[];
   optional: boolean;
   sensitive: boolean;
   allowMultiple: boolean;
@@ -547,6 +548,7 @@ export interface ConnectedApp {
 export interface AuditLogEntry {
   id: string;
   action: string;
+  platform?: string;
   objectType: string;
   objectId: string;
   userName: string;
