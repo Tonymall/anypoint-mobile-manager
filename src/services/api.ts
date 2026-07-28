@@ -20,6 +20,11 @@ import * as SecureStore from 'expo-secure-store';
 import { DEFAULT_REGION_ID, getRegionUrl } from '../config/regions';
 import logger from '../utils/logger';
 import type { ControlPlaneRegionId } from '../types';
+import {
+  authState,
+  resolveRequestAuth,
+  type StoredCredentialReader,
+} from './authMode';
 
 const TOKEN_KEY = 'anypoint_access_token';
 const REFRESH_TOKEN_KEY = 'anypoint_refresh_token';
@@ -29,9 +34,11 @@ const XSRF_TOKEN_KEY = 'anypoint_xsrf_token';
 
 let currentBaseUrl: string = getRegionUrl(DEFAULT_REGION_ID);
 
-let inMemoryToken: string | null = null;
-let inMemorySessionMode = false;
-let inMemoryXsrfToken: string | null = null;
+const secureStoreReader: StoredCredentialReader = {
+  getAccessToken: () => SecureStore.getItemAsync(TOKEN_KEY),
+  getSessionMode: () => SecureStore.getItemAsync(SESSION_MODE_KEY),
+  getXsrfToken: () => SecureStore.getItemAsync(XSRF_TOKEN_KEY),
+};
 
 function isExpectedDiscoveryFailure(
   status: number,
@@ -117,27 +124,27 @@ export async function clearTokens(): Promise<void> {
 }
 
 export async function storeSessionAuth(xsrfToken?: string): Promise<void> {
-  inMemorySessionMode = true;
+  authState.sessionMode = true;
   await SecureStore.setItemAsync(SESSION_MODE_KEY, 'true');
   if (xsrfToken) {
-    inMemoryXsrfToken = xsrfToken;
+    authState.xsrfToken = xsrfToken;
     await SecureStore.setItemAsync(XSRF_TOKEN_KEY, xsrfToken);
   }
 }
 
 export async function clearSessionAuth(): Promise<void> {
-  inMemorySessionMode = false;
-  inMemoryXsrfToken = null;
+  authState.sessionMode = false;
+  authState.xsrfToken = null;
   await SecureStore.deleteItemAsync(SESSION_MODE_KEY);
   await SecureStore.deleteItemAsync(XSRF_TOKEN_KEY);
 }
 
 export function isSessionAuthEnabled(): boolean {
-  return inMemorySessionMode;
+  return authState.sessionMode;
 }
 
 export async function enableCookieSessionAuth(xsrfToken?: string): Promise<void> {
-  inMemoryToken = null;
+  authState.token = null;
   delete api.defaults.headers.common['Authorization'];
   await storeSessionAuth(xsrfToken);
   api.defaults.withCredentials = true;
@@ -151,44 +158,23 @@ api.interceptors.request.use(
     config.baseURL = currentBaseUrl;
     config.withCredentials = true;
 
-    const isLoginRequest = config.url?.includes('/accounts/login');
-    if (isLoginRequest) {
-      delete config.headers.Authorization;
-      return config;
-    }
-
-    if (inMemoryToken) {
-      inMemorySessionMode = false;
-      delete config.headers['X-XSRF-TOKEN'];
-      config.headers.Authorization = `Bearer ${inMemoryToken}`;
-    } else {
-      try {
-        const token = await getStoredAccessToken();
-        if (token) {
-          inMemorySessionMode = false;
-          delete config.headers['X-XSRF-TOKEN'];
-          config.headers.Authorization = `Bearer ${token}`;
-          inMemoryToken = token;
-        } else {
-          const storedSessionMode = inMemorySessionMode ? 'true' : await SecureStore.getItemAsync(SESSION_MODE_KEY);
-          if (storedSessionMode === 'true') {
-            inMemorySessionMode = true;
-            delete config.headers.Authorization;
-            const xsrfToken = inMemoryXsrfToken ?? await SecureStore.getItemAsync(XSRF_TOKEN_KEY);
-            if (xsrfToken) {
-              inMemoryXsrfToken = xsrfToken;
-              config.headers['X-XSRF-TOKEN'] = xsrfToken;
-            }
-          } else {
-            logger.warn('[API Interceptor] No token in memory or SecureStore for:', config.url);
-          }
+    const auth = await resolveRequestAuth(config.url, secureStoreReader);
+    switch (auth.kind) {
+      case 'login':
+        delete config.headers.Authorization;
+        return config;
+      case 'bearer':
+        delete config.headers['X-XSRF-TOKEN'];
+        config.headers.Authorization = `Bearer ${auth.token}`;
+        break;
+      case 'session':
+        delete config.headers.Authorization;
+        if (auth.xsrfToken) {
+          config.headers['X-XSRF-TOKEN'] = auth.xsrfToken;
         }
-      } catch (error: any) {
-        logger.warn(
-          '[API Interceptor] SecureStore token read failed:',
-          error?.message ?? 'unknown error',
-        );
-      }
+        break;
+      case 'none':
+        break;
     }
 
     const url = config.url ?? '';
@@ -226,9 +212,9 @@ api.interceptors.response.use(
 );
 
 export function setAuthHeader(token: string): void {
-  inMemorySessionMode = false;
-  inMemoryXsrfToken = null;
-  inMemoryToken = token;
+  authState.sessionMode = false;
+  authState.xsrfToken = null;
+  authState.token = token;
   delete api.defaults.headers.common['X-XSRF-TOKEN'];
   api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 }
@@ -250,9 +236,9 @@ export async function resetApiState(): Promise<void> {
   await clearTokens();
   await clearSessionAuth();
 
-  inMemoryToken = null;
-  inMemorySessionMode = false;
-  inMemoryXsrfToken = null;
+  authState.token = null;
+  authState.sessionMode = false;
+  authState.xsrfToken = null;
 
   delete api.defaults.headers.common['Authorization'];
   delete api.defaults.headers.common['X-XSRF-TOKEN'];

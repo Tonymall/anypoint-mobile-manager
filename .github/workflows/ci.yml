@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [development]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint -- --max-warnings 25
+
+      - name: Test
+        run: npm test
+
+      - name: Expo doctor
+        run: npx expo-doctor
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Backend typecheck
+        working-directory: backend
+        run: npm run typecheck --if-present
+
+      - name: Backend build
+        working-directory: backend
+        run: npm run build --if-present
