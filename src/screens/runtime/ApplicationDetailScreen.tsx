@@ -1,26 +1,31 @@
 // ============================================================
 // Application Detail Screen - Full app info with actions
-// 2026 Modern Dark-First Design with glassmorphic cards,
-// accent borders, and refined metric displays.
+// Built on the design token layer: every colour, type size and
+// radius here names a role, so the screen resolves correctly in
+// both colour schemes.
 // ============================================================
 
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { StyleSheet, View, ScrollView, Pressable } from 'react-native';
+import { StyleSheet, View, ScrollView } from 'react-native';
 import {
   Text,
-  useTheme,
   Appbar,
   Portal,
   Snackbar,
   TextInput,
   IconButton,
-  ActivityIndicator,
-  type MD3Theme,
 } from 'react-native-paper';
-import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { statusColors, anypointColors } from '../../theme';
+
 import { ConfirmDialog } from '../../components/common';
+import { Skeleton } from '../../components/ui';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  type Tokens,
+} from '../../theme';
 import {
   useApplication,
   useStartApp,
@@ -35,189 +40,27 @@ import {
   getDeploymentTarget,
 } from '../../utils/appHelpers';
 import * as runtimeService from '../../services/runtimeService';
-import { getStatusColor, getStatusLabel, isTransitional } from '../../utils/statusHelpers';
+import { getStatusRole, getStatusLabel, isTransitional } from '../../utils/statusHelpers';
 import { hapticSuccess, hapticError } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
-import type { IconName } from '../../types/icons';
+import {
+  ActionButton,
+  InfoItem,
+  MetricBox,
+  StatusBanner,
+} from './applicationDetail';
 
-// ---------------------------------------------------------------------------
-// InfoItem — reusable key/value row
-// ---------------------------------------------------------------------------
-
-const InfoItem: React.FC<{ label: string; value: string; icon?: IconName; iconColor?: string }> = ({
-  label, value, icon, iconColor,
-}) => {
-  const theme = useTheme();
-  return (
-    <View style={infoStyles.row}>
-      {icon && (
-        <View style={[infoStyles.iconBox, { backgroundColor: (iconColor ?? theme.colors.onSurfaceVariant) + '14' }]}>
-          <Icon name={icon} size={14} color={iconColor ?? theme.colors.onSurfaceVariant} />
-        </View>
-      )}
-      <Text
-        variant="labelMedium"
-        style={{ color: theme.colors.onSurfaceVariant, width: icon ? 100 : 110, flexShrink: 0 }}
-        numberOfLines={1}
-      >
-        {label}
-      </Text>
-      <Text
-        variant="bodyMedium"
-        style={{ color: theme.colors.onSurface, flex: 1 }}
-        selectable
-        numberOfLines={2}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-};
-
-const infoStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 7,
-    gap: 8,
-  },
-  iconBox: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
-
-// ---------------------------------------------------------------------------
-// MetricBox — compact metric display
-// ---------------------------------------------------------------------------
-
-const MetricBox: React.FC<{
-  label: string;
-  value: string;
-  color: string;
-  icon: IconName;
-  warning?: boolean;
-}> = ({ label, value, color, icon, warning }) => {
-  const theme = useTheme();
-  return (
-    <View style={metricStyles.box}>
-      <View style={[metricStyles.iconCircle, { backgroundColor: color + '14' }]}>
-        <Icon name={icon} size={18} color={color} />
-      </View>
-      <Text
-        variant="headlineSmall"
-        style={{
-          color: warning ? anypointColors.error : theme.colors.onSurface,
-          fontWeight: '700',
-          letterSpacing: -0.5,
-        }}
-      >
-        {value}
-      </Text>
-      <Text style={[metricStyles.label, { color: theme.colors.onSurfaceVariant }]}>
-        {label}
-      </Text>
-    </View>
-  );
-};
-
-const metricStyles = StyleSheet.create({
-  box: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  iconCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  label: {
-    fontSize: 10,
-    fontWeight: '500',
-    letterSpacing: 0.3,
-  },
-});
-
-// ---------------------------------------------------------------------------
-// Action Button
-// ---------------------------------------------------------------------------
-
-const ActionButton: React.FC<{
-  icon: IconName;
-  label: string;
-  color?: string;
-  onPress: () => void;
-  loading?: boolean;
-  disabled?: boolean;
-}> = ({ icon, label, color, onPress, loading, disabled }) => {
-  const theme = useTheme();
-  const btnColor = color ?? theme.colors.primary;
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled || loading}
-      accessibilityLabel={`${label}${disabled ? ', disabled' : ''}`}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled || !!loading }}
-      style={[
-        actionStyles.btn,
-        {
-          backgroundColor: disabled ? theme.colors.surfaceVariant : btnColor + '14',
-          borderColor: disabled ? theme.colors.outlineVariant : btnColor + '30',
-          opacity: disabled ? 0.5 : 1,
-        },
-      ]}
-    >
-      {loading ? (
-        <ActivityIndicator size={16} color={btnColor} />
-      ) : (
-        <Icon name={icon} size={16} color={disabled ? theme.colors.onSurfaceVariant : btnColor} />
-      )}
-      <Text
-        style={{
-          fontSize: 12,
-          fontWeight: '600',
-          color: disabled ? theme.colors.onSurfaceVariant : btnColor,
-          letterSpacing: 0.2,
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-};
-
-const actionStyles = StyleSheet.create({
-  btn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    minWidth: 80,
-    flex: 1,
-  },
-});
+/** Placeholder rows shown while the application payload is in flight. */
+const SKELETON_ROWS = [0, 1, 2, 3, 4, 5, 6];
 
 // ---------------------------------------------------------------------------
 // Main Screen
 // ---------------------------------------------------------------------------
 
 const ApplicationDetailScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const styles = useMemo(() => createStyles(t), [t]);
   const { domain } = useLocalSearchParams<{ domain: string }>();
   const transition = useRuntimeTransitionStore((s) => (domain ? s.transitions[String(domain)] : undefined));
 
@@ -285,11 +128,11 @@ const ApplicationDetailScreen: React.FC = () => {
   const [savingProps, setSavingProps] = useState(false);
 
   const status = app?.status ?? 'UNKNOWN';
-  const statusColor = useMemo(() => getStatusColor(status), [status]);
+  const statusRole = useMemo(() => getStatusRole(t, status), [t, status]);
   const statusLabel = useMemo(() => getStatusLabel(status), [status]);
 
   const effectiveLabel = pendingAction || transition?.label || statusLabel;
-  const effectiveColor = (pendingAction || transition) ? statusColors.deploying : statusColor;
+  const effectiveRole = (pendingAction || transition) ? t.color.status.warning : statusRole;
   const showSpinner = !!pendingAction || !!transition || isTransitional(status);
   const workerInfo = useMemo(() => getWorkerInfo(app), [app]);
 
@@ -392,11 +235,29 @@ const ApplicationDetailScreen: React.FC = () => {
   if (isLoading) {
     return (
       <View style={styles.container}>
-        <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
+        <Appbar.Header style={styles.appbar}>
           <Appbar.BackAction onPress={() => router.back()} />
-          <Appbar.Content title="Application" titleStyle={{ fontWeight: '600' }} />
+          <Appbar.Content title="Application" titleStyle={styles.appbarTitle} />
         </Appbar.Header>
-        <LoadingState message="Loading application details..." />
+        {/* Shaped like the real content so nothing jumps when it lands. */}
+        <View style={[styles.card, styles.skeletonCard, styles.skeletonBanner]}>
+          <Skeleton width="45%" height={18} />
+          <Skeleton width="65%" height={13} />
+        </View>
+        <View style={styles.actionsRow}>
+          <Skeleton height={40} radius={radii.md} style={styles.skeletonAction} />
+          <Skeleton height={40} radius={radii.md} style={styles.skeletonAction} />
+          <Skeleton height={40} radius={radii.md} style={styles.skeletonAction} />
+        </View>
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.accent.secondary.base }]} />
+          <Text style={styles.sectionTitle}>CONFIGURATION</Text>
+        </View>
+        <View style={[styles.card, styles.skeletonCard]}>
+          {SKELETON_ROWS.map((row) => (
+            <Skeleton key={row} height={14} />
+          ))}
+        </View>
       </View>
     );
   }
@@ -404,9 +265,9 @@ const ApplicationDetailScreen: React.FC = () => {
   if (isError || !app) {
     return (
       <View style={styles.container}>
-        <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
+        <Appbar.Header style={styles.appbar}>
           <Appbar.BackAction onPress={() => router.back()} />
-          <Appbar.Content title="Application" titleStyle={{ fontWeight: '600' }} />
+          <Appbar.Content title="Application" titleStyle={styles.appbarTitle} />
         </Appbar.Header>
         <ErrorState
           message={error?.message ?? 'Failed to load application details.'}
@@ -424,58 +285,21 @@ const ApplicationDetailScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* ── Header ── */}
-      <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
+      <Appbar.Header style={styles.appbar}>
         <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title={getAppName(app)} titleStyle={{ fontWeight: '600', letterSpacing: -0.3 }} />
+        <Appbar.Content title={getAppName(app)} titleStyle={styles.appbarTitle} />
         <Appbar.Action icon="refresh" onPress={() => refetch()} />
       </Appbar.Header>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* ── Status Banner ── */}
-        <View style={[styles.statusCard, { borderLeftColor: effectiveColor, borderColor: theme.colors.outlineVariant }]}>
-          {/* Accent glow */}
-          <View style={[styles.statusGlow, { backgroundColor: effectiveColor }]} />
-          <View style={styles.statusContent}>
-            <View style={styles.statusRow}>
-              {showSpinner ? (
-                <ActivityIndicator size={14} color={effectiveColor} style={{ marginRight: 6 }} />
-              ) : (
-                <View
-                  style={[
-                    styles.statusDot,
-                    {
-                      backgroundColor: effectiveColor,
-                      shadowColor: effectiveColor,
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: isStarted ? 0.6 : 0,
-                      shadowRadius: 6,
-                    },
-                  ]}
-                />
-              )}
-              <Text
-                variant="titleMedium"
-                style={{ color: effectiveColor, fontWeight: '700', letterSpacing: -0.2 }}
-              >
-                {effectiveLabel}
-              </Text>
-            </View>
-            <Text
-              variant="bodySmall"
-              style={{ color: theme.colors.onSurfaceVariant, fontFamily: 'monospace', fontSize: 12 }}
-            >
-              {app?.domain ?? domain}
-            </Text>
-            {showSpinner && (
-              <Text
-                variant="bodySmall"
-                style={{ color: theme.colors.onSurfaceVariant, marginTop: 4, fontStyle: 'italic' }}
-              >
-                Refreshing status automatically…
-              </Text>
-            )}
-          </View>
-        </View>
+        <StatusBanner
+          role={effectiveRole}
+          label={effectiveLabel}
+          domain={String(app?.domain ?? domain ?? '')}
+          busy={showSpinner}
+          glowing={isStarted}
+        />
 
         {/* ── Action Buttons ── */}
         <View style={styles.actionsRow}>
@@ -483,7 +307,7 @@ const ApplicationDetailScreen: React.FC = () => {
             <ActionButton
               icon="play"
               label="Start"
-              color={anypointColors.success}
+              role={t.color.status.success}
               onPress={() => handleAction('start')}
               loading={startMutation.isPending}
               disabled={isMutating || isInTransition}
@@ -493,7 +317,7 @@ const ApplicationDetailScreen: React.FC = () => {
             <ActionButton
               icon="stop"
               label="Stop"
-              color={anypointColors.error}
+              role={t.color.status.danger}
               onPress={() => handleAction('stop')}
               loading={stopMutation.isPending}
               disabled={isMutating || isInTransition}
@@ -502,7 +326,7 @@ const ApplicationDetailScreen: React.FC = () => {
           <ActionButton
             icon="restart"
             label="Restart"
-            color={anypointColors.warning}
+            role={t.color.status.warning}
             onPress={() => handleAction('restart')}
             loading={restartMutation.isPending}
             disabled={isMutating || isStopped || isInTransition}
@@ -526,34 +350,32 @@ const ApplicationDetailScreen: React.FC = () => {
         {hasMonitoring && (
           <>
             <View style={styles.sectionHeader}>
-              <View style={[styles.sectionAccent, { backgroundColor: anypointColors.primary }]} />
-              <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-                MONITORING
-              </Text>
+              <View style={[styles.sectionAccent, { backgroundColor: t.color.accent.brand.base }]} />
+              <Text style={styles.sectionTitle}>MONITORING</Text>
             </View>
-            <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+            <View style={styles.card}>
               <View style={styles.metricsGrid}>
                 <MetricBox
                   icon="cpu-64-bit"
                   label="CPU"
                   value={`${Math.round(cpuPercent)}%`}
-                  color={anypointColors.primary}
+                  role={t.color.accent.brand}
                   warning={cpuPercent > 80}
                 />
-                <View style={[styles.metricDivider, { backgroundColor: theme.colors.outlineVariant }]} />
+                <View style={styles.metricDivider} />
                 <MetricBox
                   icon="memory"
                   label={memTotal > 0 ? `${memUsage}/${memTotal} MB` : 'Memory'}
                   value={`${Math.round(memPercent)}%`}
-                  color={anypointColors.secondary}
+                  role={t.color.accent.secondary}
                   warning={memPercent > 80}
                 />
-                <View style={[styles.metricDivider, { backgroundColor: theme.colors.outlineVariant }]} />
+                <View style={styles.metricDivider} />
                 <MetricBox
                   icon="chart-timeline-variant"
                   label="Threads"
                   value={String(threadCount)}
-                  color={anypointColors.accent}
+                  role={t.color.status.success}
                 />
               </View>
             </View>
@@ -562,16 +384,14 @@ const ApplicationDetailScreen: React.FC = () => {
 
         {/* ── Configuration ── */}
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionAccent, { backgroundColor: theme.colors.secondary }]} />
-          <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-            CONFIGURATION
-          </Text>
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.accent.secondary.base }]} />
+          <Text style={styles.sectionTitle}>CONFIGURATION</Text>
         </View>
-        <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
-          <InfoItem label="Target" value={getDeploymentTarget(app)} icon="cloud-outline" iconColor={theme.colors.primary} />
-          <InfoItem label="Mule" value={getMuleVersion(app) || 'N/A'} icon="cog-outline" iconColor={theme.colors.secondary} />
-          <InfoItem label="Region" value={app?.region ?? 'N/A'} icon="earth" iconColor={anypointColors.info} />
-          <InfoItem label="Workers" value={`${workerInfo.amount} x ${workerInfo.typeName}`} icon="server" iconColor={anypointColors.accent} />
+        <View style={styles.card}>
+          <InfoItem label="Target" value={getDeploymentTarget(app)} icon="cloud-outline" iconColor={t.color.accent.brand.base} />
+          <InfoItem label="Mule" value={getMuleVersion(app) || 'N/A'} icon="cog-outline" iconColor={t.color.accent.secondary.base} />
+          <InfoItem label="Region" value={app?.region ?? 'N/A'} icon="earth" iconColor={t.color.status.info.base} />
+          <InfoItem label="Workers" value={`${workerInfo.amount} x ${workerInfo.typeName}`} icon="server" iconColor={t.color.status.success.base} />
           <InfoItem label="File" value={app?.fileName ?? 'N/A'} icon="file-outline" />
           <InfoItem label="Queues" value={app?.persistentQueues ? 'Enabled' : 'Disabled'} icon="swap-horizontal" />
           <InfoItem
@@ -584,8 +404,8 @@ const ApplicationDetailScreen: React.FC = () => {
         {/* ── Properties ── */}
         <View style={styles.propsHeader}>
           <View style={styles.sectionHeader}>
-            <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
-            <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
+            <View style={[styles.sectionAccent, { backgroundColor: t.color.accent.tertiary.base }]} />
+            <Text style={styles.sectionTitle}>
               PROPERTIES {hasProperties ? `(${Object.keys(properties).length})` : ''}
             </Text>
           </View>
@@ -593,31 +413,26 @@ const ApplicationDetailScreen: React.FC = () => {
             <IconButton icon="pencil-outline" size={18} onPress={startEditing} />
           )}
           {editingProps && (
-            <View style={{ flexDirection: 'row', gap: 4 }}>
+            <View style={styles.propsActions}>
               <IconButton icon="close" size={18} onPress={cancelEditing} />
               <IconButton
                 icon="content-save-outline"
                 size={18}
-                iconColor={anypointColors.primary}
+                iconColor={t.color.accent.brand.base}
                 onPress={saveProperties}
                 disabled={savingProps}
               />
             </View>
           )}
         </View>
-        <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+        <View style={styles.card}>
           {hasProperties ? (
             editingProps ? (
               Object.entries(editedProperties).map(([key, value]) => {
                 const isMasked = typeof value === 'string' && value.includes('****');
                 return (
-                  <View key={key} style={{ marginBottom: 10 }}>
-                    <Text
-                      variant="labelSmall"
-                      style={{ color: theme.colors.onSurfaceVariant, marginBottom: 2 }}
-                    >
-                      {key}
-                    </Text>
+                  <View key={key} style={styles.propField}>
+                    <Text style={styles.propLabel}>{key}</Text>
                     <TextInput
                       value={isMasked ? '' : value}
                       placeholder={isMasked ? '••••••••' : 'Value'}
@@ -625,8 +440,8 @@ const ApplicationDetailScreen: React.FC = () => {
                       mode="outlined"
                       dense
                       disabled={savingProps}
-                      style={{ backgroundColor: theme.colors.surface, fontSize: 13 }}
-                      outlineStyle={{ borderRadius: 10 }}
+                      style={styles.propInput}
+                      outlineStyle={styles.propInputOutline}
                     />
                   </View>
                 );
@@ -645,9 +460,7 @@ const ApplicationDetailScreen: React.FC = () => {
               ))
             )
           ) : (
-            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-              No properties configured
-            </Text>
+            <Text style={styles.emptyText}>No properties configured</Text>
           )}
         </View>
       </ScrollView>
@@ -682,73 +495,58 @@ const ApplicationDetailScreen: React.FC = () => {
 // Styles
 // ---------------------------------------------------------------------------
 
-const createStyles = (theme: MD3Theme) =>
+const createStyles = (t: Tokens) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.background,
+      backgroundColor: t.color.surface.canvas,
+    },
+    appbar: {
+      backgroundColor: t.color.surface.raised,
+      elevation: 0,
+    },
+    appbarTitle: {
+      ...typeScale.title,
+      color: t.color.text.primary,
     },
     scrollContent: {
       paddingBottom: 40,
-    },
-    // ── Status Card ──
-    statusCard: {
-      marginHorizontal: 16,
-      marginTop: 12,
-      borderLeftWidth: 3,
-      borderRadius: 18,
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      overflow: 'hidden',
-    },
-    statusGlow: {
-      height: 2,
-      borderTopLeftRadius: 18,
-      borderTopRightRadius: 18,
-    },
-    statusContent: {
-      padding: 16,
-    },
-    statusRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 4,
-    },
-    statusDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
     },
     // ── Actions ──
     actionsRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      paddingHorizontal: 16,
-      paddingTop: 12,
-      gap: 8,
+      paddingHorizontal: spacing.lg,
+      paddingTop: spacing.md,
+      gap: spacing.sm,
     },
     // ── Section ──
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      paddingHorizontal: 20,
-      marginTop: 24,
-      marginBottom: 10,
+      gap: spacing.sm,
+      paddingHorizontal: spacing.xl,
+      marginTop: spacing.xxl,
+      marginBottom: spacing.sm,
     },
     sectionAccent: {
       width: 3,
       height: 14,
       borderRadius: 2,
     },
+    sectionTitle: {
+      ...typeScale.label,
+      color: t.color.text.secondary,
+      letterSpacing: 0.8,
+    },
     // ── Cards ──
     card: {
-      marginHorizontal: 16,
-      borderRadius: 18,
-      backgroundColor: theme.colors.surface,
+      marginHorizontal: spacing.lg,
+      borderRadius: radii.lg,
+      backgroundColor: t.color.surface.raised,
       borderWidth: 1,
-      padding: 16,
+      borderColor: t.color.border.subtle,
+      padding: spacing.lg,
     },
     metricsGrid: {
       flexDirection: 'row',
@@ -757,13 +555,47 @@ const createStyles = (theme: MD3Theme) =>
     metricDivider: {
       width: StyleSheet.hairlineWidth,
       height: 40,
+      backgroundColor: t.color.border.subtle,
     },
-    // ── Props Header ──
+    // ── Props ──
     propsHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingRight: 8,
+      paddingRight: spacing.sm,
+    },
+    propsActions: {
+      flexDirection: 'row',
+      gap: spacing.xs,
+    },
+    propField: {
+      marginBottom: spacing.sm,
+    },
+    propLabel: {
+      ...typeScale.caption,
+      color: t.color.text.secondary,
+      marginBottom: 2,
+    },
+    propInput: {
+      backgroundColor: t.color.surface.raised,
+      fontSize: typeScale.bodySmall.fontSize,
+    },
+    propInputOutline: {
+      borderRadius: radii.sm,
+    },
+    emptyText: {
+      ...typeScale.body,
+      color: t.color.text.secondary,
+    },
+    // ── Loading placeholders ──
+    skeletonCard: {
+      gap: spacing.md,
+    },
+    skeletonBanner: {
+      marginTop: spacing.md,
+    },
+    skeletonAction: {
+      flex: 1,
     },
   });
 

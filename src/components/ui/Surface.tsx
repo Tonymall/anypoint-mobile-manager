@@ -9,8 +9,14 @@ import React, { memo, type ReactNode } from 'react';
 import { StyleSheet, View, type ViewStyle, type StyleProp } from 'react-native';
 import { Text } from 'react-native-paper';
 
-import { radii, spacing } from '../../theme';
-import { useTokens, withAlpha, typeScale, type StatusRole } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type StatusRole,
+} from '../../theme';
 
 // ── Card ────────────────────────────────────────────────────────────
 

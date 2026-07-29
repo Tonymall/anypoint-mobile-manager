@@ -4,7 +4,7 @@
 // used across all screens (runtime, monitoring, dashboard).
 // ============================================================
 
-import { statusColors } from '../theme';
+import { statusColors, type StatusRole, type Tokens } from '../theme';
 
 /** Transitional statuses — the app is mid-lifecycle change. */
 export const TRANSITIONAL_STATUSES = [
@@ -28,6 +28,51 @@ export const getStatusColor = (status: string): string => {
     case 'PARTIALLY_STARTED': return statusColors.pending;
     case 'UNDEPLOYED': return statusColors.stopped;
     default: return statusColors.stopped;
+  }
+};
+
+/**
+ * Status → semantic status role (base/surface/border), the token-layer
+ * counterpart of `getStatusColor`. Screens should prefer this: it gives
+ * the tinted background and border for free, and resolves correctly in
+ * both colour schemes.
+ */
+export const getStatusRole = (t: Tokens, status: string): StatusRole => {
+  switch (status) {
+    case 'STARTED':
+    case 'RUNNING':
+    case 'ACTIVE':
+      return t.color.status.success;
+    case 'FAILED':
+    case 'DEPLOY_FAILED':
+      return t.color.status.danger;
+    case 'DEPLOYING':
+    case 'UNDEPLOYING':
+    case 'UPDATING':
+    case 'STARTING':
+    case 'STOPPING':
+    case 'PARTIALLY_STARTED':
+      return t.color.status.warning;
+    case 'STOPPED':
+    case 'UNDEPLOYED':
+    default:
+      return t.color.status.neutral;
+  }
+};
+
+/** Alert/notification severity → semantic status role. */
+export const getSeverityRole = (t: Tokens, severity?: string): StatusRole => {
+  switch (severity?.toUpperCase()) {
+    case 'CRITICAL':
+    case 'ERROR':
+      return t.color.status.danger;
+    case 'WARNING':
+    case 'WARN':
+      return t.color.status.warning;
+    case 'INFO':
+      return t.color.status.info;
+    default:
+      return t.color.status.neutral;
   }
 };
 

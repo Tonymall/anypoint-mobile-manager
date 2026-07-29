@@ -1,8 +1,12 @@
 // ============================================================
-// Platform Alerts — Alert List (2026 Design)
+// Platform Alerts — Alert List
 //
 // Card-based alert list with severity filtering, search,
 // pull-to-refresh, and navigation to alert detail.
+//
+// Built on the design token layer: severity and alert status both
+// resolve to semantic status roles, so the accent bar, badge tint
+// and dot stay in step across light and dark.
 // ============================================================
 
 import React, { useState, useCallback, useMemo } from 'react';
@@ -19,18 +23,24 @@ import {
   Text,
   Chip,
   useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useRouter, useIsFocused } from 'expo-router';
 
 import type { Alert, AlertSeverity } from '../../types';
-import { anypointColors, severityColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import { Skeleton } from '../../components/ui';
 import { usePlatformAlerts } from '../../hooks/queries/useAlertQueries';
-import { formatRelativeTime } from '../../utils/statusHelpers';
+import { formatRelativeTime, getSeverityRole } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 import type { IconName } from '../../types/icons';
 
@@ -45,10 +55,6 @@ const SEVERITY_FILTERS: { label: string; value: SeverityFilter; icon: string }[]
 ];
 
 // --- Severity helpers ---
-const getSeverityColor = (severity: AlertSeverity): string => {
-  return severityColors[severity] ?? anypointColors.info;
-};
-
 const getSeverityIcon = (severity: AlertSeverity): IconName => {
   switch (severity) {
     case 'CRITICAL': return 'alert-octagon';
@@ -58,13 +64,14 @@ const getSeverityIcon = (severity: AlertSeverity): IconName => {
   }
 };
 
-const getStatusColor = (status: string, theme: MD3Theme): string => {
+/** Alert lifecycle status → semantic status role. */
+const getAlertStatusRole = (t: Tokens, status: string): StatusRole => {
   switch (status) {
-    case 'ACTIVE': return anypointColors.error;
-    case 'ACKNOWLEDGED': return anypointColors.warning;
-    case 'RESOLVED': return anypointColors.success;
-    case 'DISMISSED': return theme.colors.onSurfaceVariant;
-    default: return theme.colors.onSurfaceVariant;
+    case 'ACTIVE': return t.color.status.danger;
+    case 'ACKNOWLEDGED': return t.color.status.warning;
+    case 'RESOLVED': return t.color.status.success;
+    case 'DISMISSED': return t.color.status.neutral;
+    default: return t.color.status.neutral;
   }
 };
 
@@ -72,10 +79,13 @@ const getStatusColor = (status: string, theme: MD3Theme): string => {
 const AlertCard = React.memo<{
   alert: Alert;
   onPress: () => void;
-  theme: MD3Theme;
-}>(({ alert, onPress, theme }) => {
-  const sevColor = getSeverityColor(alert.severity);
-  const statColor = getStatusColor(alert.status, theme);
+  t: Tokens;
+}>(({ alert, onPress, t }) => {
+  const sevRole = getSeverityRole(t, alert.severity);
+  const statRole = getAlertStatusRole(t, alert.status);
+
+  const tagStyle = [styles.tag, { backgroundColor: t.color.surface.sunken }];
+  const tagTextStyle = [styles.tagText, { color: t.color.text.secondary }];
 
   return (
     <Pressable
@@ -87,43 +97,24 @@ const AlertCard = React.memo<{
       accessibilityRole="button"
       accessibilityHint="Double tap to view details"
       style={({ pressed }) => [
+        styles.card,
         {
-          marginBottom: 8,
-          borderRadius: 18,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-          overflow: 'hidden',
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
           opacity: pressed ? 0.92 : 1,
         },
       ]}
     >
       {/* Severity accent border at left */}
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 12,
-          bottom: 12,
-          width: 3,
-          borderRadius: 1.5,
-          backgroundColor: sevColor,
-        }}
-      />
+      <View style={[styles.cardAccent, { backgroundColor: sevRole.base }]} />
 
-      <View style={{ padding: 16, paddingLeft: 18 }}>
+      <View style={styles.cardBody}>
         {/* Header: name + status badge */}
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}>
-            <Icon name={getSeverityIcon(alert.severity)} size={18} color={sevColor} />
+        <View style={styles.cardHeader}>
+          <View style={styles.cardHeaderText}>
+            <Icon name={getSeverityIcon(alert.severity)} size={18} color={sevRole.base} />
             <Text
-              style={{
-                fontSize: 15,
-                fontWeight: '600',
-                color: theme.colors.onSurface,
-                letterSpacing: -0.2,
-                flex: 1,
-              }}
+              style={[styles.alertName, { color: t.color.text.primary }]}
               numberOfLines={1}
             >
               {alert.name}
@@ -131,41 +122,20 @@ const AlertCard = React.memo<{
           </View>
 
           {/* Status chip badge */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 10,
-              backgroundColor: statColor + '12',
-            }}
-          >
+          <View style={[styles.statusBadge, { backgroundColor: statRole.surface }]}>
             <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
-                backgroundColor: statColor,
-                ...(alert.status === 'ACTIVE'
-                  ? {
-                      shadowColor: statColor,
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: 0.6,
-                      shadowRadius: 3,
-                    }
-                  : {}),
-              }}
+              style={[
+                styles.statusDot,
+                { backgroundColor: statRole.base },
+                alert.status === 'ACTIVE' && {
+                  shadowColor: statRole.base,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.6,
+                  shadowRadius: 3,
+                },
+              ]}
             />
-            <Text
-              style={{
-                color: statColor,
-                fontSize: 11,
-                fontWeight: '700',
-                letterSpacing: 0.2,
-              }}
-            >
+            <Text style={[styles.statusText, { color: statRole.base }]}>
               {alert.status}
             </Text>
           </View>
@@ -173,34 +143,29 @@ const AlertCard = React.memo<{
 
         {/* Message (2 lines max) */}
         <Text
-          style={{
-            fontSize: 13,
-            color: theme.colors.onSurfaceVariant,
-            marginTop: 8,
-            lineHeight: 18,
-          }}
+          style={[styles.message, { color: t.color.text.secondary }]}
           numberOfLines={2}
         >
           {alert.message}
         </Text>
 
         {/* Meta: source app + relative time */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+        <View style={styles.tagRow}>
           {alert.applicationName && (
-            <View style={tagStyle(theme)}>
-              <Icon name="application-outline" size={11} color={theme.colors.onSurfaceVariant} />
-              <Text style={tagTextStyle(theme)}>{alert.applicationName}</Text>
+            <View style={tagStyle}>
+              <Icon name="application-outline" size={11} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>{alert.applicationName}</Text>
             </View>
           )}
           {alert.source && (
-            <View style={tagStyle(theme)}>
-              <Icon name="source-branch" size={11} color={theme.colors.onSurfaceVariant} />
-              <Text style={tagTextStyle(theme)}>{alert.source}</Text>
+            <View style={tagStyle}>
+              <Icon name="source-branch" size={11} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>{alert.source}</Text>
             </View>
           )}
-          <View style={tagStyle(theme)}>
-            <Icon name="clock-outline" size={11} color={theme.colors.onSurfaceVariant} />
-            <Text style={tagTextStyle(theme)}>{formatRelativeTime(alert.createdAt)}</Text>
+          <View style={tagStyle}>
+            <Icon name="clock-outline" size={11} color={t.color.text.secondary} />
+            <Text style={tagTextStyle}>{formatRelativeTime(alert.createdAt)}</Text>
           </View>
         </View>
       </View>
@@ -209,26 +174,46 @@ const AlertCard = React.memo<{
 });
 AlertCard.displayName = 'AlertCard';
 
-// Tag helpers (match ApplicationsListScreen style)
-const tagStyle = (theme: MD3Theme) => ({
-  flexDirection: 'row' as const,
-  alignItems: 'center' as const,
-  gap: 4,
-  paddingHorizontal: 8,
-  paddingVertical: 3,
-  borderRadius: 8,
-  backgroundColor: theme.colors.surfaceVariant + '80',
-});
+// ── Loading placeholder ──
+// Card-shaped so the list does not jump when the alerts land.
+const AlertCardSkeleton = React.memo<{ t: Tokens }>(({ t }) => (
+  <View
+    style={[
+      styles.card,
+      {
+        backgroundColor: t.color.surface.raised,
+        borderColor: t.color.border.subtle,
+      },
+    ]}
+  >
+    <View style={[styles.cardAccent, { backgroundColor: t.color.border.default }]} />
+    <View style={styles.cardBody}>
+      <View style={styles.cardHeader}>
+        <View style={styles.cardHeaderText}>
+          <Skeleton width={18} height={18} radius={radii.pill} />
+          <Skeleton width="55%" height={15} />
+        </View>
+        <Skeleton width={72} height={20} />
+      </View>
+      <View style={styles.skeletonMessage}>
+        <Skeleton width="100%" height={12} />
+        <Skeleton width="70%" height={12} />
+      </View>
+      <View style={styles.tagRow}>
+        <Skeleton width={96} height={18} />
+        <Skeleton width={72} height={18} />
+      </View>
+    </View>
+  </View>
+));
+AlertCardSkeleton.displayName = 'AlertCardSkeleton';
 
-const tagTextStyle = (theme: MD3Theme) => ({
-  fontSize: 11,
-  color: theme.colors.onSurfaceVariant,
-  fontWeight: '500' as const,
-});
+const SKELETON_ROWS = [0, 1, 2, 3, 4];
 
 // --- Component ---
 const PlatformAlertsScreen: React.FC = () => {
   const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const isFocused = useIsFocused();
 
@@ -268,83 +253,64 @@ const PlatformAlertsScreen: React.FC = () => {
             params: { alertId: item.id },
           })
         }
-        theme={theme}
+        t={t}
       />
     ),
-    [theme, router],
+    [t, router],
   );
 
   const renderEmptyState = useCallback(
     () => (
       <View style={styles.emptyState}>
-        <View
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 24,
-            backgroundColor: theme.colors.surfaceVariant,
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginBottom: 16,
-          }}
-        >
-          <Icon name="bell-off-outline" size={36} color={theme.colors.onSurfaceVariant} />
+        <View style={[styles.emptyIcon, { backgroundColor: t.color.surface.sunken }]}>
+          <Icon name="bell-off-outline" size={36} color={t.color.text.tertiary} />
         </View>
-        <Text
-          style={{
-            fontSize: 17,
-            fontWeight: '700',
-            color: theme.colors.onSurface,
-            marginBottom: 6,
-          }}
-        >
+        <Text style={[styles.emptyTitle, { color: t.color.text.primary }]}>
           No platform alerts
         </Text>
-        <Text
-          style={{
-            fontSize: 13,
-            color: theme.colors.onSurfaceVariant,
-            textAlign: 'center',
-          }}
-        >
+        <Text style={[styles.emptyBody, { color: t.color.text.secondary }]}>
           {searchQuery || severityFilter !== 'ALL'
             ? 'Try adjusting your filters or search query.'
             : 'All clear! No alerts have been triggered.'}
         </Text>
       </View>
     ),
-    [searchQuery, severityFilter, theme],
+    [searchQuery, severityFilter, t],
   );
 
-  if (isLoading) return <LoadingState message="Loading alerts..." />;
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+        <View style={styles.topBar}>
+          <View style={styles.titleRow}>
+            <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+            <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
+              Alerts
+            </Text>
+          </View>
+          <Skeleton width="100%" height={44} radius={radii.lg} />
+        </View>
+        <View style={styles.listContent}>
+          {SKELETON_ROWS.map((row) => (
+            <AlertCardSkeleton key={row} t={t} />
+          ))}
+        </View>
+      </View>
+    );
+  }
   if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
       {/* ── Header ── */}
-      <View style={[styles.topBar, { paddingTop: 12 }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 }}>
-          <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
-          <Text
-            style={{
-              fontSize: 20,
-              fontWeight: '700',
-              color: theme.colors.onSurface,
-              flex: 1,
-              letterSpacing: -0.3,
-            }}
-          >
+      <View style={styles.topBar}>
+        <View style={styles.titleRow}>
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+          <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
             Alerts
           </Text>
-          <View
-            style={{
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 10,
-              backgroundColor: anypointColors.primary + '12',
-            }}
-          >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: anypointColors.primary }}>
+          <View style={[styles.countBadge, { backgroundColor: t.color.brand.surface }]}>
+            <Text style={[styles.countBadgeText, { color: t.color.text.accent }]}>
               {alertsList.length}
             </Text>
           </View>
@@ -353,7 +319,7 @@ const PlatformAlertsScreen: React.FC = () => {
           placeholder="Search by name or app..."
           onChangeText={setSearchQuery}
           value={searchQuery}
-          style={[styles.searchBar, { backgroundColor: theme.colors.surfaceVariant }]}
+          style={[styles.searchBar, { backgroundColor: t.color.surface.sunken }]}
           inputStyle={styles.searchInput}
           icon="magnify"
         />
@@ -363,10 +329,10 @@ const PlatformAlertsScreen: React.FC = () => {
       <View style={styles.filterRow}>
         {SEVERITY_FILTERS.map((f) => {
           const isActive = severityFilter === f.value;
-          const chipColor =
+          const chipRole =
             f.value === 'ALL'
-              ? anypointColors.primary
-              : getSeverityColor(f.value as AlertSeverity);
+              ? t.color.accent.brand
+              : getSeverityRole(t, f.value);
           const count =
             f.value === 'ALL' ? alertsList.length : (severityCounts[f.value] ?? 0);
 
@@ -380,14 +346,14 @@ const PlatformAlertsScreen: React.FC = () => {
               }}
               style={[
                 styles.filterChip,
-                { borderColor: theme.colors.outline },
+                { borderColor: t.color.border.default },
                 isActive && {
-                  backgroundColor: chipColor + '15',
-                  borderColor: chipColor + '30',
+                  backgroundColor: chipRole.surface,
+                  borderColor: chipRole.border,
                 },
               ]}
               selected={isActive}
-              selectedColor={isActive ? chipColor : undefined}
+              selectedColor={isActive ? chipRole.base : undefined}
               compact
               accessibilityRole="button"
               accessibilityLabel={`Filter: ${f.label} (${count})`}
@@ -396,8 +362,8 @@ const PlatformAlertsScreen: React.FC = () => {
             </Chip>
           );
         })}
-        <View style={{ flex: 1 }} />
-        <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, fontWeight: '500' }}>
+        <View style={styles.spacer} />
+        <Text style={[styles.resultCount, { color: t.color.text.tertiary }]}>
           {filteredAlerts.length} result{filteredAlerts.length !== 1 ? 's' : ''}
         </Text>
       </View>
@@ -432,9 +398,79 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  card: {
+    marginBottom: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    position: 'absolute',
+    left: 0,
+    top: spacing.md,
+    bottom: spacing.md,
+    width: 3,
+    borderRadius: 1.5,
+  },
+  cardBody: {
+    padding: spacing.lg,
+    paddingLeft: 18,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardHeaderText: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing.sm,
+  },
+  alertName: { ...typeScale.subheading, flex: 1 },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radii.pill,
+  },
+  statusText: { ...typeScale.caption, fontWeight: '700' },
+  message: { ...typeScale.bodySmall, marginTop: spacing.sm },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.md,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+  },
+  tagText: { ...typeScale.caption, fontWeight: '500' },
+  skeletonMessage: {
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
   topBar: {
-    paddingHorizontal: 16,
-    paddingBottom: 4,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
   sectionAccent: {
     width: 3,
@@ -442,37 +478,58 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     marginRight: 10,
   },
+  screenTitle: { ...typeScale.title, fontSize: 20, flex: 1 },
+  countBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  countBadgeText: { ...typeScale.label, fontWeight: '700' },
   searchBar: {
     elevation: 0,
-    borderRadius: 16,
+    borderRadius: radii.lg,
     height: 44,
   },
   searchInput: {
-    fontSize: 14,
+    ...typeScale.body,
     minHeight: 44,
   },
   filterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     flexWrap: 'wrap',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
     paddingVertical: 10,
-    gap: 8,
+    gap: spacing.sm,
   },
   filterChip: {
-    borderRadius: 12,
+    borderRadius: radii.md,
   },
+  spacer: {
+    flex: 1,
+  },
+  resultCount: { ...typeScale.caption, fontWeight: '500' },
   listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 32,
-    paddingTop: 4,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxxl,
+    paddingTop: spacing.xs,
   },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 80,
-    paddingHorizontal: 32,
+    paddingHorizontal: spacing.xxxl,
   },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: radii.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  emptyTitle: { ...typeScale.heading, marginBottom: 6 },
+  emptyBody: { ...typeScale.bodySmall, textAlign: 'center' },
 });
 
 export default PlatformAlertsScreen;

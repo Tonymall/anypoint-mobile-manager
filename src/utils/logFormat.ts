@@ -38,8 +38,25 @@ export const MAX_RENDER_LINES = 400;
  */
 const MAX_PREFIX_SCAN = 16 * 1024;
 
-/** How many plausible payload starts we are willing to try per message. */
+/** How many plausible payload starts we are willing to try per payload. */
 const MAX_CANDIDATES = 8;
+
+/**
+ * Payload blocks we are willing to render for one log line.
+ *
+ * Real Mule lines wrap two or three payloads (`body` plus `headers`, a
+ * request plus its response). Past that the row stops being a log line
+ * and starts being a document, so we stop and say so.
+ */
+export const MAX_PAYLOADS_PER_MESSAGE = 3;
+
+/**
+ * Hard ceiling on candidate scans for one message, shared across every
+ * payload search. Each scan is linear, so this — not the per-payload
+ * budget — is what actually bounds the cost of a pathological line.
+ * The extra allowance is the probe that answers "are there more?".
+ */
+const MAX_TOTAL_CANDIDATES = MAX_CANDIDATES * (MAX_PAYLOADS_PER_MESSAGE + 1);
 
 /**
  * Shorter than this is prose, not a payload — `[1, 2]` in a sentence
@@ -450,10 +467,32 @@ export function detectPayload(message: string): DetectedPayload {
     return noPayload(typeof message === 'string' ? message : '');
   }
 
-  const limit = Math.min(message.length, MAX_PREFIX_SCAN);
+  return (
+    findPayload(message, 0, { left: MAX_TOTAL_CANDIDATES }) ?? noPayload(message)
+  );
+}
+
+/** Remaining candidate scans for the message being segmented. */
+interface CandidateBudget {
+  left: number;
+}
+
+/**
+ * The single-payload search, resumable from an offset.
+ *
+ * Two budgets apply: `MAX_CANDIDATES` bounds this search, and `budget`
+ * bounds every search over the same message put together — so finding a
+ * second and third payload cannot multiply the worst case indefinitely.
+ */
+function findPayload(
+  message: string,
+  from: number,
+  budget: CandidateBudget,
+): DetectedPayload | null {
+  const limit = Math.min(message.length, from + MAX_PREFIX_SCAN);
   let candidates = 0;
 
-  for (let i = 0; i < limit; i++) {
+  for (let i = from; i < limit; i++) {
     const ch = message[i];
     if (ch !== '{' && ch !== '[' && ch !== '<') continue;
 
@@ -464,14 +503,142 @@ export function detectPayload(message: string): DetectedPayload {
       continue;
     }
 
-    if (++candidates > MAX_CANDIDATES) break;
+    if (candidates >= MAX_CANDIDATES || budget.left <= 0) break;
+    candidates++;
+    budget.left--;
 
     const found =
       ch === '<' ? tryXml(message, i) : tryJson(message, i);
     if (found) return found;
   }
 
-  return noPayload(message);
+  return null;
+}
+
+// ── Segmentation (multiple payloads per line) ───────────────────────
+
+export interface ProseSegment {
+  type: 'prose';
+  text: string;
+}
+
+export interface PayloadSegment {
+  type: 'payload';
+  kind: 'json' | 'xml';
+  /** The payload substring, verbatim. */
+  raw: string;
+  start: number;
+  end: number;
+}
+
+export type MessageSegment = ProseSegment | PayloadSegment;
+
+export interface SegmentedMessage {
+  /** Prose and payloads interleaved, in the order they appear. */
+  segments: MessageSegment[];
+  /** How many payload segments are present. */
+  payloadCount: number;
+  /** True when the line holds more payloads than the cap allowed. */
+  more: boolean;
+}
+
+/**
+ * Punctuation that only ever joined a payload to its neighbours. Once
+ * the payload is lifted into its own block, a leftover `,` sitting on
+ * its own line is noise — this is the set we shave off either end.
+ */
+const ORPHAN_EDGE_START = /^[\s,;]+/;
+const ORPHAN_EDGE_END = /[\s,;]+$/;
+
+/**
+ * Tidy a prose fragment left behind by an extracted payload.
+ *
+ * Returns '' for a fragment with nothing readable in it, so the caller
+ * can drop it rather than render a lone `,` or `}` on its own line.
+ */
+export function trimProse(text: string): string {
+  if (typeof text !== 'string') return '';
+  const trimmed = text
+    .trim()
+    .replace(ORPHAN_EDGE_START, '')
+    .replace(ORPHAN_EDGE_END, '');
+  if (!trimmed) return '';
+  // Brackets, colons and quotes on their own are the seams of the
+  // structure we just pulled apart, not something anyone reads.
+  if (!/[A-Za-z0-9]/.test(trimmed)) return '';
+  return trimmed;
+}
+
+function pushProse(segments: MessageSegment[], raw: string): void {
+  const text = trimProse(raw);
+  if (text) segments.push({ type: 'prose', text });
+}
+
+/**
+ * Split a log line into prose and payload segments, in source order.
+ *
+ * `detectPayload` finds the *first* payload; real Mule lines routinely
+ * carry several (`... response : { body: <xml/> , headers: ["..."] }`),
+ * and stopping at the first leaves the rest as an unreadable tail. This
+ * repeats the search from the end of each payload, up to a cap, and
+ * reports honestly when the cap was reached.
+ *
+ * Cost stays bounded by `MAX_TOTAL_CANDIDATES` across the whole line.
+ */
+export function segmentMessage(
+  message: string,
+  maxPayloads: number = MAX_PAYLOADS_PER_MESSAGE,
+): SegmentedMessage {
+  const src = typeof message === 'string' ? message : '';
+  if (src.length < MIN_PAYLOAD_CHARS) {
+    const text = src.trim();
+    return {
+      segments: text ? [{ type: 'prose', text }] : [],
+      payloadCount: 0,
+      more: false,
+    };
+  }
+
+  const cap = Math.max(1, Math.min(maxPayloads, MAX_PAYLOADS_PER_MESSAGE));
+  const budget: CandidateBudget = { left: MAX_TOTAL_CANDIDATES };
+  const segments: MessageSegment[] = [];
+  let cursor = 0;
+  let payloadCount = 0;
+
+  while (payloadCount < cap && cursor < src.length) {
+    const found = findPayload(src, cursor, budget);
+    if (!found) break;
+    pushProse(segments, src.slice(cursor, found.start));
+    segments.push({
+      type: 'payload',
+      kind: found.kind as 'json' | 'xml',
+      raw: found.raw,
+      start: found.start,
+      end: found.end,
+    });
+    payloadCount++;
+    cursor = found.end;
+  }
+
+  const more =
+    payloadCount === cap &&
+    cursor < src.length &&
+    findPayload(src, cursor, budget) !== null;
+
+  pushProse(segments, src.slice(cursor));
+
+  // Nothing structured in the line: hand back the message untouched so
+  // the caller renders exactly what the server sent.
+  if (payloadCount === 0) {
+    const text = src.trim();
+    return {
+      segments: text ? [{ type: 'prose', text }] : [],
+      payloadCount: 0,
+      more: false,
+    };
+  }
+
+  return { segments, payloadCount, more };
 }
 
 // ── Formatting ──────────────────────────────────────────────────────
@@ -795,6 +962,132 @@ export function tokenizePayload(kind: PayloadKind, text: string): Span[] {
   if (kind === 'json') return tokenizeJson(text);
   if (kind === 'xml') return tokenizeXml(text);
   return [{ text, kind: 'plain' }];
+}
+
+// ── Line layout (overflow-safe rendering) ───────────────────────────
+// A pretty-printed payload is wider than a phone. Rather than clip it —
+// or hide it behind a nested horizontal scroller inside a virtualised
+// row — we hand the UI one entry per line, with the leading indent
+// lifted out so it can be rendered as a fixed gutter and the remainder
+// left free to soft-wrap underneath itself.
+
+/**
+ * Indentation is capped before it eats the whole line. Past this depth
+ * the nesting is conveyed by the tags themselves.
+ */
+export const MAX_INDENT_COLUMNS = 12;
+
+/**
+ * Longest run of non-space characters we leave without a break
+ * opportunity. Namespace URIs and base64 blobs have none of their own,
+ * and a token wider than the viewport is exactly what clipped before.
+ */
+export const MAX_UNBROKEN_RUN = 24;
+
+/** Invisible break opportunity — zero width, so nothing is added visually. */
+export const SOFT_BREAK = '\u200B';
+
+export interface SpanLine {
+  /** Leading indent columns, lifted out of `spans`. */
+  indent: number;
+  /** The line's content, indent removed. Empty for a blank line. */
+  spans: Span[];
+}
+
+export interface SpanLineOptions {
+  /** Clamp for `indent`. Defaults to `MAX_INDENT_COLUMNS`. */
+  maxIndent?: number;
+  /** Run length after which a soft break is inserted. 0 disables it. */
+  maxRun?: number;
+}
+
+/** Lift the leading spaces off a line's spans. */
+function liftIndent(spans: Span[], maxIndent: number): SpanLine {
+  let indent = 0;
+
+  for (let i = 0; i < spans.length; i++) {
+    const { text, kind } = spans[i];
+    let lead = 0;
+    while (lead < text.length && text[lead] === ' ') lead++;
+    indent += lead;
+
+    if (lead < text.length) {
+      const rest = spans.slice(i);
+      rest[0] = { text: text.slice(lead), kind };
+      return { indent: Math.min(indent, maxIndent), spans: rest };
+    }
+  }
+
+  return { indent: Math.min(indent, maxIndent), spans: [] };
+}
+
+/**
+ * Insert zero-width break opportunities into over-long runs, sharing one
+ * counter across the line's spans so a run split over several spans is
+ * still caught.
+ */
+function addSoftBreaks(spans: Span[], maxRun: number): Span[] {
+  if (maxRun <= 0) return spans;
+  let run = 0;
+
+  return spans.map((span) => {
+    let out = '';
+    for (const ch of span.text) {
+      if (ch === ' ' || ch === '\t') {
+        run = 0;
+        out += ch;
+        continue;
+      }
+      if (run >= maxRun) {
+        out += SOFT_BREAK;
+        run = 0;
+      }
+      out += ch;
+      run++;
+    }
+    return out === span.text ? span : { text: out, kind: span.kind };
+  });
+}
+
+/**
+ * Regroup tokeniser output into one entry per rendered line.
+ *
+ * The UI draws each line as `[indent gutter][wrapping content]`, which
+ * gives a hanging indent for free: continuation rows line up under the
+ * start of the line rather than under the left margin, and the row's
+ * height is whatever the layout engine measures — no scroll offset, no
+ * nested scroll container, nothing for a virtualised list to get wrong.
+ */
+export function splitSpanLines(
+  spans: Span[],
+  options: SpanLineOptions = {},
+): SpanLine[] {
+  const maxIndent = options.maxIndent ?? MAX_INDENT_COLUMNS;
+  const maxRun = options.maxRun ?? MAX_UNBROKEN_RUN;
+
+  const lines: SpanLine[] = [];
+  let current: Span[] = [];
+
+  const flush = () => {
+    const line = liftIndent(current, maxIndent);
+    lines.push({ indent: line.indent, spans: addSoftBreaks(line.spans, maxRun) });
+    current = [];
+  };
+
+  for (const span of spans) {
+    if (!span.text.includes('\n')) {
+      if (span.text) current.push(span);
+      continue;
+    }
+    const parts = span.text.split('\n');
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) flush();
+      if (parts[i]) current.push({ text: parts[i], kind: span.kind });
+    }
+  }
+  flush();
+
+  return lines;
 }
 
 // ── Display helpers ─────────────────────────────────────────────────

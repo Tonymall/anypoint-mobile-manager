@@ -1,6 +1,8 @@
 import {
   CRITICAL_ERROR_RATE,
   MIN_TRAFFIC_FOR_ERROR_RATE,
+  RECENT_CHANGE_MS,
+  STALE_CHANGE_MS,
   deriveIncidents,
   incidentsFromAlerts,
   incidentsFromApplications,
@@ -44,23 +46,53 @@ function alert(over: Partial<Alert>): Alert {
   };
 }
 
-describe('incidentsFromApplications', () => {
-  it('reports failed and undeployed apps as critical', () => {
-    const incidents = incidentsFromApplications([
-      { domain: 'a', status: 'FAILED' },
-      { domain: 'b', status: 'UNDEPLOYED' },
-    ]);
+const NOW = 1_800_000_000_000;
+const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
-    expect(incidents).toHaveLength(2);
-    expect(incidents.every((i) => i.severity === 'critical')).toBe(true);
-    expect(incidents[1].detail).toBe('Application is undeployed');
+describe('incidentsFromApplications', () => {
+  it('reports a failed deploy as critical however old it is', () => {
+    const [incident] = incidentsFromApplications(
+      [{ domain: 'a', status: 'FAILED', lastUpdateTime: ago(STALE_CHANGE_MS * 4) }],
+      NOW,
+    );
+
+    expect(incident.severity).toBe('critical');
+    expect(incident.detail).toBe('Application failed to deploy');
   });
 
-  it('reports stopped apps as warnings', () => {
-    const [incident] = incidentsFromApplications([{ domain: 'a', status: 'STOPPED' }]);
+  it('reports a recent undeploy as a warning, not critical', () => {
+    const [incident] = incidentsFromApplications(
+      [{ domain: 'a', status: 'UNDEPLOYED', lastUpdateTime: ago(60_000) }],
+      NOW,
+    );
 
     expect(incident.severity).toBe('warning');
-    expect(incident.detail).toBe('Application is stopped');
+    expect(incident.detail).toBe('Application is undeployed');
+  });
+
+  it('demotes a deliberate stop to info once it is no longer fresh', () => {
+    const [incident] = incidentsFromApplications(
+      [{ domain: 'a', status: 'STOPPED', lastUpdateTime: ago(RECENT_CHANGE_MS * 2) }],
+      NOW,
+    );
+
+    expect(incident.severity).toBe('info');
+  });
+
+  it('drops long-parked applications from the feed entirely', () => {
+    // The estate always has parked apps; listing them forever buries real work.
+    const incidents = incidentsFromApplications(
+      [{ domain: 'a', status: 'UNDEPLOYED', lastUpdateTime: ago(STALE_CHANGE_MS + 1) }],
+      NOW,
+    );
+
+    expect(incidents).toEqual([]);
+  });
+
+  it('keeps an idle app without a timestamp rather than hiding it', () => {
+    const [incident] = incidentsFromApplications([{ domain: 'a', status: 'STOPPED' }], NOW);
+
+    expect(incident.severity).toBe('warning');
   });
 
   it('ignores healthy apps', () => {
@@ -76,7 +108,7 @@ describe('incidentsFromApplications', () => {
   });
 
   it('links to the application detail route', () => {
-    const [incident] = incidentsFromApplications([{ domain: 'orders', status: 'FAILED' }]);
+    const [incident] = incidentsFromApplications([{ domain: 'orders', status: 'FAILED' }], NOW);
 
     expect(incident.route).toBe('/(main)/runtime/[domain]');
     expect(incident.routeParams).toEqual({ domain: 'orders' });

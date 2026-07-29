@@ -3,6 +3,9 @@
 //
 // mode="requiredAcceptance" → mandatory gate after env selection
 // mode="readOnly"           → informational view from Settings
+//
+// Drawn against the design token layer: brand/status roles carry
+// the tinted surfaces, so both colour schemes resolve in one place.
 // ============================================================
 
 import React, { useEffect, useCallback } from 'react';
@@ -18,7 +21,6 @@ import {
   Button,
   Appbar,
   useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,7 +37,14 @@ import {
   TERMS_SECTIONS,
 } from '../../constants/legal';
 import { hapticSuccess, hapticWarning } from '../../utils/haptics';
-import { anypointColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type Tokens,
+} from '../../theme';
 import logger from '../../utils/logger';
 
 interface TermsConditionsScreenProps {
@@ -44,6 +53,7 @@ interface TermsConditionsScreenProps {
 
 const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) => {
   const theme = useTheme();
+  const t = useTokens();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -121,43 +131,36 @@ const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) =
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.root, { backgroundColor: t.color.surface.canvas }]}>
       {/* Header */}
       {isRequired ? (
-        <View style={[styles.requiredHeader, { paddingTop: insets.top + 12 }]}>
-          <View style={[styles.iconBox, { backgroundColor: anypointColors.primary + '18' }]}>
-            <Icon name="file-document-check-outline" size={32} color={anypointColors.primary} />
-          </View>
-          <Text
-            variant="headlineSmall"
-            style={[styles.title, { color: theme.colors.onSurface }]}
+        <View style={[styles.requiredHeader, { paddingTop: insets.top + spacing.md }]}>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: withAlpha(t.color.brand.base, 'soft') },
+            ]}
           >
+            <Icon name="file-document-check-outline" size={32} color={t.color.brand.base} />
+          </View>
+          <Text style={[styles.title, { color: t.color.text.primary }]}>
             Terms & Conditions
           </Text>
-          <Text
-            variant="bodyMedium"
-            style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center' }}
-          >
+          <Text style={[styles.headerSubtitle, { color: t.color.text.secondary }]}>
             Please review and accept to continue
           </Text>
-          <Text
-            variant="labelSmall"
-            style={[styles.versionLabel, { color: theme.colors.onSurfaceVariant }]}
-          >
+          <Text style={[styles.versionLabel, { color: t.color.text.tertiary }]}>
             Last updated: {TERMS_LAST_UPDATED} {'\u00B7'} Version {TERMS_VERSION}
           </Text>
         </View>
       ) : (
         <>
-          <Appbar.Header style={{ backgroundColor: 'transparent', elevation: 0 }}>
+          <Appbar.Header style={styles.appbar}>
             <Appbar.BackAction onPress={handleBack} />
             <Appbar.Content title="Terms & Conditions" />
           </Appbar.Header>
           <View style={styles.readOnlySubheader}>
-            <Text
-              variant="labelSmall"
-              style={{ color: theme.colors.onSurfaceVariant }}
-            >
+            <Text style={[styles.versionInline, { color: t.color.text.tertiary }]}>
               Last updated: {TERMS_LAST_UPDATED} {'\u00B7'} Version {TERMS_VERSION}
             </Text>
           </View>
@@ -169,7 +172,7 @@ const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) =
         style={styles.scrollArea}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: isRequired ? 100 + insets.bottom : 24 + insets.bottom },
+          { paddingBottom: isRequired ? 100 + insets.bottom : spacing.xxl + insets.bottom },
         ]}
         showsVerticalScrollIndicator
       >
@@ -177,29 +180,17 @@ const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) =
           <View key={section.title} style={styles.section}>
             <View style={styles.sectionHeader}>
               <View
-                style={[
-                  styles.sectionNumber,
-                  { backgroundColor: theme.colors.primary + '14' },
-                ]}
+                style={[styles.sectionNumber, { backgroundColor: t.color.brand.surface }]}
               >
-                <Text
-                  variant="labelSmall"
-                  style={{ color: theme.colors.primary, fontWeight: '700' }}
-                >
+                <Text style={[styles.sectionNumberText, { color: t.color.text.accent }]}>
                   {index + 1}
                 </Text>
               </View>
-              <Text
-                variant="titleMedium"
-                style={{ color: theme.colors.onSurface, fontWeight: '600', flex: 1 }}
-              >
+              <Text style={[styles.sectionTitle, { color: t.color.text.primary }]}>
                 {section.title}
               </Text>
             </View>
-            <Text
-              variant="bodyMedium"
-              style={[styles.sectionBody, { color: theme.colors.onSurfaceVariant }]}
-            >
+            <Text style={[styles.sectionBody, { color: t.color.text.secondary }]}>
               {section.body}
             </Text>
           </View>
@@ -207,7 +198,7 @@ const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) =
 
         {/* Read-only acceptance status card */}
         {!isRequired && acceptance && (
-          <AcceptanceStatusCard theme={theme} acceptance={acceptance} formatDate={formatAcceptedDate} />
+          <AcceptanceStatusCard t={t} acceptance={acceptance} formatDate={formatAcceptedDate} />
         )}
       </ScrollView>
 
@@ -217,9 +208,9 @@ const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) =
           style={[
             styles.bottomBar,
             {
-              backgroundColor: theme.colors.surface,
-              borderTopColor: theme.colors.outlineVariant,
-              paddingBottom: Math.max(insets.bottom, 16),
+              backgroundColor: t.color.surface.raised,
+              borderTopColor: t.color.border.subtle,
+              paddingBottom: Math.max(insets.bottom, spacing.lg),
             },
           ]}
         >
@@ -249,32 +240,26 @@ const TermsConditionsScreen: React.FC<TermsConditionsScreenProps> = ({ mode }) =
 
 // ── Acceptance Status Card (read-only mode) ──
 const AcceptanceStatusCard: React.FC<{
-  theme: MD3Theme;
+  t: Tokens;
   acceptance: { version: string; acceptedAt: string };
   formatDate: (iso: string) => string;
-}> = ({ theme, acceptance, formatDate }) => (
+}> = ({ t, acceptance, formatDate }) => (
   <View
     style={[
       styles.statusCard,
       {
-        backgroundColor: anypointColors.success + '10',
-        borderColor: anypointColors.success + '30',
+        backgroundColor: withAlpha(t.color.status.success.base, 'faint'),
+        borderColor: t.color.status.success.border,
       },
     ]}
   >
     <View style={styles.statusRow}>
-      <Icon name="check-circle" size={20} color={anypointColors.success} />
+      <Icon name="check-circle" size={20} color={t.color.status.success.base} />
       <View style={styles.statusText}>
-        <Text
-          variant="titleSmall"
-          style={{ color: theme.colors.onSurface, fontWeight: '600' }}
-        >
+        <Text style={[styles.statusTitle, { color: t.color.text.primary }]}>
           Terms Accepted
         </Text>
-        <Text
-          variant="bodySmall"
-          style={{ color: theme.colors.onSurfaceVariant }}
-        >
+        <Text style={[styles.statusBody, { color: t.color.text.secondary }]}>
           Accepted on {formatDate(acceptance.acceptedAt)} {'\u00B7'} Version {acceptance.version}
         </Text>
       </View>
@@ -286,11 +271,15 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
+  appbar: {
+    backgroundColor: 'transparent',
+    elevation: 0,
+  },
   // ── Required acceptance header ──
   requiredHeader: {
     alignItems: 'center',
-    paddingHorizontal: 32,
-    paddingBottom: 16,
+    paddingHorizontal: spacing.xxxl,
+    paddingBottom: spacing.lg,
   },
   iconBox: {
     width: 64,
@@ -298,48 +287,46 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
-  title: {
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    marginBottom: 4,
-  },
-  versionLabel: {
-    marginTop: 8,
-    opacity: 0.7,
-  },
+  title: { ...typeScale.title, fontSize: 24, lineHeight: 32, marginBottom: spacing.xs },
+  headerSubtitle: { ...typeScale.body, textAlign: 'center' },
+  versionLabel: { ...typeScale.caption, marginTop: spacing.sm },
   // ── Read-only subheader ──
   readOnlySubheader: {
-    paddingHorizontal: 20,
-    paddingBottom: 8,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.sm,
   },
+  versionInline: typeScale.caption,
   // ── Scroll ──
   scrollArea: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
   },
   // ── Sections ──
   section: {
-    marginBottom: 20,
+    marginBottom: spacing.xl,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   sectionNumber: {
     width: 26,
     height: 26,
-    borderRadius: 8,
+    borderRadius: radii.sm,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  sectionNumberText: { ...typeScale.caption, fontWeight: '700' },
+  sectionTitle: { ...typeScale.heading, flex: 1 },
   sectionBody: {
+    ...typeScale.body,
     lineHeight: 22,
     paddingLeft: 36,
   },
@@ -350,8 +337,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 20,
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
     paddingTop: 14,
     borderTopWidth: 1,
   },
@@ -367,19 +354,21 @@ const styles = StyleSheet.create({
   },
   // ── Acceptance status card ──
   statusCard: {
-    borderRadius: 16,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    padding: 16,
-    marginTop: 8,
+    padding: spacing.lg,
+    marginTop: spacing.sm,
   },
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: spacing.md,
   },
   statusText: {
     flex: 1,
   },
+  statusTitle: typeScale.subheading,
+  statusBody: typeScale.bodySmall,
 });
 
 export default TermsConditionsScreen;

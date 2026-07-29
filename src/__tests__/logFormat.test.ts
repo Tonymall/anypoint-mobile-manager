@@ -1,4 +1,5 @@
 import {
+  MAX_PAYLOADS_PER_MESSAGE,
   MAX_DEPTH,
   MAX_FORMAT_CHARS,
   clampLines,
@@ -8,9 +9,12 @@ import {
   formatSize,
   formatXml,
   payloadLabel,
+  segmentMessage,
+  splitSpanLines,
   tokenizeJson,
   tokenizePayload,
   tokenizeXml,
+  trimProse,
 } from '../utils/logFormat';
 
 // A realistic CloudHub log line: prose prefix, payload crammed on the end.
@@ -361,5 +365,133 @@ describe('formatSize / payloadLabel', () => {
     expect(payloadLabel('json', 'x'.repeat(1434))).toBe('JSON · 1.4 KB');
     expect(payloadLabel('xml', 'x'.repeat(20))).toBe('XML · 20 B');
     expect(payloadLabel('none', '')).toBe('');
+  });
+});
+
+// ── Segmentation: several payloads in one log line ──────────────────
+// Mule wraps a response as `{ body: <xml/>, headers: [...] }`, so a
+// single message routinely carries more than one payload.
+
+describe('segmentMessage', () => {
+  it('keeps prose and payloads interleaved in source order', () => {
+    const message =
+      'Response : { body: {"ok":true,"id":42} , headers: ["<?xml version="1.0"?><a><b>1</b></a>"] }';
+    const { segments } = segmentMessage(message);
+
+    expect(segments[0]).toMatchObject({ type: 'prose' });
+    const kinds = segments.filter((s) => s.type === 'payload').map((s: any) => s.kind);
+    expect(kinds).toContain('json');
+  });
+
+  it('finds a second payload after the first', () => {
+    const message =
+      'out {"a":1,"b":[2,3]} then more {"c":{"d":"e"},"f":true} done';
+    const { payloadCount } = segmentMessage(message);
+
+    expect(payloadCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('honours the payload cap and flags that more were present', () => {
+    const one = '{"k":"vvvvvvvvvvvvvvv"}';
+    const message = `start ${one} a ${one} b ${one} c ${one} end`;
+    const { payloadCount, more } = segmentMessage(message, 2);
+
+    expect(payloadCount).toBeLessThanOrEqual(2);
+    expect(more).toBe(true);
+  });
+
+  it('never exceeds the module cap even when asked for more', () => {
+    const one = '{"k":"vvvvvvvvvvvvvvv"}';
+    const message = Array.from({ length: 8 }, () => one).join(' x ');
+
+    expect(segmentMessage(message, 99).payloadCount).toBeLessThanOrEqual(
+      MAX_PAYLOADS_PER_MESSAGE,
+    );
+  });
+
+  it('returns a single prose segment for an ordinary line', () => {
+    const { segments, payloadCount, more } = segmentMessage(
+      'INFO [http.worker.01] Started listener on port 8081',
+    );
+
+    expect(payloadCount).toBe(0);
+    expect(more).toBe(false);
+    expect(segments).toEqual([
+      { type: 'prose', text: 'INFO [http.worker.01] Started listener on port 8081' },
+    ]);
+  });
+
+  it('drops an empty message entirely', () => {
+    expect(segmentMessage('   ').segments).toEqual([]);
+  });
+
+  it('tolerates a non-string input', () => {
+    expect(segmentMessage(undefined as any).segments).toEqual([]);
+  });
+});
+
+// ── Prose tidying around an extracted payload ───────────────────────
+
+describe('trimProse', () => {
+  it('removes the orphaned separators a lifted payload leaves behind', () => {
+    expect(trimProse(' , ')).toBe('');
+    expect(trimProse(' ; ')).toBe('');
+  });
+
+  it('keeps readable text and strips only the edges', () => {
+    expect(trimProse(', and http attributes :')).toBe('and http attributes :');
+  });
+
+  it('leaves interior punctuation alone', () => {
+    expect(trimProse('a, b, c')).toBe('a, b, c');
+  });
+
+  it('handles non-string input', () => {
+    expect(trimProse(null as any)).toBe('');
+  });
+});
+
+// ── Line splitting for the hanging-indent renderer ──────────────────
+// This is what stops a long attribute value from being clipped at the
+// right edge: indent is lifted out so continuation rows can wrap under
+// the line start instead of overflowing.
+
+describe('splitSpanLines', () => {
+  it('splits on newlines and lifts the indent off each line', () => {
+    const lines = splitSpanLines(tokenizeXml('<a>\n  <b>1</b>\n</a>'));
+
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    expect(lines[1].indent).toBeGreaterThan(0);
+    expect(lines[1].spans.map((s) => s.text).join('')).not.toMatch(/^\s/);
+  });
+
+  it('caps runaway indentation', () => {
+    const deep = ' '.repeat(400) + 'x';
+    const [line] = splitSpanLines([{ text: deep, kind: 'text' } as any], {
+      maxIndent: 8,
+    });
+
+    expect(line.indent).toBeLessThanOrEqual(8);
+  });
+
+  it('breaks an unbroken run so it cannot overflow horizontally', () => {
+    const run = 'y'.repeat(500);
+    const [line] = splitSpanLines([{ text: run, kind: 'text' } as any], {
+      maxRun: 40,
+    });
+    const longest = line.spans
+      .map((s) => s.text)
+      .join('')
+      .split(/\s|\u200b/)
+      .reduce((m, part) => Math.max(m, part.length), 0);
+
+    expect(longest).toBeLessThanOrEqual(41);
+  });
+
+  it('degenerates to a single empty line for no spans', () => {
+    const lines = splitSpanLines([]);
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toEqual({ indent: 0, spans: [] });
   });
 });

@@ -1,8 +1,9 @@
 // ============================================================
-// Runtime Manager — Applications List (2026 Design)
+// Runtime Manager — Applications List
 //
-// Modern card layout with glassmorphic borders, glowing status
-// indicators, and clean typography hierarchy.
+// Card layout built on the design token layer: status roles drive
+// the accent, badge and dot together, so light and dark are defined
+// in one place rather than per-screen.
 // ============================================================
 
 import React, { useState, useCallback, useMemo, useRef } from 'react';
@@ -30,10 +31,17 @@ import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useIsFocused } from 'expo-router';
 
 import type { Application, AppStatus } from '../../types';
-import { anypointColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type Tokens,
+} from '../../theme';
 import { useApplications } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
-import { getStatusColor, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
+import { getStatusRole, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
 import { useRuntimeTransitionStore } from '../../stores/runtimeTransitionStore';
 import LoadingState from '../../components/common/LoadingState';
@@ -55,15 +63,18 @@ const STATUS_OPTIONS: { label: string; value: StatusFilter }[] = [
 const AppCard = React.memo<{
   app: any;
   onPress: () => void;
-  theme: MD3Theme;
-}>(({ app, onPress, theme }) => {
+  t: Tokens;
+}>(({ app, onPress, t }) => {
   const domain = app.domain ?? app.name ?? '';
   const transition = useRuntimeTransitionStore((s) => s.transitions[domain]);
-  const color = transition ? anypointColors.info : getStatusColor(app.status);
+  const role = transition ? t.color.status.info : getStatusRole(t, app.status);
   const statusLabel = transition?.label ?? getStatusLabel(app.status);
   const appName = getAppName(app);
   const muleVer = getMuleVersion(app);
   const workerInfo = getWorkerInfo(app);
+
+  const tagStyle = [styles.tag, { backgroundColor: t.color.surface.sunken }];
+  const tagTextStyle = [styles.tagText, { color: t.color.text.secondary }];
 
   return (
     <Pressable
@@ -72,73 +83,69 @@ const AppCard = React.memo<{
       accessibilityRole="button"
       accessibilityHint="Double tap to view details"
       style={({ pressed }) => [
+        styles.card,
         {
-          marginBottom: 8,
-          borderRadius: 18,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-          overflow: 'hidden',
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
           opacity: pressed ? 0.92 : 1,
         },
       ]}
     >
       {/* Accent border at left */}
-      <View style={{ position: 'absolute', left: 0, top: 12, bottom: 12, width: 3, borderRadius: 1.5, backgroundColor: color }} />
+      <View style={[styles.cardAccent, { backgroundColor: role.base }]} />
 
-      <View style={{ padding: 16, paddingLeft: 18 }}>
+      <View style={styles.cardBody}>
         {/* Header: name + status */}
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.onSurface, letterSpacing: -0.2 }} numberOfLines={1}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardHeaderText}>
+            <Text style={[styles.appName, { color: t.color.text.primary }]} numberOfLines={1}>
               {appName}
             </Text>
-            <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, marginTop: 2 }} numberOfLines={1}>
+            <Text style={[styles.appDomain, { color: t.color.text.tertiary }]} numberOfLines={1}>
               {app.fullDomain ?? app.domain ?? ''}
             </Text>
           </View>
 
           {/* Status badge */}
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', gap: 5,
-            paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
-            backgroundColor: color + '12',
-          }}>
-            <View style={{
-              width: 7, height: 7, borderRadius: 4, backgroundColor: color,
-              ...(app.status === 'STARTED' ? {
-                shadowColor: color, shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.6, shadowRadius: 3,
-              } : {}),
-            }} />
-            <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 }}>
-              {statusLabel}
-            </Text>
+          <View style={[styles.statusBadge, { backgroundColor: role.surface }]}>
+            <View
+              style={[
+                styles.statusDot,
+                { backgroundColor: role.base },
+                app.status === 'STARTED' && {
+                  shadowColor: role.base,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.6,
+                  shadowRadius: 3,
+                },
+              ]}
+            />
+            <Text style={[styles.statusText, { color: role.base }]}>{statusLabel}</Text>
           </View>
         </View>
 
         {/* Meta tags */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+        <View style={styles.tagRow}>
           {app.region && (
-            <View style={tagStyle(theme)}>
-              <Icon name="map-marker-outline" size={11} color={theme.colors.onSurfaceVariant} />
-              <Text style={tagTextStyle(theme)}>{app.region}</Text>
+            <View style={tagStyle}>
+              <Icon name="map-marker-outline" size={11} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>{app.region}</Text>
             </View>
           )}
           {muleVer ? (
-            <View style={tagStyle(theme)}>
-              <Icon name="puzzle-outline" size={11} color={theme.colors.onSurfaceVariant} />
-              <Text style={tagTextStyle(theme)}>Mule {muleVer}</Text>
+            <View style={tagStyle}>
+              <Icon name="puzzle-outline" size={11} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>Mule {muleVer}</Text>
             </View>
           ) : null}
-          <View style={tagStyle(theme)}>
-            <Icon name="server-network" size={11} color={theme.colors.onSurfaceVariant} />
-            <Text style={tagTextStyle(theme)}>{workerInfo.amount}x {workerInfo.typeName}</Text>
+          <View style={tagStyle}>
+            <Icon name="server-network" size={11} color={t.color.text.secondary} />
+            <Text style={tagTextStyle}>{workerInfo.amount}x {workerInfo.typeName}</Text>
           </View>
           {app.lastUpdateTime && (
-            <View style={tagStyle(theme)}>
-              <Icon name="clock-outline" size={11} color={theme.colors.onSurfaceVariant} />
-              <Text style={tagTextStyle(theme)}>{formatRelativeTime(app.lastUpdateTime)}</Text>
+            <View style={tagStyle}>
+              <Icon name="clock-outline" size={11} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>{formatRelativeTime(app.lastUpdateTime)}</Text>
             </View>
           )}
         </View>
@@ -148,33 +155,17 @@ const AppCard = React.memo<{
 });
 AppCard.displayName = 'AppCard';
 
-// Tag helpers
-const tagStyle = (theme: MD3Theme) => ({
-  flexDirection: 'row' as const,
-  alignItems: 'center' as const,
-  gap: 4,
-  paddingHorizontal: 8,
-  paddingVertical: 3,
-  borderRadius: 8,
-  backgroundColor: theme.colors.surfaceVariant + '80',
-});
-
-const tagTextStyle = (theme: MD3Theme) => ({
-  fontSize: 11,
-  color: theme.colors.onSurfaceVariant,
-  fontWeight: '500' as const,
-});
-
 // --- Component ---
 const CONTENT_MAX_WIDTH = 768;
 
 const ApplicationsListScreen: React.FC = () => {
   const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const isFocused = useIsFocused();
   const { width: windowWidth } = useWindowDimensions();
   const { columns } = useResponsiveLayout();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const themedStyles = useMemo(() => createStyles(theme), [theme]);
   const flatListRef = useRef<FlatList>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -218,34 +209,34 @@ const ApplicationsListScreen: React.FC = () => {
 
   const renderApplicationCard = useCallback(
     ({ item }: ListRenderItemInfo<Application>) => (
-      <View style={columns > 1 ? { flex: 1, paddingHorizontal: 4 } : undefined}>
+      <View style={columns > 1 ? styles.gridCell : undefined}>
         <AppCard
           app={item}
           onPress={() => router.push({ pathname: '/(main)/runtime/[domain]' as any, params: { domain: getAppId(item) } })}
-          theme={theme}
+          t={t}
         />
       </View>
     ),
-    [theme, router, columns],
+    [t, router, columns],
   );
 
   const renderEmptyState = useCallback(
     () => (
       <View style={styles.emptyState}>
-        <View style={{ width: 72, height: 72, borderRadius: 24, backgroundColor: theme.colors.surfaceVariant, justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
-          <Icon name="application-outline" size={36} color={theme.colors.onSurfaceVariant} />
+        <View style={[styles.emptyIcon, { backgroundColor: t.color.surface.sunken }]}>
+          <Icon name="application-outline" size={36} color={t.color.text.tertiary} />
         </View>
-        <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.onSurface, marginBottom: 6 }}>
+        <Text style={[styles.emptyTitle, { color: t.color.text.primary }]}>
           No applications found
         </Text>
-        <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant, textAlign: 'center' }}>
+        <Text style={[styles.emptyBody, { color: t.color.text.secondary }]}>
           {searchQuery || statusFilter !== 'ALL'
             ? 'Try adjusting your filters or search query.'
             : 'No applications deployed in this environment.'}
         </Text>
       </View>
     ),
-    [searchQuery, statusFilter, styles, theme],
+    [searchQuery, statusFilter, t],
   );
 
   if (isLoading) return <LoadingState message="Loading applications..." />;
@@ -253,38 +244,47 @@ const ApplicationsListScreen: React.FC = () => {
 
   const isWide = windowWidth > CONTENT_MAX_WIDTH;
   const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
+  const widePadding = isWide ? { paddingHorizontal: sidePadding + spacing.lg } : null;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
       {/* ── Header ── */}
-      <View style={[styles.topBar, { paddingTop: 12 }, isWide && { paddingHorizontal: sidePadding + 16 }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, paddingHorizontal: 4 }}>
-          <View style={styles.sectionAccent} />
-          <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.onSurface, flex: 1, letterSpacing: -0.3 }}>
+      <View style={[styles.topBar, widePadding]}>
+        <View style={styles.titleRow}>
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+          <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
             Applications
           </Text>
-          <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: anypointColors.primary + '12' }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: anypointColors.primary }}>{appsList.length}</Text>
+          <View style={[styles.countBadge, { backgroundColor: t.color.brand.surface }]}>
+            <Text style={[styles.countBadgeText, { color: t.color.text.accent }]}>
+              {appsList.length}
+            </Text>
           </View>
         </View>
         <Searchbar
           placeholder="Search apps..."
           onChangeText={setSearchQuery}
           value={searchQuery}
-          style={styles.searchBar}
+          style={[themedStyles.searchBar, { backgroundColor: t.color.surface.sunken }]}
           inputStyle={styles.searchInput}
           icon="magnify"
         />
       </View>
 
       {/* ── Filter chips ── */}
-      <View style={[styles.filterRow, isWide && { paddingHorizontal: sidePadding + 16 }]}>
+      <View style={[styles.filterRow, widePadding]}>
         <Chip
           icon="filter-variant"
           onPress={() => setFilterVisible(true)}
-          style={[styles.filterChip, statusFilter !== 'ALL' && { backgroundColor: anypointColors.primary + '15', borderColor: anypointColors.primary + '30' }]}
+          style={[
+            themedStyles.filterChip,
+            statusFilter !== 'ALL' && {
+              backgroundColor: t.color.brand.surface,
+              borderColor: withAlpha(t.color.brand.base, 'border'),
+            },
+          ]}
           selected={statusFilter !== 'ALL'}
-          selectedColor={statusFilter !== 'ALL' ? anypointColors.primary : undefined}
+          selectedColor={statusFilter !== 'ALL' ? t.color.text.accent : undefined}
           compact
           accessibilityRole="button"
           accessibilityLabel={`Filter: ${activeFilterLabel}`}
@@ -294,7 +294,10 @@ const ApplicationsListScreen: React.FC = () => {
         <Chip
           icon={sortOrder === 'za' ? 'sort-alphabetical-descending' : 'sort-alphabetical-ascending'}
           onPress={() => setSortOrder((prev) => prev === 'default' ? 'az' : prev === 'az' ? 'za' : 'default')}
-          style={[styles.filterChip, sortOrder !== 'default' && { backgroundColor: anypointColors.secondary + '15' }]}
+          style={[
+            themedStyles.filterChip,
+            sortOrder !== 'default' && { backgroundColor: t.color.accent.secondary.surface },
+          ]}
           selected={sortOrder !== 'default'}
           compact
           accessibilityRole="button"
@@ -303,12 +306,12 @@ const ApplicationsListScreen: React.FC = () => {
           {sortOrder === 'az' ? 'A → Z' : sortOrder === 'za' ? 'Z → A' : 'Sort'}
         </Chip>
         {statusFilter !== 'ALL' && (
-          <Chip icon="close" onPress={() => setStatusFilter('ALL')} style={styles.filterChip} compact>
+          <Chip icon="close" onPress={() => setStatusFilter('ALL')} style={themedStyles.filterChip} compact>
             Clear
           </Chip>
         )}
-        <View style={{ flex: 1 }} />
-        <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant, fontWeight: '500' }}>
+        <View style={styles.spacer} />
+        <Text style={[styles.resultCount, { color: t.color.text.tertiary }]}>
           {filteredApps.length} result{filteredApps.length !== 1 ? 's' : ''}
         </Text>
       </View>
@@ -321,10 +324,7 @@ const ApplicationsListScreen: React.FC = () => {
         keyExtractor={(item: any) => getAppId(item)}
         renderItem={renderApplicationCard}
         numColumns={columns}
-        contentContainerStyle={[
-          styles.listContent,
-          isWide && { paddingHorizontal: sidePadding + 16 },
-        ]}
+        contentContainerStyle={[styles.listContent, widePadding]}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
           <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} colors={[theme.colors.primary]} tintColor={theme.colors.primary} />
@@ -341,9 +341,15 @@ const ApplicationsListScreen: React.FC = () => {
         <Modal
           visible={filterVisible}
           onDismiss={() => setFilterVisible(false)}
-          contentContainerStyle={[styles.filterModal, { backgroundColor: theme.colors.surface }]}
+          contentContainerStyle={[
+            styles.filterModal,
+            {
+              backgroundColor: t.color.surface.raised,
+              borderColor: t.color.border.subtle,
+            },
+          ]}
         >
-          <Text style={{ fontSize: 17, fontWeight: '700', color: theme.colors.onSurface, marginBottom: 16 }}>
+          <Text style={[styles.modalTitle, { color: t.color.text.primary }]}>
             Filter by Status
           </Text>
           <RadioButton.Group
@@ -359,7 +365,7 @@ const ApplicationsListScreen: React.FC = () => {
               />
             ))}
           </RadioButton.Group>
-          <Button mode="text" onPress={() => setFilterVisible(false)} style={{ marginTop: 8 }}>
+          <Button mode="text" onPress={() => setFilterVisible(false)} style={styles.modalCancel}>
             Cancel
           </Button>
         </Modal>
@@ -369,65 +375,156 @@ const ApplicationsListScreen: React.FC = () => {
 };
 
 // --- Styles ---
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  card: {
+    marginBottom: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    position: 'absolute',
+    left: 0,
+    top: spacing.md,
+    bottom: spacing.md,
+    width: 3,
+    borderRadius: 1.5,
+  },
+  cardBody: {
+    padding: spacing.lg,
+    paddingLeft: 18,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardHeaderText: {
+    flex: 1,
+  },
+  appName: typeScale.subheading,
+  appDomain: { ...typeScale.caption, marginTop: 2 },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radii.pill,
+  },
+  statusText: { ...typeScale.caption, fontWeight: '700' },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.md,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+  },
+  tagText: { ...typeScale.caption, fontWeight: '500' },
+  gridCell: {
+    flex: 1,
+    paddingHorizontal: spacing.xs,
+  },
+  topBar: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
+  },
+  sectionAccent: {
+    width: 3,
+    height: 18,
+    borderRadius: 1.5,
+    marginRight: 10,
+  },
+  screenTitle: { ...typeScale.title, fontSize: 20, flex: 1 },
+  countBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  countBadgeText: { ...typeScale.label, fontWeight: '700' },
+  searchInput: {
+    ...typeScale.body,
+    minHeight: 44,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
+    gap: spacing.sm,
+  },
+  spacer: {
+    flex: 1,
+  },
+  resultCount: { ...typeScale.caption, fontWeight: '500' },
+  listContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxxl,
+    paddingTop: spacing.xs,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 80,
+    paddingHorizontal: spacing.xxxl,
+  },
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: radii.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  emptyTitle: { ...typeScale.heading, marginBottom: 6 },
+  emptyBody: { ...typeScale.bodySmall, textAlign: 'center' },
+  filterModal: {
+    margin: spacing.xxl,
+    padding: spacing.xxl,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+  },
+  modalTitle: { ...typeScale.heading, marginBottom: spacing.lg },
+  modalCancel: {
+    marginTop: spacing.sm,
+  },
+  radioItem: {
+    paddingVertical: 2,
+  },
+});
+
 const createStyles = (theme: MD3Theme) =>
   StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    topBar: {
-      paddingHorizontal: 16,
-      paddingBottom: 4,
-    },
-    sectionAccent: {
-      width: 3,
-      height: 18,
-      borderRadius: 1.5,
-      backgroundColor: theme.colors.primary,
-      marginRight: 10,
-    },
     searchBar: {
       elevation: 0,
-      backgroundColor: theme.colors.surfaceVariant,
-      borderRadius: 16,
+      borderRadius: radii.lg,
       height: 44,
     },
-    searchInput: {
-      fontSize: 14,
-      minHeight: 44,
-    },
-    filterRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      flexWrap: 'wrap',
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      gap: 8,
-    },
     filterChip: {
-      borderRadius: 12,
+      borderRadius: radii.md,
       borderColor: theme.colors.outline,
-    },
-    listContent: {
-      paddingHorizontal: 16,
-      paddingBottom: 32,
-      paddingTop: 4,
-    },
-    emptyState: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 80,
-      paddingHorizontal: 32,
-    },
-    filterModal: {
-      margin: 24,
-      padding: 24,
-      borderRadius: 24,
-      borderWidth: 1,
-      borderColor: theme.colors.outlineVariant,
-    },
-    radioItem: {
-      paddingVertical: 2,
     },
   });
 

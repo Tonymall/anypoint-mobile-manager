@@ -31,9 +31,19 @@ export interface Incident {
   routeParams?: Record<string, string>;
 }
 
-/** Application statuses that mean "this is not serving traffic". */
-const DOWN_STATUSES = new Set(['FAILED', 'UNDEPLOYED', 'DEPLOY_FAILED']);
-const STOPPED_STATUSES = new Set(['STOPPED', 'UNDEPLOYING']);
+/** A deploy that actually broke — urgent regardless of age. */
+const FAILED_STATUSES = new Set(['FAILED', 'DEPLOY_FAILED']);
+/**
+ * Deliberate states. An app someone undeployed or stopped is only news while
+ * it is fresh: after a while it is inventory, not an incident. Reporting a
+ * week-old undeployment as critical is what trains people to ignore the feed.
+ */
+const IDLE_STATUSES = new Set(['UNDEPLOYED', 'UNDEPLOYING', 'STOPPED']);
+
+/** Within this window a deliberate stop/undeploy is still worth surfacing. */
+export const RECENT_CHANGE_MS = 24 * 60 * 60 * 1000;
+/** Past this, a deliberate state drops out of the feed entirely. */
+export const STALE_CHANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Error rate above which an entity is considered critical rather than degraded. */
 export const CRITICAL_ERROR_RATE = 0.1;
@@ -61,8 +71,26 @@ function parseTimestamp(value: unknown): number | undefined {
   return undefined;
 }
 
-/** Applications that are failed, undeployed or stopped. */
-export function incidentsFromApplications(applications: readonly any[]): Incident[] {
+function idleDetail(status: string): string {
+  if (status === 'STOPPED') return 'Application is stopped';
+  if (status === 'UNDEPLOYING') return 'Application is being undeployed';
+  return 'Application is undeployed';
+}
+
+/**
+ * Applications that are not serving traffic.
+ *
+ * A failed deploy is always critical. A deliberate stop or undeploy is a
+ * warning while it is recent, drops to info for the rest of the week, and
+ * then leaves the feed — the estate always has some parked applications and
+ * listing them forever would bury the things that actually need a human.
+ *
+ * `now` is injected so the ageing is testable.
+ */
+export function incidentsFromApplications(
+  applications: readonly any[],
+  now: number = Date.now(),
+): Incident[] {
   const incidents: Incident[] = [];
 
   for (const app of applications ?? []) {
@@ -70,29 +98,35 @@ export function incidentsFromApplications(applications: readonly any[]): Inciden
     const status = normalizeStatus(app.status);
     const name = getAppName(app);
     const domain = getAppId(app) || name;
+    const timestamp = parseTimestamp(app.lastUpdateTime ?? app.updatedAt);
 
-    if (DOWN_STATUSES.has(status)) {
+    if (FAILED_STATUSES.has(status)) {
       incidents.push({
         id: `runtime:${domain}:${status}`,
         severity: 'critical',
         source: 'runtime',
         title: name,
-        detail:
-          status === 'UNDEPLOYED'
-            ? 'Application is undeployed'
-            : 'Application failed to deploy',
-        timestamp: parseTimestamp(app.lastUpdateTime ?? app.updatedAt),
+        detail: 'Application failed to deploy',
+        timestamp,
         route: '/(main)/runtime/[domain]',
         routeParams: { domain },
       });
-    } else if (STOPPED_STATUSES.has(status)) {
+      continue;
+    }
+
+    if (IDLE_STATUSES.has(status)) {
+      // No timestamp means we cannot tell fresh from ancient. Treat it as
+      // recent so a genuine outage is never hidden by missing metadata.
+      const age = timestamp === undefined ? 0 : now - timestamp;
+      if (age > STALE_CHANGE_MS) continue;
+
       incidents.push({
         id: `runtime:${domain}:${status}`,
-        severity: 'warning',
+        severity: age <= RECENT_CHANGE_MS ? 'warning' : 'info',
         source: 'runtime',
         title: name,
-        detail: 'Application is stopped',
-        timestamp: parseTimestamp(app.lastUpdateTime ?? app.updatedAt),
+        detail: idleDetail(status),
+        timestamp,
         route: '/(main)/runtime/[domain]',
         routeParams: { domain },
       });
@@ -170,13 +204,16 @@ export function incidentsFromEstateHealth(
  * Merge every signal into one feed, worst first. Newer incidents win ties so a
  * fresh failure surfaces above an old one of the same severity.
  */
-export function deriveIncidents(input: {
-  applications?: readonly any[];
-  alerts?: readonly Alert[];
-  entities?: readonly InsightsEntityHealth[];
-}): Incident[] {
+export function deriveIncidents(
+  input: {
+    applications?: readonly any[];
+    alerts?: readonly Alert[];
+    entities?: readonly InsightsEntityHealth[];
+  },
+  now: number = Date.now(),
+): Incident[] {
   const incidents = [
-    ...incidentsFromApplications(input.applications ?? []),
+    ...incidentsFromApplications(input.applications ?? [], now),
     ...incidentsFromAlerts(input.alerts ?? []),
     ...incidentsFromEstateHealth(input.entities ?? []),
   ];

@@ -1,25 +1,22 @@
-// ============================================================
-// Logs Screen — Muleye-inspired card-based log viewer
+// ═══════════════════════════════════════════════════════════════════
+// Logs Screen — card-based log viewer
 //   1) App Logs   → CloudHub runtime logs (auto-polling live feed)
 //   2) Audit Logs → Anypoint Platform audit trail
 //
-// Visual design inspired by the Muleye App:
-//   - Status bar with total count + last updated time
-//   - Card-based log entries with level badge + timestamp
-//   - Auto-scroll toggle
-//   - Search field
-//   - Tap to see full log details in a bottom sheet
-// ============================================================
+// Chrome is deliberately thin. Everything above the first log line is
+// one header (back, title, live state, refresh) plus one control bar
+// (feed switch, search, filter button) — level, time range and the
+// live/auto-scroll switches live in a sheet behind the filter button.
+// Nothing was dropped; it is progressive disclosure, so the list gets
+// the viewport instead of six stacked rows of controls.
+// ═══════════════════════════════════════════════════════════════════
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
-  View, FlatList, StyleSheet, RefreshControl, Platform, ScrollView,
-  Modal, Pressable, useWindowDimensions,
+  View, FlatList, StyleSheet, RefreshControl, Platform,
+  Modal, Pressable, ScrollView, useWindowDimensions,
 } from 'react-native';
-import {
-  Appbar, Text, Chip, Searchbar, useTheme, ActivityIndicator, Switch,
-  Button, IconButton, type MD3Theme,
-} from 'react-native-paper';
+import { Text, ActivityIndicator } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -32,32 +29,33 @@ import type { AuditLogQueryParams } from '../../services/auditLogService';
 import LoadingState from '../../components/common/LoadingState';
 import logger from '../../utils/logger';
 import type { IconName } from '../../types/icons';
-import { LogMessage } from './logs';
-
-// ---------------------------------------------------------------------------
-// Date-range presets (ordered from smallest to largest)
-// Default: 1h (index 0) — show the latest logs first
-// ---------------------------------------------------------------------------
-
-interface DateRange { label: string; ms: number }
-
-const DATE_RANGES: DateRange[] = [
-  { label: '1h',  ms: 3_600_000 },
-  { label: '4h',  ms: 14_400_000 },
-  { label: '12h', ms: 43_200_000 },
-  { label: '24h', ms: 86_400_000 },
-  { label: '3d',  ms: 259_200_000 },
-  { label: '7d',  ms: 604_800_000 },
-];
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import { hapticSelection } from '../../utils/haptics';
+import {
+  LogMessage,
+  LogControlBar,
+  LogFilterSheet,
+  activeFilterCount,
+  DATE_RANGES,
+  DEFAULT_LEVEL,
+  DEFAULT_RANGE_INDEX,
+  auditActionRole,
+  priorityRole,
+  type LogLevel,
+  type LogTab,
+} from './logs';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const PRIORITY_COLORS: Record<string, string> = {
-  ERROR: '#F44336', FATAL: '#B71C1C', WARN: '#FF9800',
-  INFO: '#2196F3', DEBUG: '#9E9E9E', SYSTEM: '#7E57C2',
-};
 
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -109,16 +107,16 @@ function getEntryPriority(entry: any): string {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// App Log Card — Muleye-inspired card design
+// App Log Card
 // ═══════════════════════════════════════════════════════════════════
 
 const AppLogCard = React.memo<{
   entry: any;
-  theme: MD3Theme;
+  t: Tokens;
   onPress: (entry: any) => void;
-}>(({ entry, theme, onPress }) => {
+}>(({ entry, t, onPress }) => {
   const priority = getEntryPriority(entry);
-  const priColor = PRIORITY_COLORS[priority] ?? '#9E9E9E';
+  const role: StatusRole = priorityRole(t, priority);
 
   // Extract message — handle nested event wrapper from CH1
   const ev = entry.event;
@@ -136,67 +134,56 @@ const AppLogCard = React.memo<{
       accessibilityHint="Double tap to view full details"
     >
       <View
-        style={{
-          marginHorizontal: 12,
-          marginVertical: 4,
-          borderRadius: 16,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-        }}
+        style={[
+          styles.card,
+          {
+            backgroundColor: t.color.surface.raised,
+            borderColor: t.color.border.subtle,
+          },
+        ]}
       >
-        <View style={{ padding: 12 }}>
-          {/* Message — JSON/XML payloads render as a collapsible block */}
+        <View style={styles.cardBody}>
+          {/* Message — JSON/XML payloads render as collapsible blocks */}
           <LogMessage message={message} />
 
-          {/* Logger name (if present) */}
           {loggerName ? (
             <Text
-              style={{
-                fontSize: 10,
-                color: theme.colors.onSurfaceVariant,
-                marginBottom: 4,
-                fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-              }}
+              style={[
+                styles.mono,
+                { color: t.color.text.tertiary, fontFamily: t.monoFontFamily },
+              ]}
               numberOfLines={1}
             >
               {loggerName}
             </Text>
           ) : null}
 
-          {/* Bottom row: docId on left, timestamp + level on right */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <View style={{ flex: 1, marginRight: 8 }}>
+          <View style={styles.cardFooter}>
+            <View style={styles.cardFooterLeft}>
               {docId ? (
                 <Text
-                  style={{
-                    fontSize: 10,
-                    color: theme.colors.onSurfaceVariant,
-                    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-                  }}
+                  style={[
+                    styles.mono,
+                    { color: t.color.text.tertiary, fontFamily: t.monoFontFamily },
+                  ]}
                   numberOfLines={1}
                 >
                   Pos: {docId}
                 </Text>
               ) : null}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {/* Level badge */}
-              <View style={{
-                paddingHorizontal: 6,
-                paddingVertical: 2,
-                borderRadius: 4,
-                backgroundColor: priColor + '20',
-              }}>
-                <Text style={{ fontSize: 10, fontWeight: '700', color: priColor }}>{priority}</Text>
+            <View style={styles.cardFooterRight}>
+              <View style={[styles.levelBadge, { backgroundColor: role.surface }]}>
+                <Text style={[styles.levelBadgeText, { color: role.base }]}>
+                  {priority}
+                </Text>
               </View>
-              {/* Timestamp */}
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.primary }}>
+              <View style={styles.timestamp}>
+                <Text style={[typeScale.caption, { color: t.color.text.accent }]}>
                   {fmtTs(ts)}
                 </Text>
                 {ts ? (
-                  <Text style={{ fontSize: 9, color: theme.colors.onSurfaceVariant }}>
+                  <Text style={[typeScale.micro, { color: t.color.text.tertiary }]}>
                     {fmtDate(ts)}
                   </Text>
                 ) : null}
@@ -218,8 +205,8 @@ const LogDetailSheet: React.FC<{
   entry: any | null;
   visible: boolean;
   onDismiss: () => void;
-  theme: MD3Theme;
-}> = ({ entry, visible, onDismiss, theme }) => {
+  t: Tokens;
+}> = ({ entry, visible, onDismiss, t }) => {
   if (!entry) return null;
 
   const jsonStr = JSON.stringify(entry, null, 2);
@@ -231,43 +218,41 @@ const LogDetailSheet: React.FC<{
       transparent
       onRequestClose={onDismiss}
     >
-      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-        <Pressable style={{ flex: 1 }} onPress={onDismiss} accessibilityLabel="Close log details" accessibilityRole="button" />
-        <View style={{
-          backgroundColor: theme.colors.surface,
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
-          maxHeight: '60%',
-          borderTopWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-        }}>
-          {/* Handle + title */}
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingHorizontal: 16,
-            paddingTop: 12,
-            paddingBottom: 8,
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: theme.colors.outlineVariant,
-          }}>
-            <Text variant="titleMedium" style={{ fontWeight: '700', color: theme.colors.onSurface }}>
+      <View style={styles.sheetWrap}>
+        <Pressable
+          style={[styles.sheetBackdrop, { backgroundColor: withAlpha(t.color.shadow, 0.45) }]}
+          onPress={onDismiss}
+          accessibilityLabel="Close log details"
+          accessibilityRole="button"
+        />
+        <View
+          style={[
+            styles.sheet,
+            {
+              backgroundColor: t.color.surface.raised,
+              borderColor: t.color.border.subtle,
+            },
+          ]}
+        >
+          <View style={[styles.sheetHeader, { borderBottomColor: t.color.border.subtle }]}>
+            <Text style={[typeScale.heading, { color: t.color.text.primary }]}>
               Log Details
             </Text>
-            <IconButton icon="close" size={20} onPress={onDismiss} />
+            <Pressable
+              onPress={onDismiss}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Close log details"
+            >
+              <Icon name="close" size={20} color={t.color.text.tertiary} />
+            </Pressable>
           </View>
-          <ScrollView
-            contentContainerStyle={{ padding: 16 }}
-            showsVerticalScrollIndicator
-          >
+          <ScrollView contentContainerStyle={styles.sheetBody} showsVerticalScrollIndicator>
             <Text
-              style={{
-                fontSize: 12,
-                color: theme.colors.onSurface,
-                fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-                lineHeight: 20,
-              }}
+              style={[
+                styles.detailText,
+                { color: t.color.text.secondary, fontFamily: t.monoFontFamily },
+              ]}
               selectable
             >
               {jsonStr}
@@ -296,48 +281,51 @@ function getActionIcon(action: string): IconName {
   return 'information-outline';
 }
 
-function getActionColor(action: string): string {
-  const l = action.toLowerCase();
-  if (l.includes('delete') || l.includes('stop')) return '#F44336';
-  if (l.includes('create') || l.includes('deploy') || l.includes('start')) return '#4CAF50';
-  if (l.includes('update') || l.includes('modify') || l.includes('restart')) return '#FF9800';
-  return '#9E9E9E';
-}
-
-const AuditLogItem = React.memo<{ entry: AuditLogEntry; theme: MD3Theme }>(({ entry, theme }) => {
-  const color = getActionColor(entry.action);
+const AuditLogItem = React.memo<{ entry: AuditLogEntry; t: Tokens }>(({ entry, t }) => {
+  const role = auditActionRole(t, entry.action);
   const icon = getActionIcon(entry.action);
   return (
-    <View style={{
-      paddingHorizontal: 12, paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.outlineVariant,
-    }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-        <View style={{ width: 26, height: 26, borderRadius: 7, backgroundColor: color + '20', justifyContent: 'center', alignItems: 'center' }}>
-          <Icon name={icon} size={14} color={color} />
+    <View style={[styles.auditRow, { borderBottomColor: t.color.border.subtle }]}>
+      <View style={styles.auditTop}>
+        <View style={[styles.auditIcon, { backgroundColor: role.surface }]}>
+          <Icon name={icon} size={14} color={role.base} />
         </View>
-        <Text style={{ flex: 1, fontSize: 13, fontWeight: '600', color: theme.colors.onSurface }} numberOfLines={1}>
+        <Text
+          style={[styles.auditAction, { color: t.color.text.primary }]}
+          numberOfLines={1}
+        >
           {entry.action}
         </Text>
-        <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}>
+        <Text
+          style={[typeScale.micro, { color: t.color.text.tertiary, fontFamily: t.monoFontFamily }]}
+        >
           {fmtTs(entry.timestamp)}
         </Text>
       </View>
       {entry.objectType ? (
-        <View style={{ flexDirection: 'row', gap: 4, marginLeft: 34 }}>
-          <Text style={{ fontSize: 11, color: theme.colors.onSurfaceVariant }}>{entry.objectType}</Text>
-          {entry.objectId ? <Text style={{ fontSize: 11, color: theme.colors.onSurface, fontWeight: '500', flex: 1 }} numberOfLines={1}>· {entry.objectId}</Text> : null}
+        <View style={styles.auditMetaRow}>
+          <Text style={[typeScale.caption, { color: t.color.text.tertiary }]}>
+            {entry.objectType}
+          </Text>
+          {entry.objectId ? (
+            <Text
+              style={[styles.auditObjectId, { color: t.color.text.secondary }]}
+              numberOfLines={1}
+            >
+              · {entry.objectId}
+            </Text>
+          ) : null}
         </View>
       ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 34, gap: 3, marginTop: 2 }}>
-        <Icon name="account-outline" size={11} color={theme.colors.onSurfaceVariant} />
-        <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant }}>{entry.userName || 'System'}</Text>
+      <View style={styles.auditUserRow}>
+        <Icon name="account-outline" size={11} color={t.color.text.tertiary} />
+        <Text style={[typeScale.micro, { color: t.color.text.tertiary }]}>
+          {entry.userName || 'System'}
+        </Text>
         {entry.environmentName ? (
-          <>
-            <Text style={{ fontSize: 10, color: theme.colors.outline }}> · </Text>
-            <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant }}>{entry.environmentName}</Text>
-          </>
+          <Text style={[typeScale.micro, { color: t.color.text.tertiary }]}>
+            {` · ${entry.environmentName}`}
+          </Text>
         ) : null}
       </View>
     </View>
@@ -352,25 +340,16 @@ AuditLogItem.displayName = 'AuditLogItem';
 const CONTENT_MAX_WIDTH = 768;
 
 const LogsScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { domain } = useLocalSearchParams<{ domain: string }>();
   const { width: windowWidth } = useWindowDimensions();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
   const flatListRef = useRef<FlatList>(null);
 
   const isWide = windowWidth > CONTENT_MAX_WIDTH;
   const sidePadding = isWide ? Math.round((windowWidth - CONTENT_MAX_WIDTH) / 2) : 0;
-  const headerBackgroundColor = theme.dark ? '#08111F' : '#F6FAFF';
-  const headerBorderColor = theme.dark ? 'rgba(126, 164, 208, 0.18)' : 'rgba(49, 193, 255, 0.16)';
-  const headerIconColor = theme.dark ? '#E8F3FF' : theme.colors.onSurface;
-  const headerTitleColor = theme.dark ? '#F4F8FF' : theme.colors.onSurface;
-  const headerSubtitleColor = theme.dark ? 'rgba(232,243,255,0.72)' : theme.colors.onSurfaceVariant;
-  const headerBadgeBackground = theme.dark ? 'rgba(49,193,255,0.14)' : 'rgba(49,193,255,0.10)';
-  const headerBadgeText = theme.dark ? '#A9DEFF' : theme.colors.primary;
   const headerTopPadding = Math.max(insets.top, Platform.OS === 'android' ? 12 : 16);
-  const headerBottomPadding = Platform.OS === 'android' ? 10 : 12;
 
   // ── Debug: log domain on mount ──
   useEffect(() => {
@@ -378,13 +357,14 @@ const LogsScreen: React.FC = () => {
   }, [domain]);
 
   // State
-  const [tab, setTab] = useState<'app' | 'audit'>('app');
-  const [dateIdx, setDateIdx] = useState(0); // Default to 1h (latest)
+  const [tab, setTab] = useState<LogTab>('app');
+  const [dateIdx, setDateIdx] = useState(DEFAULT_RANGE_INDEX);
   const [searchQuery, setSearchQuery] = useState('');
-  const [levelFilter, setLevelFilter] = useState<string>('ALL'); // Log level filter
+  const [levelFilter, setLevelFilter] = useState<LogLevel>(DEFAULT_LEVEL);
   const [liveMode, setLiveMode] = useState(true); // Auto-polling toggle
   const [autoScroll, setAutoScroll] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [filtersVisible, setFiltersVisible] = useState(false);
 
   // Log detail bottom sheet
   const [detailEntry, setDetailEntry] = useState<any>(null);
@@ -472,7 +452,7 @@ const LogsScreen: React.FC = () => {
       const ev = l.event;
       const msg = String(l.message ?? ev?.message ?? l.msg ?? l.line ?? '');
       const pri = getEntryPriority(l);
-      const logger = String(l.loggerName ?? ev?.loggerName ?? l.logger ?? '');
+      const loggerLabel = String(l.loggerName ?? ev?.loggerName ?? l.logger ?? '');
       const thread = String(l.threadName ?? ev?.threadName ?? '');
 
       // Level filter
@@ -484,7 +464,7 @@ const LogsScreen: React.FC = () => {
         return (
           msg.toLowerCase().includes(q) ||
           pri.toLowerCase().includes(q) ||
-          logger.toLowerCase().includes(q) ||
+          loggerLabel.toLowerCase().includes(q) ||
           thread.toLowerCase().includes(q)
         );
       }
@@ -523,12 +503,12 @@ const LogsScreen: React.FC = () => {
 
   // Render items
   const renderAppLog = useCallback(({ item }: { item: any }) => (
-    <AppLogCard entry={item} theme={theme} onPress={handleLogPress} />
-  ), [theme, handleLogPress]);
+    <AppLogCard entry={item} t={t} onPress={handleLogPress} />
+  ), [t, handleLogPress]);
 
   const renderAuditLog = useCallback(({ item }: { item: AuditLogEntry }) => (
-    <AuditLogItem entry={item} theme={theme} />
-  ), [theme]);
+    <AuditLogItem entry={item} t={t} />
+  ), [t]);
 
   // Always append index to key to prevent duplicate key errors
   const keyExtractorApp = useCallback((item: any, idx: number) => {
@@ -561,11 +541,11 @@ const LogsScreen: React.FC = () => {
     const err = tab === 'app' ? appLogsError : auditError;
     return (
       <View style={styles.emptyContainer}>
-        <Icon name="text-box-search-outline" size={48} color={theme.colors.outlineVariant} />
-        <Text variant="titleMedium" style={styles.emptyTitle}>
+        <Icon name="text-box-search-outline" size={48} color={t.color.border.strong} />
+        <Text style={[styles.emptyTitle, { color: t.color.text.primary }]}>
           {tab === 'app' ? 'No application logs found' : 'No audit logs found'}
         </Text>
-        <Text variant="bodyMedium" style={styles.emptySubtitle}>
+        <Text style={[styles.emptySubtitle, { color: t.color.text.secondary }]}>
           {err
             ? `Error: ${(err as Error).message}`
             : tab === 'app'
@@ -573,234 +553,145 @@ const LogsScreen: React.FC = () => {
               : 'No audit events found for the selected time range.'}
         </Text>
         {tab === 'app' && !err && (
-          <View style={[styles.hintBox, { backgroundColor: theme.colors.surfaceVariant }]}>
-            <Icon name="information-outline" size={16} color={theme.colors.onSurfaceVariant} />
-            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, flex: 1, marginLeft: 8 }}>
+          <View style={[styles.hintBox, { backgroundColor: t.color.surface.sunken }]}>
+            <Icon name="information-outline" size={16} color={t.color.text.tertiary} />
+            <Text style={[styles.hintText, { color: t.color.text.secondary }]}>
               Log APIs are tried across CloudHub 1.0, CloudHub 2.0, and Runtime Fabric automatically. If logs appear empty, the app may not have generated any logs in the selected time range, or log access may require an Anypoint Monitoring subscription.
             </Text>
           </View>
         )}
       </View>
     );
-  }, [isLoading, tab, appLogsError, auditError, styles, theme]);
+  }, [isLoading, tab, appLogsError, auditError, t]);
+
+  const totalLogs = tab === 'app' ? (appLogs?.length ?? 0) : (auditResponse?.data?.length ?? 0);
+  const appCount = appLogs?.length ?? 0;
+  const auditCount = auditResponse?.data?.length ?? 0;
+  const activeCount = activeFilterCount(tab === 'app' ? levelFilter : DEFAULT_LEVEL, dateIdx);
+  const isLive = liveMode && areLogEndpointsAvailable();
+  const liveRole = isLive ? t.color.status.success : t.color.status.neutral;
+
+  const handleResetFilters = useCallback(() => {
+    setLevelFilter(DEFAULT_LEVEL);
+    setDateIdx(DEFAULT_RANGE_INDEX);
+  }, []);
 
   // Loading
   if (appLogsLoading && auditLoading) {
     return (
-      <View style={styles.container}>
-        <Appbar.Header><Appbar.BackAction onPress={() => router.back()} /><Appbar.Content title="Logs" /></Appbar.Header>
+      <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+        <View style={[styles.header, { paddingTop: headerTopPadding, borderBottomColor: t.color.border.subtle }]}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Icon name="arrow-left" size={22} color={t.color.text.primary} />
+          </Pressable>
+          <Text style={[typeScale.title, { color: t.color.text.primary, marginLeft: spacing.md }]}>
+            Logs
+          </Text>
+        </View>
         <LoadingState message="Loading logs..." />
       </View>
     );
   }
 
-  const totalLogs = tab === 'app' ? (appLogs?.length ?? 0) : (auditResponse?.data?.length ?? 0);
-  const _displayedLogs = tab === 'app' ? filteredAppLogs.length : filteredAuditLogs.length;
-
   return (
-    <View style={styles.container}>
-      {/* ── Header Banner (Muleye-style) ── */}
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+      {/* ── Header: back, title, live state, refresh ── */}
       <View
         style={[
-          styles.headerBanner,
+          styles.header,
           {
-            backgroundColor: headerBackgroundColor,
-            borderBottomColor: headerBorderColor,
             paddingTop: headerTopPadding,
-            paddingBottom: headerBottomPadding,
+            borderBottomColor: t.color.border.subtle,
+            backgroundColor: t.color.surface.canvas,
           },
-          isWide && { paddingHorizontal: sidePadding + 4 },
+          isWide && { paddingHorizontal: sidePadding + spacing.md },
         ]}
       >
-        <View style={styles.headerBannerTop}>
-          <IconButton
-            icon="arrow-left"
-            iconColor={headerIconColor}
-            size={22}
-            onPress={() => router.back()}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.headerBannerTitle, { color: headerTitleColor }]}>
-              Application Logs
-            </Text>
-            <Text style={[styles.headerBannerSubtitle, { color: headerSubtitleColor }]}>
-              {domain ?? 'Unknown'}
-            </Text>
-          </View>
-          {lastUpdated && (
-            <View style={[styles.updatedBadge, { backgroundColor: headerBadgeBackground }]}>
-              <Icon name="clock-outline" size={12} color={headerBadgeText} />
-              <Text style={[styles.updatedText, { color: headerBadgeText }]}>
-                Updated {fmtTimeOnly(lastUpdated.getTime())}
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* ── Controls row: Auto-scroll + Refresh + Count ── */}
-      <View style={[styles.controlsRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
-        {tab === 'app' && (
-          <View style={styles.toggleItem}>
-            <Icon name="arrow-up" size={12} color={autoScroll ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-            <Text variant="labelSmall" style={{ color: autoScroll ? theme.colors.primary : theme.colors.onSurfaceVariant, marginHorizontal: 4 }}>
-              Auto-scroll
-            </Text>
-            <Switch
-              value={autoScroll}
-              onValueChange={setAutoScroll}
-              style={{ transform: [{ scale: 0.6 }], marginHorizontal: -6 }}
-            />
-          </View>
-        )}
-        <View style={{ flex: 1 }} />
-        <Button
-          mode="outlined"
-          icon="refresh"
-          compact
-          onPress={handleRefresh}
-          loading={isRefetching}
-          style={{ borderRadius: 8, marginRight: 8 }}
-          labelStyle={{ fontSize: 12 }}
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
-          Refresh
-        </Button>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text variant="labelSmall" style={{ fontWeight: '700', color: theme.colors.onSurface }}>
-            {totalLogs}
+          <Icon name="arrow-left" size={22} color={t.color.text.primary} />
+        </Pressable>
+
+        <View style={styles.headerTitleWrap}>
+          <Text style={[typeScale.heading, { color: t.color.text.primary }]} numberOfLines={1}>
+            Logs
           </Text>
-          <Text style={{ fontSize: 9, color: theme.colors.onSurfaceVariant }}>Total</Text>
+          <Text style={[typeScale.micro, { color: t.color.text.tertiary }]} numberOfLines={1}>
+            {[
+              domain ?? 'Unknown',
+              `${totalLogs} entries`,
+              lastUpdated ? `updated ${fmtTimeOnly(lastUpdated.getTime())}` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
         </View>
-        {lastUpdated && (
-          <View style={{ alignItems: 'flex-end', marginLeft: 12 }}>
-            <Text variant="labelSmall" style={{ fontWeight: '700', color: theme.colors.onSurface }}>
-              {fmtTimeOnly(lastUpdated.getTime())}
-            </Text>
-            <Text style={{ fontSize: 9, color: theme.colors.onSurfaceVariant }}>Updated</Text>
-          </View>
-        )}
-      </View>
 
-      {/* ── Tab selector ── */}
-      <View style={[styles.tabRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
-        <Chip
-          icon="console-line"
-          selected={tab === 'app'}
-          onPress={() => setTab('app')}
-          mode={tab === 'app' ? 'flat' : 'outlined'}
-          style={[styles.tabChip, tab === 'app' && { backgroundColor: theme.colors.primary }]}
-          textStyle={tab === 'app' ? { color: '#fff' } : undefined}
-          selectedColor={tab === 'app' ? '#fff' : undefined}
-          accessibilityLabel={`App Logs tab${tab === 'app' ? ', selected' : ''}${appLogs && appLogs.length > 0 ? `, ${appLogs.length} entries` : ''}`}
-          accessibilityRole="tab"
-        >
-          App Logs {appLogs && appLogs.length > 0 ? `(${appLogs.length})` : ''}
-        </Chip>
-        <Chip
-          icon="shield-search"
-          selected={tab === 'audit'}
-          onPress={() => setTab('audit')}
-          mode={tab === 'audit' ? 'flat' : 'outlined'}
-          style={[styles.tabChip, tab === 'audit' && { backgroundColor: theme.colors.primary }]}
-          textStyle={tab === 'audit' ? { color: '#fff' } : undefined}
-          selectedColor={tab === 'audit' ? '#fff' : undefined}
-          accessibilityLabel={`Audit Logs tab${tab === 'audit' ? ', selected' : ''}${auditResponse?.data && auditResponse.data.length > 0 ? `, ${auditResponse.data.length} entries` : ''}`}
-          accessibilityRole="tab"
-        >
-          Audit Logs {auditResponse?.data && auditResponse.data.length > 0 ? `(${auditResponse.data.length})` : ''}
-        </Chip>
-
-        {/* Live indicator (app tab only) */}
-        {tab === 'app' && liveMode && areLogEndpointsAvailable() && (
-          <View style={styles.liveIndicator}>
-            <View style={[styles.liveDot, { backgroundColor: '#4CAF50' }]} />
-            <Text style={{ fontSize: 10, fontWeight: '700', color: '#4CAF50' }}>LIVE</Text>
-          </View>
-        )}
-        {tab === 'app' && (
+        {tab === 'app' ? (
           <Pressable
-            onPress={() => setLiveMode(!liveMode)}
-            accessibilityLabel={liveMode ? 'Pause live log updates' : 'Resume live log updates'}
+            onPress={() => {
+              hapticSelection();
+              setLiveMode((prev) => !prev);
+            }}
             accessibilityRole="button"
-            style={{ marginLeft: 'auto', paddingHorizontal: 8, paddingVertical: 4 }}
+            accessibilityState={{ selected: isLive }}
+            accessibilityLabel={liveMode ? 'Pause live log updates' : 'Resume live log updates'}
+            style={[styles.livePill, { backgroundColor: liveRole.surface }]}
           >
-            <Text style={{
-              fontSize: 11,
-              fontWeight: '600',
-              color: liveMode ? theme.colors.primary : theme.colors.onSurfaceVariant,
-            }}>
-              {liveMode ? 'Pause' : 'Resume'}
+            <View style={[styles.liveDot, { backgroundColor: liveRole.base }]} />
+            <Text style={[typeScale.micro, { color: liveRole.base }]}>
+              {isLive ? 'LIVE' : 'PAUSED'}
             </Text>
           </Pressable>
-        )}
+        ) : null}
+
+        <Pressable
+          onPress={handleRefresh}
+          hitSlop={10}
+          disabled={isRefetching}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh logs"
+          style={styles.headerAction}
+        >
+          {isRefetching ? (
+            <ActivityIndicator size={16} color={t.color.text.accent} />
+          ) : (
+            <Icon name="refresh" size={20} color={t.color.text.secondary} />
+          )}
+        </Pressable>
       </View>
 
-      {/* ── Search ── */}
-      <View style={[styles.searchWrap, isWide && { paddingHorizontal: sidePadding + 12 }]}>
-        <Searchbar
-          placeholder="Search logs..."
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          style={styles.searchBar}
-          inputStyle={styles.searchInput}
-          icon="magnify"
+      {/* ── One control bar: feed switch, search, filters ── */}
+      <View
+        style={[
+          styles.controlBarWrap,
+          { backgroundColor: t.color.surface.canvas, borderBottomColor: t.color.border.subtle },
+          isWide && { paddingHorizontal: sidePadding },
+        ]}
+      >
+        <LogControlBar
+          tab={tab}
+          onTabChange={setTab}
+          appCount={appCount}
+          auditCount={auditCount}
+          search={searchQuery}
+          onSearchChange={setSearchQuery}
+          level={levelFilter}
+          onClearLevel={() => setLevelFilter(DEFAULT_LEVEL)}
+          rangeIndex={dateIdx}
+          onClearRange={() => setDateIdx(DEFAULT_RANGE_INDEX)}
+          activeCount={activeCount}
+          onOpenFilters={() => setFiltersVisible(true)}
         />
-      </View>
-
-      {/* ── Level filter (app logs only) ── */}
-      {tab === 'app' && (
-        <View style={[styles.dateRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5, paddingRight: 12 }}>
-            {(['ALL', 'ERROR', 'WARN', 'INFO', 'DEBUG'] as const).map((level) => {
-              const sel = levelFilter === level;
-              const count = level === 'ALL' ? (appLogs?.length ?? 0) : (levelCounts[level] ?? 0);
-              const lvlColor = PRIORITY_COLORS[level] ?? theme.colors.primary;
-              return (
-                <Chip
-                  key={level}
-                  mode={sel ? 'flat' : 'outlined'}
-                  selected={sel}
-                  onPress={() => setLevelFilter(level)}
-                  compact
-                  style={[
-                    styles.dateChip,
-                    sel && { backgroundColor: level === 'ALL' ? theme.colors.primaryContainer : lvlColor + '25', borderColor: lvlColor + '50' },
-                  ]}
-                  textStyle={sel
-                    ? { color: level === 'ALL' ? theme.colors.onPrimaryContainer : lvlColor, fontWeight: '700' }
-                    : { color: theme.colors.onSurfaceVariant }}
-                >
-                  {level}{count > 0 ? ` (${count})` : ''}
-                </Chip>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
-
-      {/* ── Date range ── */}
-      <View style={[styles.dateRow, isWide && { paddingHorizontal: sidePadding + 12 }]}>
-        {tab === 'app' && isRefetching && (
-          <ActivityIndicator size={12} color={theme.colors.primary} style={{ marginRight: 6 }} />
-        )}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 5, paddingRight: 12 }}>
-          {DATE_RANGES.map((dr, i) => {
-            const sel = dateIdx === i;
-            return (
-              <Chip
-                key={dr.label}
-                mode={sel ? 'flat' : 'outlined'}
-                selected={sel}
-                onPress={() => setDateIdx(i)}
-                compact
-                style={[styles.dateChip, sel && { backgroundColor: theme.colors.primaryContainer }]}
-                textStyle={sel ? { color: theme.colors.onPrimaryContainer, fontWeight: '700' } : { color: theme.colors.onSurfaceVariant }}
-              >
-                {dr.label}
-              </Chip>
-            );
-          })}
-        </ScrollView>
       </View>
 
       {/* ── List ── */}
@@ -815,7 +706,7 @@ const LogsScreen: React.FC = () => {
             filteredAppLogs.length === 0 ? styles.emptyList : styles.listContent,
             isWide && { paddingHorizontal: sidePadding },
           ]}
-          refreshControl={<RefreshControl refreshing={isRefetching && !liveMode} onRefresh={handleRefresh} tintColor={theme.colors.primary} colors={[theme.colors.primary]} />}
+          refreshControl={<RefreshControl refreshing={isRefetching && !liveMode} onRefresh={handleRefresh} tintColor={t.color.brand.base} colors={[t.color.brand.base]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
           maxToRenderPerBatch={20}
@@ -830,123 +721,181 @@ const LogsScreen: React.FC = () => {
             filteredAuditLogs.length === 0 ? styles.emptyList : styles.listContent,
             isWide && { paddingHorizontal: sidePadding },
           ]}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={theme.colors.primary} colors={[theme.colors.primary]} />}
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={t.color.brand.base} colors={[t.color.brand.base]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
           maxToRenderPerBatch={20}
         />
       )}
 
+      {/* ── Filter sheet: level, time range, feed switches ── */}
+      <LogFilterSheet
+        visible={filtersVisible}
+        onDismiss={() => setFiltersVisible(false)}
+        showLevels={tab === 'app'}
+        level={levelFilter}
+        onLevelChange={setLevelFilter}
+        levelCounts={levelCounts}
+        totalCount={appCount}
+        rangeIndex={dateIdx}
+        onRangeChange={setDateIdx}
+        showFeedControls={tab === 'app'}
+        liveMode={liveMode}
+        onLiveModeChange={setLiveMode}
+        autoScroll={autoScroll}
+        onAutoScrollChange={setAutoScroll}
+        onReset={handleResetFilters}
+        canReset={activeCount > 0}
+      />
+
       {/* ── Log Detail Bottom Sheet ── */}
       <LogDetailSheet
         entry={detailEntry}
         visible={detailVisible}
         onDismiss={() => setDetailVisible(false)}
-        theme={theme}
+        t={t}
       />
     </View>
   );
 };
 
 // ---------------------------------------------------------------------------
-const makeStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: { flex: 1, backgroundColor: theme.colors.background },
 
-    // Header banner (Muleye-style blue banner)
-    headerBanner: {
-      paddingHorizontal: 4,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    headerBannerTop: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    headerBannerTitle: {
-      fontSize: 20,
-      fontWeight: '700',
-    },
-    headerBannerSubtitle: {
-      fontSize: 12,
-      marginTop: 1,
-    },
-    updatedBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: 'rgba(255,255,255,0.2)',
-      borderRadius: 12,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      marginRight: 8,
-    },
-    updatedText: {
-      fontSize: 10,
-      fontWeight: '600',
-    },
+const styles = StyleSheet.create({
+  container: { flex: 1 },
 
-    // Controls row
-    controlsRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: theme.colors.outlineVariant,
-    },
-    toggleItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
+  // Header
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitleWrap: { flex: 1 },
+  headerAction: {
+    width: 24,
+    alignItems: 'center',
+  },
+  livePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  liveDot: { width: 6, height: 6, borderRadius: radii.pill },
 
-    // Tabs
-    tabRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingTop: 8,
-      paddingBottom: 4,
-      gap: 8,
-    },
-    tabChip: { borderColor: theme.colors.outline },
-    liveIndicator: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      marginLeft: 8,
-    },
+  // Control bar
+  controlBarWrap: {
+    paddingTop: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
 
-    // Date row
-    dateRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 4,
-    },
-    dateChip: { borderColor: theme.colors.outline },
+  // App log card
+  card: {
+    marginHorizontal: spacing.md,
+    marginVertical: spacing.xs,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+  },
+  cardBody: { padding: spacing.md },
+  mono: { ...typeScale.micro, fontWeight: '400', marginBottom: spacing.xs },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  cardFooterLeft: { flex: 1, marginRight: spacing.sm },
+  cardFooterRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  levelBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: radii.sm,
+  },
+  levelBadgeText: { ...typeScale.micro, fontWeight: '700' },
+  timestamp: { alignItems: 'flex-end' },
 
-    // Search
-    searchWrap: { paddingHorizontal: 12, paddingVertical: 6 },
-    searchBar: { backgroundColor: theme.colors.surfaceVariant, borderRadius: 12, height: 40 },
-    searchInput: { fontSize: 14, minHeight: 40 },
+  // Audit row
+  auditRow: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  auditTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: 3,
+  },
+  auditIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  auditAction: { ...typeScale.bodySmall, fontWeight: '600', flex: 1 },
+  auditMetaRow: { flexDirection: 'row', gap: spacing.xs, marginLeft: 34 },
+  auditObjectId: { ...typeScale.caption, fontWeight: '500', flex: 1 },
+  auditUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 34,
+    gap: 3,
+    marginTop: 2,
+  },
 
-    // List
-    listContent: { paddingBottom: 24, paddingTop: 4 },
-    emptyList: { flexGrow: 1 },
-    loadingContainer: {
-      flex: 1,
-      justifyContent: 'center',
-      paddingTop: 72,
-    },
+  // Detail sheet
+  sheetWrap: { flex: 1, justifyContent: 'flex-end' },
+  sheetBackdrop: { ...StyleSheet.absoluteFill },
+  sheet: {
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    maxHeight: '60%',
+    borderTopWidth: 1,
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  sheetBody: { padding: spacing.lg },
+  detailText: { ...typeScale.caption, fontWeight: '400', lineHeight: 20 },
 
-    // Empty state
-    emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 32, paddingTop: 80 },
-    emptyTitle: { color: theme.colors.onSurface, marginTop: 12, marginBottom: 8 },
-    emptySubtitle: { color: theme.colors.onSurfaceVariant, textAlign: 'center', marginBottom: 16 },
-    hintBox: { flexDirection: 'row', alignItems: 'flex-start', padding: 12, borderRadius: 10, maxWidth: 340 },
+  // List
+  listContent: { paddingBottom: spacing.xxl, paddingTop: spacing.xs },
+  emptyList: { flexGrow: 1 },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingTop: 72,
+  },
 
-    // Live dot
-    liveDot: { width: 8, height: 8, borderRadius: 4 },
-  });
+  // Empty state
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 80,
+  },
+  emptyTitle: { ...typeScale.subheading, marginTop: spacing.md, marginBottom: spacing.sm },
+  emptySubtitle: { ...typeScale.bodySmall, textAlign: 'center', marginBottom: spacing.lg },
+  hintBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: spacing.md,
+    borderRadius: radii.md,
+    maxWidth: 340,
+  },
+  hintText: { ...typeScale.caption, fontWeight: '500', flex: 1, marginLeft: spacing.sm },
+});
 
 export default LogsScreen;
