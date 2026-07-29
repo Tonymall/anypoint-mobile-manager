@@ -8,6 +8,7 @@ import { View, FlatList, StyleSheet, RefreshControl } from 'react-native';
 import { Appbar, Text, Card, useTheme, ProgressBar, Icon, type MD3Theme } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useApplications } from '../../hooks/queries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { anypointColors } from '../../theme';
 import { getAppName, getAppId, getWorkerInfo } from '../../utils/appHelpers';
 import { getStatusColor } from '../../utils/statusHelpers';
@@ -52,8 +53,9 @@ const WorkersScreen: React.FC = () => {
     data: applications,
     isLoading,
     refetch,
-    isRefetching,
   } = useApplications();
+
+  const pullRefresh = usePullRefresh(refetch);
 
   const appsList = useMemo(() => applications ?? [], [applications]);
 
@@ -90,10 +92,6 @@ const WorkersScreen: React.FC = () => {
       totalAppsWithWorkers: appsWithWorkers,
     };
   }, [appsList]);
-
-  const handleRefresh = () => {
-    refetch();
-  };
 
   const renderSummaryCard = () => (
     <Card style={styles.summaryCard} mode="contained">
@@ -228,8 +226,8 @@ const WorkersScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={handleRefresh}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[anypointColors.primary]}
             tintColor={anypointColors.primary}
           />

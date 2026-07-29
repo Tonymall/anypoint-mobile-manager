@@ -1,4 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
+// ============================================================
+// Notifications — the Feed segment of the Alerts tab
+// ============================================================
+// Lifecycle events and triggered alerts for the active account,
+// newest first.
+//
+// Built on the design token layer: each notification action maps to a
+// semantic status role, so the icon well, its tint and the unread
+// border stay in step across both colour schemes.
+// ============================================================
+
+import React, { useCallback, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -6,10 +17,11 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { Text, useTheme, type MD3Theme } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useNotificationStore } from '../../stores/notificationStore';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import {
   clearAlertHistory,
   deleteAlertHistoryItem,
@@ -17,7 +29,16 @@ import {
   mapBackendAlertToNotification,
 } from '../../services/backendService';
 import logger from '../../utils/logger';
-import { anypointColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import EmptyState from '../../components/common/EmptyState';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import type { AppNotification, NotificationAction } from '../../types';
@@ -35,26 +56,36 @@ const ACTION_ICONS: Record<NotificationAction, IconName> = {
   info: 'information-outline',
 };
 
-const ACTION_COLORS: Record<NotificationAction, string> = {
-  start: anypointColors.success,
-  stop: anypointColors.warning,
-  restart: anypointColors.info,
-  status_change: anypointColors.info,
-  deploy: anypointColors.mulePurple,
-  undeploy: anypointColors.warning,
-  error: anypointColors.error,
-  alert: anypointColors.error,
-  info: anypointColors.primary,
+/** Notification action → semantic status role. */
+const getActionRole = (t: Tokens, action: NotificationAction): StatusRole => {
+  switch (action) {
+    case 'start':
+      return t.color.status.success;
+    case 'stop':
+    case 'undeploy':
+      return t.color.status.warning;
+    case 'restart':
+    case 'status_change':
+      return t.color.status.info;
+    case 'deploy':
+      return t.color.accent.tertiary;
+    case 'error':
+    case 'alert':
+      return t.color.status.danger;
+    case 'info':
+    default:
+      return t.color.accent.brand;
+  }
 };
 
 const NotificationCard: React.FC<{
   item: AppNotification;
   onPress: (id: string) => void;
   onDelete: (id: string) => void;
-  theme: MD3Theme;
-}> = React.memo(({ item, onPress, onDelete, theme }) => {
+  t: Tokens;
+}> = React.memo(({ item, onPress, onDelete, t }) => {
   const iconName = ACTION_ICONS[item.action] ?? 'information-outline';
-  const iconColor = ACTION_COLORS[item.action] ?? anypointColors.primary;
+  const role = getActionRole(t, item.action);
 
   return (
     <Pressable
@@ -62,53 +93,52 @@ const NotificationCard: React.FC<{
         hapticLight();
         onPress(item.id);
       }}
-      android_ripple={{ color: theme.colors.primaryContainer }}
+      android_ripple={{ color: t.color.brand.surface }}
       accessibilityLabel={`${item.read ? '' : 'Unread '}notification: ${item.title}. ${item.body}. ${formatRelativeTime(item.timestamp)}`}
       accessibilityRole="button"
       accessibilityHint="Double tap to mark as read"
       style={({ pressed }) => [
         styles.card,
         {
-          backgroundColor: item.read ? theme.colors.surface : theme.colors.surfaceVariant,
-          borderColor: item.read ? theme.colors.outlineVariant : iconColor + '30',
+          backgroundColor: item.read
+            ? t.color.surface.raised
+            : withAlpha(role.base, 'faint'),
+          borderColor: item.read ? t.color.border.subtle : role.border,
           opacity: pressed ? 0.85 : 1,
         },
       ]}
     >
       {!item.read && (
         <View
-          style={[styles.unreadDot, { backgroundColor: anypointColors.primary }]}
+          style={[styles.unreadDot, { backgroundColor: t.color.brand.base }]}
           accessibilityLabel="Unread"
         />
       )}
 
-      <View style={[styles.iconBox, { backgroundColor: iconColor + '15' }]}>
-        <Icon name={iconName} size={20} color={iconColor} />
+      <View style={[styles.iconBox, { backgroundColor: role.surface }]}>
+        <Icon name={iconName} size={20} color={role.base} />
       </View>
 
       <View style={styles.contentCol}>
         <View style={styles.titleRow}>
           <Text
-            variant="bodyMedium"
-            style={{
-              color: theme.colors.onSurface,
-              fontWeight: item.read ? '500' : '700',
-              flex: 1,
-            }}
+            style={[
+              styles.cardTitle,
+              {
+                color: t.color.text.primary,
+                fontWeight: item.read ? '500' : '700',
+              },
+            ]}
             numberOfLines={1}
           >
             {item.title}
           </Text>
-          <Text
-            variant="labelSmall"
-            style={{ color: theme.colors.onSurfaceVariant, marginLeft: 8 }}
-          >
+          <Text style={[styles.cardTime, { color: t.color.text.tertiary }]}>
             {formatRelativeTime(item.timestamp)}
           </Text>
         </View>
         <Text
-          variant="bodySmall"
-          style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}
+          style={[styles.cardBody, { color: t.color.text.secondary }]}
           numberOfLines={2}
         >
           {item.body}
@@ -125,45 +155,15 @@ const NotificationCard: React.FC<{
         accessibilityRole="button"
         style={styles.deleteBtn}
       >
-        <Icon
-          name="close"
-          size={16}
-          color={theme.colors.onSurfaceVariant}
-          style={{ opacity: 0.5 }}
-        />
+        <Icon name="close" size={16} color={t.color.text.tertiary} />
       </Pressable>
     </Pressable>
   );
 });
-
-const EmptyState: React.FC<{ theme: MD3Theme }> = ({ theme }) => (
-  <View style={styles.emptyContainer} accessibilityLabel="No notifications yet">
-    <View style={[styles.emptyIconBox, { backgroundColor: theme.colors.surfaceVariant }]}>
-      <Icon name="bell-off-outline" size={48} color={theme.colors.onSurfaceVariant} />
-    </View>
-    <Text
-      variant="titleMedium"
-      style={{ color: theme.colors.onSurface, marginTop: 16, fontWeight: '600' }}
-    >
-      No notifications yet
-    </Text>
-    <Text
-      variant="bodyMedium"
-      style={{
-        color: theme.colors.onSurfaceVariant,
-        marginTop: 6,
-        textAlign: 'center',
-        maxWidth: 260,
-      }}
-    >
-      Lifecycle events and alerts will appear here
-    </Text>
-  </View>
-);
+NotificationCard.displayName = 'NotificationCard';
 
 const NotificationsScreen: React.FC = () => {
-  const theme = useTheme();
-  const dynamicStyles = useMemo(() => createDynamicStyles(theme), [theme]);
+  const t = useTokens();
   const notifications = useNotificationStore((s) => s.notifications);
   const replaceNotificationsForActiveUser = useNotificationStore((s) => s.replaceNotificationsForActiveUser);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
@@ -171,7 +171,6 @@ const NotificationsScreen: React.FC = () => {
   const markAllAsRead = useNotificationStore((s) => s.markAllAsRead);
   const clearAll = useNotificationStore((s) => s.clearAll);
   const removeNotification = useNotificationStore((s) => s.removeNotification);
-  const [refreshing, setRefreshing] = useState(false);
   const [clearingAll, setClearingAll] = useState(false);
 
   const handleCardPress = useCallback((id: string) => {
@@ -197,20 +196,22 @@ const NotificationsScreen: React.FC = () => {
     });
   }, [clearAll]);
 
-  const handleRefresh = useCallback(() => {
-    setRefreshing(true);
-    void fetchAlertHistory(150)
-      .then((events) => {
-        replaceNotificationsForActiveUser(events.map(mapBackendAlertToNotification));
-        markAllAsRead();
-      })
-      .catch((error) => {
-        logger.warn('[NotificationsScreen] Failed to refresh alert history:', (error as Error)?.message);
-      })
-      .finally(() => {
-        setRefreshing(false);
-      });
-  }, [markAllAsRead, replaceNotificationsForActiveUser]);
+  // Returns the promise; usePullRefresh owns the spinner state so this
+  // screen uses the same mechanism as every other list.
+  const handleRefresh = useCallback(
+    () =>
+      fetchAlertHistory(150)
+        .then((events) => {
+          replaceNotificationsForActiveUser(events.map(mapBackendAlertToNotification));
+          markAllAsRead();
+        })
+        .catch((error) => {
+          logger.warn('[NotificationsScreen] Failed to refresh alert history:', (error as Error)?.message);
+        }),
+    [markAllAsRead, replaceNotificationsForActiveUser],
+  );
+
+  const pullRefresh = usePullRefresh(handleRefresh);
 
   const renderItem = useCallback(
     ({ item }: { item: AppNotification }) => (
@@ -220,25 +221,23 @@ const NotificationsScreen: React.FC = () => {
         onDelete={(id) => {
           void handleDelete(id);
         }}
-        theme={theme}
+        t={t}
       />
     ),
-    [handleCardPress, handleDelete, theme],
+    [handleCardPress, handleDelete, t],
   );
 
   return (
-    <View style={[dynamicStyles.container, { paddingTop: 0 }]}>
-      <View style={dynamicStyles.header}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+      <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text
-            variant="headlineSmall"
-            style={{ color: theme.colors.onSurface, fontWeight: '700', letterSpacing: -0.3 }}
-          >
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+          <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
             Notifications
           </Text>
           {unreadCount > 0 && (
-            <View style={[styles.badge, { backgroundColor: anypointColors.primary }]}>
-              <Text style={styles.badgeText}>
+            <View style={[styles.badge, { backgroundColor: t.color.brand.base }]}>
+              <Text style={[styles.badgeText, { color: t.color.text.inverse }]}>
                 {unreadCount > 99 ? '99+' : unreadCount}
               </Text>
             </View>
@@ -254,12 +253,13 @@ const NotificationsScreen: React.FC = () => {
             accessibilityLabel="Clear all notifications"
             accessibilityRole="button"
             style={({ pressed }) => [
-              dynamicStyles.clearBtn,
+              styles.clearBtn,
+              { backgroundColor: t.color.status.danger.surface },
               { opacity: pressed || clearingAll ? 0.7 : 1 },
             ]}
           >
-            <Icon name="notification-clear-all" size={16} color={anypointColors.error} />
-            <Text style={{ color: anypointColors.error, fontSize: 13, fontWeight: '600' }}>
+            <Icon name="notification-clear-all" size={16} color={t.color.status.danger.base} />
+            <Text style={[styles.clearBtnText, { color: t.color.status.danger.base }]}>
               {clearingAll ? 'Clearing...' : 'Clear All'}
             </Text>
           </Pressable>
@@ -275,48 +275,80 @@ const NotificationsScreen: React.FC = () => {
           notifications.length === 0 && styles.listContentEmpty,
         ]}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={<EmptyState theme={theme} />}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor={theme.colors.primary}
-            colors={[anypointColors.primary]}
+        ListEmptyComponent={
+          <EmptyState
+            icon="bell-off-outline"
+            title="No notifications yet"
+            description="App restarts, deployments and triggered alerts land here as they happen, so you can catch up on anything you missed."
           />
         }
-        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
+            tintColor={t.color.brand.base}
+            colors={[t.color.brand.base]}
+          />
+        }
+        ItemSeparatorComponent={Separator}
       />
     </View>
   );
 };
 
+const Separator = () => <View style={styles.separator} />;
+
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+  },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing.sm,
+    flex: 1,
   },
+  sectionAccent: {
+    width: 3,
+    height: 18,
+    borderRadius: 1.5,
+    marginRight: spacing.xs,
+  },
+  screenTitle: typeScale.title,
   badge: {
     minWidth: 22,
     height: 22,
-    borderRadius: 11,
+    borderRadius: radii.pill,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 6,
   },
-  badgeText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '700',
+  badgeText: { ...typeScale.caption, fontWeight: '700' },
+  clearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radii.sm,
   },
+  clearBtnText: { ...typeScale.bodySmall, fontWeight: '600' },
   card: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginHorizontal: 16,
+    marginHorizontal: spacing.lg,
     padding: 14,
-    borderRadius: 16,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    gap: 12,
+    gap: spacing.md,
     position: 'relative',
   },
   unreadDot: {
@@ -325,12 +357,12 @@ const styles = StyleSheet.create({
     left: 6,
     width: 6,
     height: 6,
-    borderRadius: 3,
+    borderRadius: radii.pill,
   },
   iconBox: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: radii.md,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -341,57 +373,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing.sm,
   },
+  cardTitle: { ...typeScale.body, flex: 1 },
+  cardTime: typeScale.caption,
+  cardBody: { ...typeScale.bodySmall, marginTop: 2 },
   deleteBtn: {
-    padding: 4,
+    padding: spacing.xs,
     marginTop: -2,
     marginRight: -4,
   },
+  separator: {
+    height: spacing.sm,
+  },
   listContent: {
-    paddingTop: 4,
-    paddingBottom: 32,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.xxxl,
   },
   listContentEmpty: {
-    flex: 1,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 80,
-  },
-  emptyIconBox: {
-    width: 96,
-    height: 96,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexGrow: 1,
   },
 });
-
-const createDynamicStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    header: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingTop: 12,
-      paddingBottom: 12,
-    },
-    clearBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 10,
-      backgroundColor: anypointColors.error + '12',
-    },
-  });
 
 export default NotificationsScreen;

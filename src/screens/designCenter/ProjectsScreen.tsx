@@ -24,6 +24,7 @@ import {
 } from '../../theme';
 import { Skeleton } from '../../components/ui';
 import { useProjects } from '../../hooks/queries/useDesignCenterQueries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import ErrorState from '../../components/common/ErrorState';
@@ -237,8 +238,9 @@ const ProjectsScreen: React.FC = () => {
     isLoading,
     error,
     refetch,
-    isRefetching,
   } = useProjects();
+
+  const pullRefresh = usePullRefresh(refetch);
 
   const projects = useMemo(() => {
     if (Array.isArray(projectsData)) return projectsData;
@@ -287,8 +289,8 @@ const ProjectsScreen: React.FC = () => {
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[t.color.brand.base]}
             tintColor={t.color.brand.base}
           />

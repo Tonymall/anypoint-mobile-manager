@@ -1,6 +1,16 @@
+// ============================================================
+// LoadingState — spinner fallback
+// ============================================================
+// Prefer a Skeleton shaped like the incoming content; this remains for
+// the cases where nothing is known about what is arriving.
+// Built on the design token layer.
+// ============================================================
+
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Text, useTheme } from 'react-native-paper';
+import { ActivityIndicator, Text } from 'react-native-paper';
+
+import { spacing, typeScale, useTokens } from '../../theme';
 
 interface LoadingStateProps {
   message?: string;
@@ -13,26 +23,23 @@ const LoadingState: React.FC<LoadingStateProps> = ({
   fullScreen = true,
   size = 'large',
 }) => {
-  const theme = useTheme();
+  const t = useTokens();
 
   return (
     <View
       style={[
         styles.container,
         fullScreen && styles.fullScreen,
-        { backgroundColor: fullScreen ? theme.colors.background : 'transparent' },
+        { backgroundColor: fullScreen ? t.color.surface.canvas : 'transparent' },
       ]}
     >
       <ActivityIndicator
         animating
         size={size}
-        color={theme.colors.primary}
+        color={t.color.brand.base}
       />
       {message && (
-        <Text
-          variant="bodyMedium"
-          style={[styles.message, { color: theme.colors.onSurfaceVariant }]}
-        >
+        <Text style={[styles.message, { color: t.color.text.secondary }]}>
           {message}
         </Text>
       )}
@@ -44,13 +51,14 @@ const styles = StyleSheet.create({
   container: {
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: spacing.xxl,
   },
   fullScreen: {
     flex: 1,
   },
   message: {
-    marginTop: 16,
+    ...typeScale.body,
+    marginTop: spacing.lg,
     textAlign: 'center',
   },
 });

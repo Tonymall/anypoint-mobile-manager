@@ -1,9 +1,13 @@
 // ============================================================
-// Create Alert Rule — Form Screen (2026 Design)
+// Create Alert Rule — Form Screen
 //
 // Full form for creating a new alert rule with fields for
 // name, type, severity, condition, recipients, and enabled
 // toggle. Validates required fields before submission.
+//
+// Built on the design token layer: severity chips resolve to semantic
+// status roles, and every surface, border and type size comes from the
+// tokens, so the form is defined for both colour schemes at once.
 // ============================================================
 
 import React, { useState, useMemo, useCallback } from 'react';
@@ -20,19 +24,25 @@ import {
   TextInput,
   Button,
   Switch,
-  useTheme,
   HelperText,
   Chip,
   Menu,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import type { AlertType, AlertSeverity, AlertRecipient } from '../../types';
-import { anypointColors, severityColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type Tokens,
+} from '../../theme';
 import { useCreateAlertRule } from '../../hooks/queries/useAlertQueries';
+import { getSeverityRole } from '../../utils/statusHelpers';
 import { hapticLight, hapticSuccess } from '../../utils/haptics';
 import type { IconName } from '../../types/icons';
 
@@ -48,10 +58,10 @@ const ALERT_TYPES: { label: string; value: AlertType; icon: string }[] = [
   { label: 'Custom', value: 'custom', icon: 'tune-variant' },
 ];
 
-const SEVERITY_OPTIONS: { label: string; value: AlertSeverity; color: string }[] = [
-  { label: 'Critical', value: 'CRITICAL', color: severityColors.CRITICAL },
-  { label: 'Warning', value: 'WARNING', color: severityColors.WARNING },
-  { label: 'Info', value: 'INFO', color: severityColors.INFO },
+const SEVERITY_OPTIONS: { label: string; value: AlertSeverity }[] = [
+  { label: 'Critical', value: 'CRITICAL' },
+  { label: 'Warning', value: 'WARNING' },
+  { label: 'Info', value: 'INFO' },
 ];
 
 const OPERATOR_OPTIONS: { label: string; value: string }[] = [
@@ -70,10 +80,10 @@ const RECIPIENT_TYPES: { label: string; value: AlertRecipient['type']; icon: Ico
 
 // --- Component ---
 const CreateAlertRuleScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const styles = useMemo(() => createStyles(t), [t]);
 
   const createMutation = useCreateAlertRule();
 
@@ -102,7 +112,7 @@ const CreateAlertRuleScreen: React.FC = () => {
 
   const isValid = name.trim() && threshold.trim() && !isNaN(Number(threshold));
 
-  const selectedTypeLabel = ALERT_TYPES.find((t) => t.value === type)?.label ?? type;
+  const selectedTypeLabel = ALERT_TYPES.find((at) => at.value === type)?.label ?? type;
   const selectedOperatorLabel = OPERATOR_OPTIONS.find((o) => o.value === operator)?.label ?? operator;
 
   const handleAddRecipient = useCallback(() => {
@@ -155,24 +165,24 @@ const CreateAlertRuleScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       {/* ── Header ── */}
-      <Appbar.Header style={{ backgroundColor: theme.colors.background }} elevated={false}>
+      <Appbar.Header style={styles.appbar} elevated={false}>
         <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Create Alert Rule" titleStyle={{ fontWeight: '600' }} />
+        <Appbar.Content title="Create Alert Rule" titleStyle={styles.appbarTitle} />
       </Appbar.Header>
 
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 32 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + spacing.xxxl }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           {/* ── Name ── */}
-          <SectionLabel theme={theme}>Rule Name</SectionLabel>
+          <Text style={styles.sectionLabel}>RULE NAME</Text>
           <TextInput
             value={name}
             onChangeText={setName}
@@ -187,7 +197,7 @@ const CreateAlertRuleScreen: React.FC = () => {
           )}
 
           {/* ── Type Picker ── */}
-          <SectionLabel theme={theme}>Alert Type</SectionLabel>
+          <Text style={styles.sectionLabel}>ALERT TYPE</Text>
           <Menu
             visible={typeMenuVisible}
             onDismiss={() => setTypeMenuVisible(false)}
@@ -197,21 +207,21 @@ const CreateAlertRuleScreen: React.FC = () => {
                 onPress={() => setTypeMenuVisible(true)}
                 style={styles.pickerButton}
                 contentStyle={styles.pickerButtonContent}
-                icon={ALERT_TYPES.find((t) => t.value === type)?.icon}
-                textColor={theme.colors.onSurface}
+                icon={ALERT_TYPES.find((at) => at.value === type)?.icon}
+                textColor={t.color.text.primary}
               >
                 {selectedTypeLabel}
               </Button>
             }
-            contentStyle={{ backgroundColor: theme.colors.surface }}
+            contentStyle={styles.menuContent}
           >
-            {ALERT_TYPES.map((t) => (
+            {ALERT_TYPES.map((at) => (
               <Menu.Item
-                key={t.value}
-                title={t.label}
-                leadingIcon={t.icon}
+                key={at.value}
+                title={at.label}
+                leadingIcon={at.icon}
                 onPress={() => {
-                  setType(t.value);
+                  setType(at.value);
                   setTypeMenuVisible(false);
                   hapticLight();
                 }}
@@ -220,10 +230,11 @@ const CreateAlertRuleScreen: React.FC = () => {
           </Menu>
 
           {/* ── Severity Picker ── */}
-          <SectionLabel theme={theme}>Severity</SectionLabel>
+          <Text style={styles.sectionLabel}>SEVERITY</Text>
           <View style={styles.chipRow}>
             {SEVERITY_OPTIONS.map((s) => {
               const isActive = severity === s.value;
+              const role = getSeverityRole(t, s.value);
               return (
                 <Chip
                   key={s.value}
@@ -234,13 +245,12 @@ const CreateAlertRuleScreen: React.FC = () => {
                   }}
                   style={[
                     styles.severityChip,
-                    { borderColor: theme.colors.outline },
                     isActive && {
-                      backgroundColor: s.color + '18',
-                      borderColor: s.color + '40',
+                      backgroundColor: role.surface,
+                      borderColor: role.border,
                     },
                   ]}
-                  selectedColor={isActive ? s.color : undefined}
+                  selectedColor={isActive ? role.base : undefined}
                   showSelectedOverlay={false}
                   compact
                 >
@@ -251,12 +261,10 @@ const CreateAlertRuleScreen: React.FC = () => {
           </View>
 
           {/* ── Condition Section ── */}
-          <View style={[styles.sectionCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-              <Icon name="tune-variant" size={18} color={anypointColors.primary} />
-              <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.onSurface, marginLeft: 8 }}>
-                Condition
-              </Text>
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionCardHeader}>
+              <Icon name="tune-variant" size={18} color={t.color.brand.base} />
+              <Text style={styles.sectionCardTitle}>Condition</Text>
             </View>
 
             <Text style={styles.fieldLabel}>Metric</Text>
@@ -279,12 +287,12 @@ const CreateAlertRuleScreen: React.FC = () => {
                   onPress={() => setOperatorMenuVisible(true)}
                   style={styles.pickerButton}
                   contentStyle={styles.pickerButtonContent}
-                  textColor={theme.colors.onSurface}
+                  textColor={t.color.text.primary}
                 >
                   {selectedOperatorLabel}
                 </Button>
               }
-              contentStyle={{ backgroundColor: theme.colors.surface }}
+              contentStyle={styles.menuContent}
             >
               {OPERATOR_OPTIONS.map((o) => (
                 <Menu.Item
@@ -314,8 +322,8 @@ const CreateAlertRuleScreen: React.FC = () => {
               <HelperText type="error" visible>Valid threshold is required</HelperText>
             )}
 
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <View style={{ flex: 1 }}>
+            <View style={styles.fieldPair}>
+              <View style={styles.flex}>
                 <Text style={styles.fieldLabel}>Period (min)</Text>
                 <TextInput
                   value={period}
@@ -327,7 +335,7 @@ const CreateAlertRuleScreen: React.FC = () => {
                   outlineStyle={styles.inputOutline}
                 />
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={styles.flex}>
                 <Text style={styles.fieldLabel}>Consecutive Points</Text>
                 <TextInput
                   value={consecutivePoints}
@@ -343,43 +351,35 @@ const CreateAlertRuleScreen: React.FC = () => {
           </View>
 
           {/* ── Recipients Section ── */}
-          <View style={[styles.sectionCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-              <Icon name="account-group-outline" size={18} color={anypointColors.primary} />
-              <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.onSurface, marginLeft: 8 }}>
-                Recipients
-              </Text>
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionCardHeader}>
+              <Icon name="account-group-outline" size={18} color={t.color.brand.base} />
+              <Text style={styles.sectionCardTitle}>Recipients</Text>
             </View>
 
             {/* Existing recipients */}
             {recipients.length > 0 && (
-              <View style={{ gap: 6, marginBottom: 12 }}>
+              <View style={styles.recipientList}>
                 {recipients.map((r, idx) => (
                   <View
                     key={`${r.type}-${r.value}-${idx}`}
-                    style={[styles.recipientRow, { backgroundColor: theme.colors.surfaceVariant + '60' }]}
+                    style={styles.recipientRow}
                   >
                     <Icon
-                      name={RECIPIENT_TYPES.find((t) => t.value === r.type)?.icon ?? 'email-outline'}
+                      name={RECIPIENT_TYPES.find((rt) => rt.value === r.type)?.icon ?? 'email-outline'}
                       size={16}
-                      color={theme.colors.onSurfaceVariant}
+                      color={t.color.text.secondary}
                     />
-                    <Text style={{ flex: 1, fontSize: 13, color: theme.colors.onSurface, marginLeft: 8 }}>
-                      {r.value}
-                    </Text>
-                    <Chip
-                      compact
-                      style={{ backgroundColor: theme.colors.surfaceVariant }}
-                      textStyle={{ fontSize: 10 }}
-                    >
+                    <Text style={styles.recipientValue}>{r.value}</Text>
+                    <Chip compact style={styles.recipientChip} textStyle={styles.recipientChipText}>
                       {r.type}
                     </Chip>
                     <Icon
                       name="close"
                       size={18}
-                      color={theme.colors.onSurfaceVariant}
+                      color={t.color.text.secondary}
                       onPress={() => handleRemoveRecipient(idx)}
-                      style={{ marginLeft: 4 }}
+                      style={styles.recipientRemove}
                     />
                   </View>
                 ))}
@@ -402,13 +402,12 @@ const CreateAlertRuleScreen: React.FC = () => {
                     }}
                     style={[
                       styles.severityChip,
-                      { borderColor: theme.colors.outline },
                       isActive && {
-                        backgroundColor: anypointColors.primary + '15',
-                        borderColor: anypointColors.primary + '30',
+                        backgroundColor: t.color.brand.surface,
+                        borderColor: withAlpha(t.color.brand.base, 'border'),
                       },
                     ]}
-                    selectedColor={isActive ? anypointColors.primary : undefined}
+                    selectedColor={isActive ? t.color.text.accent : undefined}
                     showSelectedOverlay={false}
                     compact
                   >
@@ -419,7 +418,7 @@ const CreateAlertRuleScreen: React.FC = () => {
             </View>
 
             <Text style={styles.fieldLabel}>Value</Text>
-            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start' }}>
+            <View style={styles.addRecipientRow}>
               <TextInput
                 value={newRecipientValue}
                 onChangeText={setNewRecipientValue}
@@ -431,13 +430,13 @@ const CreateAlertRuleScreen: React.FC = () => {
                     : 'Device token or user ID'
                 }
                 mode="outlined"
-                style={[styles.input, { flex: 1 }]}
+                style={[styles.input, styles.flex]}
                 outlineStyle={styles.inputOutline}
               />
               <Button
                 mode="contained-tonal"
                 onPress={handleAddRecipient}
-                style={{ borderRadius: 14, marginTop: 0 }}
+                style={styles.addRecipientButton}
                 disabled={!newRecipientValue.trim()}
                 compact
               >
@@ -447,12 +446,10 @@ const CreateAlertRuleScreen: React.FC = () => {
           </View>
 
           {/* ── Enabled Toggle ── */}
-          <View style={[styles.toggleRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.onSurface }}>
-                Enabled
-              </Text>
-              <Text style={{ fontSize: 12, color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+          <View style={styles.toggleRow}>
+            <View style={styles.flex}>
+              <Text style={styles.toggleTitle}>Enabled</Text>
+              <Text style={styles.toggleSubtitle}>
                 Rule will start evaluating immediately
               </Text>
             </View>
@@ -462,7 +459,7 @@ const CreateAlertRuleScreen: React.FC = () => {
                 setEnabled(val);
                 hapticLight();
               }}
-              color={anypointColors.primary}
+              color={t.color.brand.base}
             />
           </View>
 
@@ -471,17 +468,18 @@ const CreateAlertRuleScreen: React.FC = () => {
             mode="contained"
             onPress={handleSave}
             style={styles.saveButton}
-            contentStyle={{ paddingVertical: 6 }}
+            contentStyle={styles.saveButtonContent}
             loading={createMutation.isPending}
             disabled={createMutation.isPending}
             icon="check"
-            buttonColor={anypointColors.primary}
+            buttonColor={t.color.brand.base}
+            textColor={t.color.text.inverse}
           >
             Create Alert Rule
           </Button>
 
           {createMutation.isError && (
-            <HelperText type="error" visible style={{ textAlign: 'center' }}>
+            <HelperText type="error" visible style={styles.errorHelper}>
               {(createMutation.error as Error).message ?? 'Failed to create rule'}
             </HelperText>
           )}
@@ -491,91 +489,148 @@ const CreateAlertRuleScreen: React.FC = () => {
   );
 };
 
-// ── Section label helper ──
-const SectionLabel: React.FC<{ theme: MD3Theme; children: React.ReactNode }> = ({ theme, children }) => (
-  <Text
-    style={{
-      fontSize: 11,
-      fontWeight: '600',
-      color: theme.colors.onSurfaceVariant,
-      letterSpacing: 0.4,
-      textTransform: 'uppercase',
-      marginTop: 20,
-      marginBottom: 8,
-    }}
-  >
-    {children}
-  </Text>
-);
-
 // --- Styles ---
-const createStyles = (theme: MD3Theme) =>
+const createStyles = (t: Tokens) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.background,
+      backgroundColor: t.color.surface.canvas,
     },
+    flex: {
+      flex: 1,
+    },
+    appbar: {
+      backgroundColor: t.color.surface.canvas,
+    },
+    appbarTitle: typeScale.heading,
     scrollView: {
       flex: 1,
     },
     scrollContent: {
-      paddingHorizontal: 16,
+      paddingHorizontal: spacing.lg,
+    },
+    sectionLabel: {
+      ...typeScale.caption,
+      color: t.color.text.tertiary,
+      marginTop: spacing.xl,
+      marginBottom: spacing.sm,
     },
     input: {
-      backgroundColor: theme.colors.surfaceVariant,
-      fontSize: 14,
+      backgroundColor: t.color.surface.sunken,
+      ...typeScale.body,
     },
     inputOutline: {
-      borderRadius: 14,
-      borderColor: theme.colors.outlineVariant,
+      borderRadius: radii.md,
+      borderColor: t.color.border.default,
     },
     pickerButton: {
-      borderRadius: 14,
-      borderColor: theme.colors.outlineVariant,
+      borderRadius: radii.md,
+      borderColor: t.color.border.default,
       justifyContent: 'flex-start',
     },
     pickerButtonContent: {
       justifyContent: 'flex-start',
     },
+    menuContent: {
+      backgroundColor: t.color.surface.raised,
+    },
     chipRow: {
       flexDirection: 'row',
       flexWrap: 'wrap',
-      gap: 8,
+      gap: spacing.sm,
     },
     severityChip: {
-      borderRadius: 12,
+      borderRadius: radii.md,
+      borderColor: t.color.border.default,
     },
     sectionCard: {
-      borderRadius: 18,
+      borderRadius: radii.xl,
       borderWidth: 1,
-      padding: 16,
-      marginTop: 20,
+      borderColor: t.color.border.subtle,
+      backgroundColor: t.color.surface.raised,
+      padding: spacing.lg,
+      marginTop: spacing.xl,
+    },
+    sectionCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginBottom: spacing.lg,
+    },
+    sectionCardTitle: {
+      ...typeScale.subheading,
+      color: t.color.text.primary,
     },
     fieldLabel: {
-      fontSize: 12,
-      fontWeight: '500',
-      color: theme.colors.onSurfaceVariant,
-      marginTop: 12,
+      ...typeScale.label,
+      color: t.color.text.secondary,
+      marginTop: spacing.md,
       marginBottom: 6,
+    },
+    fieldPair: {
+      flexDirection: 'row',
+      gap: spacing.md,
+    },
+    recipientList: {
+      gap: 6,
+      marginBottom: spacing.md,
     },
     recipientRow: {
       flexDirection: 'row',
       alignItems: 'center',
+      gap: spacing.sm,
       padding: 10,
-      borderRadius: 12,
+      borderRadius: radii.md,
+      backgroundColor: t.color.surface.sunken,
+    },
+    recipientValue: {
+      ...typeScale.bodySmall,
+      color: t.color.text.primary,
+      flex: 1,
+    },
+    recipientChip: {
+      backgroundColor: t.color.surface.raised,
+    },
+    recipientChipText: typeScale.micro,
+    recipientRemove: {
+      marginLeft: spacing.xs,
+    },
+    addRecipientRow: {
+      flexDirection: 'row',
+      gap: spacing.sm,
+      alignItems: 'flex-start',
+    },
+    addRecipientButton: {
+      borderRadius: radii.md,
     },
     toggleRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      padding: 16,
-      borderRadius: 18,
+      padding: spacing.lg,
+      borderRadius: radii.xl,
       borderWidth: 1,
-      marginTop: 20,
+      borderColor: t.color.border.subtle,
+      backgroundColor: t.color.surface.raised,
+      marginTop: spacing.xl,
+    },
+    toggleTitle: {
+      ...typeScale.subheading,
+      color: t.color.text.primary,
+    },
+    toggleSubtitle: {
+      ...typeScale.label,
+      color: t.color.text.tertiary,
+      marginTop: 2,
     },
     saveButton: {
-      borderRadius: 16,
-      marginTop: 24,
-      paddingVertical: 2,
+      borderRadius: radii.lg,
+      marginTop: spacing.xxl,
+    },
+    saveButtonContent: {
+      paddingVertical: 6,
+    },
+    errorHelper: {
+      textAlign: 'center',
     },
   });
 

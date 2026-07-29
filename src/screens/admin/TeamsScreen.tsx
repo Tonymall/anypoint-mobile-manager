@@ -32,6 +32,7 @@ import {
   useTeams,
   useCreateTeam,
 } from '../../hooks/queries/useAccessManagementQueries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 
@@ -148,7 +149,8 @@ const TeamsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
-  const { data: teams, isLoading, error, refetch, isRefetching } = useTeams();
+  const { data: teams, isLoading, error, refetch } = useTeams();
+  const pullRefresh = usePullRefresh(refetch);
   const createTeam = useCreateTeam();
 
   const [dialogVisible, setDialogVisible] = useState(false);
@@ -238,8 +240,8 @@ const TeamsScreen: React.FC = () => {
         ListEmptyComponent={renderEmpty}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[theme.colors.primary]}
             tintColor={theme.colors.primary}
           />

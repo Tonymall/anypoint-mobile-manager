@@ -3,9 +3,13 @@
 //
 // 2x2 grid of summary cards for Servers, Clusters, Server
 // Groups, and RTF Deployments with counts and navigation.
+//
+// Built on the design token layer: each card names an accent role
+// rather than a colour, and the counts arrive behind a Skeleton the
+// size of the number, so nothing reflows when the data lands.
 // ============================================================
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -15,13 +19,20 @@ import {
 } from 'react-native';
 import {
   Text,
-  useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useIsFocused } from 'expo-router';
 
-import { anypointColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import { Skeleton } from '../../components/ui';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import {
   useServers,
   useServerGroups,
@@ -29,89 +40,83 @@ import {
   useRTFDeployments,
 } from '../../hooks/queries/useInfrastructureQueries';
 import { hapticLight } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 import type { IconName } from '../../types/icons';
 
 // --- Summary Card ---
 const SummaryCard = React.memo<{
   icon: IconName;
-  iconColor: string;
+  role: StatusRole;
   title: string;
   count: number;
   subtitle: string;
   onPress?: () => void;
-  theme: MD3Theme;
+  t: Tokens;
+  isLoading?: boolean;
   hasError?: boolean;
   disabled?: boolean;
-}>(({ icon, iconColor, title, count, subtitle, onPress, theme, hasError, disabled }) => {
-  const isInteractive = !hasError && !disabled && !!onPress;
+}>(({ icon, role, title, count, subtitle, onPress, t, isLoading, hasError, disabled }) => {
+  const isInteractive = !hasError && !disabled && !isLoading && !!onPress;
   const dimmed = hasError || disabled;
+  const activeRole = hasError ? t.color.status.danger : role;
 
   const cardContent = (
     <>
-      {/* Icon circle */}
-      <View
-        style={{
-          width: 44,
-          height: 44,
-          borderRadius: 14,
-          backgroundColor: (hasError ? anypointColors.error : iconColor) + '14',
-          justifyContent: 'center',
-          alignItems: 'center',
-          marginBottom: 14,
-        }}
-      >
-        <Icon name={hasError ? 'alert-circle-outline' : icon} size={22} color={hasError ? anypointColors.error : iconColor} />
+      {/* Icon well */}
+      <View style={[styles.iconWell, { backgroundColor: activeRole.surface }]}>
+        <Icon
+          name={hasError ? 'alert-circle-outline' : icon}
+          size={22}
+          color={activeRole.base}
+        />
       </View>
 
       {/* Title */}
-      <Text
-        style={{
-          fontSize: 12,
-          fontWeight: '600',
-          color: theme.colors.onSurfaceVariant,
-          letterSpacing: 0.3,
-          marginBottom: 4,
-        }}
-      >
+      <Text style={[styles.cardTitle, { color: t.color.text.secondary }]}>
         {title}
       </Text>
 
-      {/* Count */}
-      <Text
-        style={{
-          fontSize: 28,
-          fontWeight: '700',
-          color: hasError ? anypointColors.error : theme.colors.onSurface,
-          letterSpacing: -0.5,
-          marginBottom: 8,
-        }}
-      >
-        {hasError ? '—' : count}
-      </Text>
+      {/* Count — a Skeleton the size of the number while it loads */}
+      {isLoading ? (
+        <View style={styles.countSkeleton}>
+          <Skeleton width={44} height={28} />
+        </View>
+      ) : (
+        <Text
+          style={[
+            styles.count,
+            { color: hasError ? activeRole.base : t.color.text.primary },
+          ]}
+        >
+          {hasError ? '—' : count}
+        </Text>
+      )}
 
       {/* Subtitle / CTA */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Text style={{ fontSize: 12, fontWeight: '600', color: hasError ? anypointColors.error : disabled ? theme.colors.onSurfaceVariant : iconColor }}>
+      <View style={styles.cardFooter}>
+        <Text
+          style={[
+            styles.cardSubtitle,
+            { color: disabled && !hasError ? t.color.text.tertiary : activeRole.base },
+          ]}
+        >
           {hasError ? 'Failed to load' : subtitle}
         </Text>
-        {isInteractive && <Icon name="chevron-right" size={14} color={iconColor} />}
+        {isInteractive && (
+          <Icon name="chevron-right" size={14} color={activeRole.base} />
+        )}
       </View>
     </>
   );
 
-  const cardStyle = {
-    flex: 1,
-    minWidth: 140,
-    borderRadius: 18,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: hasError ? anypointColors.error + '40' : theme.colors.outlineVariant,
-    overflow: 'hidden' as const,
-    opacity: dimmed ? 0.6 : 1,
-    padding: 16,
-  };
+  const cardStyle = [
+    styles.card,
+    {
+      backgroundColor: t.color.surface.raised,
+      borderColor: hasError ? activeRole.border : t.color.border.subtle,
+      opacity: dimmed ? 0.6 : 1,
+    },
+  ];
 
   if (!isInteractive) {
     return (
@@ -129,7 +134,7 @@ const SummaryCard = React.memo<{
       onPress={() => { hapticLight(); onPress!(); }}
       accessibilityLabel={`${title}: ${count}. ${subtitle}`}
       accessibilityRole="button"
-      style={({ pressed }) => [cardStyle, pressed && { opacity: 0.92 }]}
+      style={({ pressed }) => [cardStyle, pressed && styles.cardPressed]}
     >
       {cardContent}
     </Pressable>
@@ -139,22 +144,14 @@ SummaryCard.displayName = 'SummaryCard';
 
 // --- Main Screen ---
 const InfrastructureHomeScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const isFocused = useIsFocused();
-  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const serversQuery = useServers(undefined, { enabled: isFocused });
   const serverGroupsQuery = useServerGroups({ enabled: isFocused });
   const clustersQuery = useClusters({ enabled: isFocused });
   const rtfQuery = useRTFDeployments(undefined, { enabled: isFocused });
-
-  // Show full-screen loading only when ALL queries are still loading (first mount)
-  const isFirstLoad =
-    serversQuery.isLoading ||
-    serverGroupsQuery.isLoading ||
-    clustersQuery.isLoading ||
-    rtfQuery.isLoading;
 
   // Show full-screen error only when ALL queries failed
   const allFailed =
@@ -163,18 +160,20 @@ const InfrastructureHomeScreen: React.FC = () => {
     clustersQuery.isError &&
     rtfQuery.isError;
 
-  const isRefetching =
-    serversQuery.isRefetching ||
-    serverGroupsQuery.isRefetching ||
-    clustersQuery.isRefetching ||
-    rtfQuery.isRefetching;
+  const refetchAll = useCallback(
+    () =>
+      Promise.allSettled([
+        serversQuery.refetch(),
+        serverGroupsQuery.refetch(),
+        clustersQuery.refetch(),
+        rtfQuery.refetch(),
+      ]),
+    [serversQuery, serverGroupsQuery, clustersQuery, rtfQuery],
+  );
 
-  const refetchAll = useCallback(() => {
-    serversQuery.refetch();
-    serverGroupsQuery.refetch();
-    clustersQuery.refetch();
-    rtfQuery.refetch();
-  }, [serversQuery, serverGroupsQuery, clustersQuery, rtfQuery]);
+  // The OR of four isRefetching flags meant any single poll opened the
+  // control. Only a pull should.
+  const pullRefresh = usePullRefresh(refetchAll);
 
   // getServers() and getRTFDeployments() return PaginatedResponse<T>; getClusters() and getServerGroups() return T[]
   const serverCount = ((serversQuery.data as any)?.data ?? []).length;
@@ -182,7 +181,6 @@ const InfrastructureHomeScreen: React.FC = () => {
   const serverGroupCount = Array.isArray(serverGroupsQuery.data) ? serverGroupsQuery.data.length : 0;
   const rtfCount = ((rtfQuery.data as any)?.data ?? []).length;
 
-  if (isFirstLoad) return <LoadingState message="Loading infrastructure..." />;
   if (allFailed) {
     return (
       <ErrorState
@@ -193,23 +191,23 @@ const InfrastructureHomeScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingTop: 12 }]}
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetchAll}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
+            colors={[t.color.brand.base]}
+            tintColor={t.color.brand.base}
           />
         }
       >
         {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 4 }}>
-          <View style={styles.sectionAccent} />
-          <Text style={{ fontSize: 20, fontWeight: '700', color: theme.colors.onSurface, flex: 1, letterSpacing: -0.3 }}>
+        <View style={styles.titleRow}>
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+          <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
             Infrastructure
           </Text>
         </View>
@@ -220,22 +218,24 @@ const InfrastructureHomeScreen: React.FC = () => {
           <View style={styles.gridRow}>
             <SummaryCard
               icon="server"
-              iconColor={anypointColors.primary}
+              role={t.color.accent.brand}
               title="Servers"
               count={serverCount}
               subtitle="View Servers"
               onPress={() => router.push('/(main)/runtime/servers' as any)}
-              theme={theme}
+              t={t}
+              isLoading={serversQuery.isLoading}
               hasError={serversQuery.isError}
             />
             <SummaryCard
               icon="lan"
-              iconColor={anypointColors.secondary}
+              role={t.color.accent.secondary}
               title="Clusters"
               count={clusterCount}
               subtitle="View Clusters"
               onPress={() => router.push('/(main)/runtime/clusters' as any)}
-              theme={theme}
+              t={t}
+              isLoading={clustersQuery.isLoading}
               hasError={clustersQuery.isError}
             />
           </View>
@@ -244,21 +244,23 @@ const InfrastructureHomeScreen: React.FC = () => {
           <View style={styles.gridRow}>
             <SummaryCard
               icon="server-network"
-              iconColor={anypointColors.accent}
+              role={t.color.status.success}
               title="Server Groups"
               count={serverGroupCount}
               subtitle="View Groups"
               onPress={() => router.push('/(main)/runtime/clusters' as any)}
-              theme={theme}
+              t={t}
+              isLoading={serverGroupsQuery.isLoading}
               hasError={serverGroupsQuery.isError}
             />
             <SummaryCard
               icon="kubernetes"
-              iconColor={anypointColors.mulePurple}
+              role={t.color.accent.tertiary}
               title="RTF Deployments"
               count={rtfCount}
               subtitle="Read-only"
-              theme={theme}
+              t={t}
+              isLoading={rtfQuery.isLoading}
               hasError={rtfQuery.isError}
               disabled={!rtfQuery.isError}
             />
@@ -266,19 +268,18 @@ const InfrastructureHomeScreen: React.FC = () => {
         </View>
 
         <View
-          style={{
-            marginTop: 16,
-            borderRadius: 14,
-            backgroundColor: theme.colors.surface,
-            borderWidth: 1,
-            borderColor: theme.colors.outlineVariant,
-            padding: 14,
-          }}
+          style={[
+            styles.noteCard,
+            {
+              backgroundColor: t.color.surface.raised,
+              borderColor: t.color.border.subtle,
+            },
+          ]}
         >
-          <Text style={{ color: theme.colors.onSurface, fontSize: 13, fontWeight: '600', marginBottom: 4 }}>
+          <Text style={[styles.noteTitle, { color: t.color.text.primary }]}>
             Infrastructure scope
           </Text>
-          <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 12, lineHeight: 18 }}>
+          <Text style={[styles.noteBody, { color: t.color.text.secondary }]}>
             Servers, server groups, and clusters are hybrid/agent-managed resources. If this environment is CloudHub-only, those sections may stay empty. CloudHub VPC, load balancer, and tunnel views now live in Administration under Cloud Network.
           </Text>
         </View>
@@ -288,30 +289,75 @@ const InfrastructureHomeScreen: React.FC = () => {
 };
 
 // --- Styles ---
-const createStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    scrollContent: {
-      paddingHorizontal: 16,
-      paddingBottom: 40,
-    },
-    sectionAccent: {
-      width: 3,
-      height: 18,
-      borderRadius: 1.5,
-      backgroundColor: theme.colors.primary,
-      marginRight: 10,
-    },
-    grid: {
-      gap: 12,
-    },
-    gridRow: {
-      flexDirection: 'row',
-      gap: 12,
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: 40,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xl,
+    paddingHorizontal: spacing.xs,
+  },
+  sectionAccent: {
+    width: 3,
+    height: 18,
+    borderRadius: 1.5,
+    marginRight: 10,
+  },
+  screenTitle: { ...typeScale.title, flex: 1 },
+  grid: {
+    gap: spacing.md,
+  },
+  gridRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  card: {
+    flex: 1,
+    minWidth: 140,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+    padding: spacing.lg,
+  },
+  cardPressed: {
+    opacity: 0.92,
+  },
+  iconWell: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  cardTitle: { ...typeScale.label, marginBottom: spacing.xs },
+  count: { ...typeScale.metric, marginBottom: spacing.sm },
+  countSkeleton: {
+    height: 32,
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  cardSubtitle: typeScale.label,
+  noteCard: {
+    marginTop: spacing.lg,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    padding: 14,
+  },
+  noteTitle: { ...typeScale.bodySmall, fontWeight: '700', marginBottom: spacing.xs },
+  noteBody: { ...typeScale.label, fontWeight: '400', lineHeight: 18 },
+});
 
 export default InfrastructureHomeScreen;

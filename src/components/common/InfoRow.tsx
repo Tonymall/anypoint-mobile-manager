@@ -1,7 +1,16 @@
+// ============================================================
+// InfoRow — label/value row inside a detail card
+// ============================================================
+// Built on the design token layer, so the divider, label and value
+// contrast are defined once for both colour schemes.
+// ============================================================
+
 import React from 'react';
 import { StyleSheet, View, Pressable } from 'react-native';
-import { Text, useTheme } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
+
+import { spacing, typeScale, useTokens, withAlpha } from '../../theme';
 import type { IconName } from '../../types/icons';
 
 interface InfoRowProps {
@@ -19,38 +28,30 @@ const InfoRow: React.FC<InfoRowProps> = ({
   icon,
   copyable = false,
 }) => {
-  const theme = useTheme();
+  const t = useTokens();
 
   const content = (
     <View
-      style={[
-        styles.container,
-        { borderBottomColor: theme.colors.outlineVariant },
-      ]}
+      style={[styles.container, { borderBottomColor: t.color.border.subtle }]}
     >
       <View style={styles.labelContainer}>
         {icon && (
           <Icon
             name={icon}
             size={18}
-            color={theme.colors.onSurfaceVariant}
+            color={t.color.text.tertiary}
             style={styles.icon}
           />
         )}
-        <Text
-          variant="bodyMedium"
-          style={[styles.label, { color: theme.colors.onSurfaceVariant }]}
-        >
+        <Text style={[styles.label, { color: t.color.text.secondary }]}>
           {label}
         </Text>
       </View>
       <View style={styles.valueContainer}>
         <Text
-          variant="bodyMedium"
           style={[
             styles.value,
-            { color: theme.colors.onSurface },
-            onPress && { color: theme.colors.primary },
+            { color: onPress ? t.color.text.accent : t.color.text.primary },
           ]}
           numberOfLines={2}
           selectable={!onPress}
@@ -61,7 +62,7 @@ const InfoRow: React.FC<InfoRowProps> = ({
           <Icon
             name={copyable ? 'content-copy' : 'chevron-right'}
             size={16}
-            color={theme.colors.onSurfaceVariant}
+            color={t.color.text.tertiary}
             style={styles.actionIcon}
           />
         )}
@@ -71,7 +72,10 @@ const InfoRow: React.FC<InfoRowProps> = ({
 
   if (onPress) {
     return (
-      <Pressable onPress={onPress} android_ripple={{ color: theme.colors.surfaceVariant }}>
+      <Pressable
+        onPress={onPress}
+        android_ripple={{ color: withAlpha(t.color.text.primary, 'faint') }}
+      >
         {content}
       </Pressable>
     );
@@ -85,8 +89,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
     minHeight: 48,
   },
@@ -94,14 +98,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    marginRight: 16,
+    marginRight: spacing.lg,
   },
   icon: {
-    marginRight: 8,
+    marginRight: spacing.sm,
   },
-  label: {
-    flexShrink: 1,
-  },
+  label: { ...typeScale.body, flexShrink: 1 },
   valueContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -109,11 +111,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   value: {
+    ...typeScale.body,
     textAlign: 'right',
     flexShrink: 1,
   },
   actionIcon: {
-    marginLeft: 4,
+    marginLeft: spacing.xs,
   },
 });
 

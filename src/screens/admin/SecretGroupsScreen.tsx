@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import ErrorState from '../../components/common/ErrorState';
 import LoadingState from '../../components/common/LoadingState';
 import { useSecretGroups } from '../../hooks/queries/useSecretManagerQueries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { anypointColors } from '../../theme';
 import { hapticLight } from '../../utils/haptics';
 import { formatRelativeTime } from '../../utils/statusHelpers';
@@ -81,7 +82,8 @@ const SecretGroupsScreen: React.FC = () => {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { data: groups, isLoading, error, refetch, isRefetching } = useSecretGroups();
+  const { data: groups, isLoading, error, refetch } = useSecretGroups();
+  const pullRefresh = usePullRefresh(refetch);
 
   const groupsList = useMemo(() => (groups as SecretGroup[]) ?? [], [groups]);
 
@@ -137,8 +139,8 @@ const SecretGroupsScreen: React.FC = () => {
         ListEmptyComponent={renderEmpty}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[theme.colors.primary]}
             tintColor={theme.colors.primary}
           />

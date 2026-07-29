@@ -28,6 +28,7 @@ import {
 import { Skeleton } from '../../components/ui';
 import { useExchangeSearch } from '../../hooks/queries/useExchangeQueries';
 import { useDebounce } from '../../hooks/useDebounce';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import ErrorState from '../../components/common/ErrorState';
@@ -294,8 +295,9 @@ const ExchangeSearchScreen: React.FC = () => {
     isLoading,
     error,
     refetch,
-    isRefetching,
   } = useExchangeSearch({ search: debouncedSearch || undefined, types: typeFilter !== 'all' ? [typeFilter] : undefined });
+
+  const pullRefresh = usePullRefresh(refetch);
 
   const assets = useMemo(() => assetsResponse?.data ?? [], [assetsResponse]);
 
@@ -400,8 +402,8 @@ const ExchangeSearchScreen: React.FC = () => {
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[t.color.brand.base]}
             tintColor={t.color.brand.base}
           />

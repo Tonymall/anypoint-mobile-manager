@@ -10,6 +10,7 @@ import { Appbar, Text, Card, Chip, useTheme } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useApplication, useAppMetrics, useDashboardStats } from '../../hooks/queries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { getAppName } from '../../utils/appHelpers';
 import { anypointColors } from '../../theme';
 import { getStatusColor, getStatusLabel } from '../../utils/statusHelpers';
@@ -54,7 +55,6 @@ const AppMonitoringDetailScreen: React.FC = () => {
     isLoading: appLoading,
     error: appError,
     refetch: refetchApp,
-    isRefetching: appRefetching,
   } = useApplication(domain as string);
 
   const interval = rangeHours <= 4 ? '1m' : rangeHours <= 24 ? '5m' : rangeHours <= 72 ? '15m' : '1h';
@@ -63,28 +63,29 @@ const AppMonitoringDetailScreen: React.FC = () => {
     data: cpuMetrics,
     isLoading: cpuLoading,
     refetch: refetchCpu,
-    isRefetching: cpuRefetching,
   } = useAppMetrics(domain as string, { metricName: 'cpu', startDate, endDate, interval });
 
   const {
     data: memoryMetrics,
     isLoading: memLoading,
     refetch: refetchMem,
-    isRefetching: memRefetching,
   } = useAppMetrics(domain as string, { metricName: 'memory', startDate, endDate, interval });
 
   const {
     data: dashStats,
     isLoading: dashStatsLoading,
     refetch: refetchDashStats,
-    isRefetching: dashStatsRefetching,
   } = useDashboardStats(domain as string, rangeHours * 60);
 
-  const isRefreshing = appRefetching || cpuRefetching || memRefetching || dashStatsRefetching;
+  // Returns the combined promise so the pull spinner clears only once all four
+  // queries have settled. allSettled, not all — one failure must not leave the
+  // control spinning.
+  const handleRefresh = useCallback(
+    () => Promise.allSettled([refetchApp(), refetchCpu(), refetchMem(), refetchDashStats()]),
+    [refetchApp, refetchCpu, refetchMem, refetchDashStats],
+  );
 
-  const handleRefresh = useCallback(() => {
-    refetchApp(); refetchCpu(); refetchMem(); refetchDashStats();
-  }, [refetchApp, refetchCpu, refetchMem, refetchDashStats]);
+  const pullRefresh = usePullRefresh(handleRefresh);
 
   // Derived metrics, chart series, and availability flags
   const metrics = useAppMonitoringMetrics({ app, cpuMetrics, memoryMetrics, dashStats });
@@ -196,8 +197,8 @@ const AppMonitoringDetailScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             tintColor={theme.colors.primary}
             colors={[theme.colors.primary]}
           />

@@ -30,6 +30,7 @@ import { statusColors, typeScale, useTokens, withAlpha, type Tokens } from '../.
 import { useApplications, useManagedAPIs } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { StatCard } from './home/StatCard';
 import IncidentFeed from './incidents/IncidentFeed';
 import { useIncidentFeed } from './incidents/useIncidentFeed';
@@ -172,7 +173,12 @@ const DashboardScreen: React.FC = () => {
     refetch: refetchIncidents,
   } = useIncidentFeed({ enabled: isFocused });
 
-  const handleRefresh = () => { refetchApps(); refetchApis(); refetchIncidents(); };
+  // Returns the combined promise so the pull spinner clears only once every
+  // query has settled. allSettled, not all — a single failure must not leave
+  // the control spinning.
+  const handleRefresh = () => Promise.allSettled([refetchApps(), refetchApis(), refetchIncidents()]);
+
+  const pullRefresh = usePullRefresh(handleRefresh);
 
   const handleIncidentPress = useCallback((incident: Incident) => {
     if (!incident.route) return;
@@ -217,7 +223,7 @@ const DashboardScreen: React.FC = () => {
         isWide && { paddingHorizontal: sidePadding },
       ]}
       showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={handleRefresh} />}
+      refreshControl={<RefreshControl refreshing={pullRefresh.refreshing} onRefresh={pullRefresh.onRefresh} />}
     >
       {/* ── Profile Header ── */}
       <View style={styles.headerSection}>

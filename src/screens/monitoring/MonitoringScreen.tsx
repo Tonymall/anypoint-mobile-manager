@@ -20,6 +20,7 @@ import { useRouter, useIsFocused } from 'expo-router';
 import { useQueries } from '@tanstack/react-query';
 
 import { useApplications } from '../../hooks/queries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import * as runtimeService from '../../services/runtimeService';
 import { isMonitoringUnavailable, resetSessionFlags } from '../../services/runtimeService';
 import { useAuthStore } from '../../stores/authStore';
@@ -57,17 +58,18 @@ const MonitoringScreen: React.FC = () => {
     isLoading: appsLoading,
     error: appsError,
     refetch: refetchApps,
-    isRefetching: appsRefetching,
   } = useApplications({ enabled: isFocused });
-
-  const isRefreshing = appsRefetching;
 
   const handleRefresh = useCallback(() => {
     // Reset monitoring discovery flags so it re-tests endpoints on refresh
     resetSessionFlags();
     setMonitoringDown(false);
-    refetchApps();
+    return refetchApps();
   }, [refetchApps]);
+
+  // A pull is the only thing that should show the control; the 120s poll
+  // was popping it open and shifting the list under the user's thumb.
+  const pullRefresh = usePullRefresh(handleRefresh);
 
   const appsList = useMemo(() => applications ?? [], [applications]);
 
@@ -311,8 +313,8 @@ const MonitoringScreen: React.FC = () => {
         ]}
         refreshControl={
           <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[t.color.brand.base]}
             tintColor={t.color.brand.base}
           />

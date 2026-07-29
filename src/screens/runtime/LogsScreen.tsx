@@ -22,6 +22,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuditLogs } from '../../hooks/queries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import * as runtimeService from '../../services/runtimeService';
 import { areLogEndpointsAvailable } from '../../services/runtimeService';
 import type { AuditLogEntry } from '../../types';
@@ -496,10 +497,17 @@ const LogsScreen: React.FC = () => {
 
   const isLoading = tab === 'app' ? appLogsLoading : auditLoading;
   const isRefetching = tab === 'app' ? appLogsRefetching : auditRefetching;
-  const handleRefresh = useCallback(() => {
-    refetchAppLogs();
-    refetchAudit();
-  }, [refetchAppLogs, refetchAudit]);
+  // Returns the combined promise so the pull spinner clears only once both
+  // feeds have settled. allSettled, not all — a failing feed must not leave
+  // the control spinning.
+  const handleRefresh = useCallback(
+    () => Promise.allSettled([refetchAppLogs(), refetchAudit()]),
+    [refetchAppLogs, refetchAudit],
+  );
+
+  // The RefreshControls follow the pull, never the 5s live-tail polling, so
+  // live mode can keep refetching without the control opening on its own.
+  const pullRefresh = usePullRefresh(handleRefresh);
 
   // Render items
   const renderAppLog = useCallback(({ item }: { item: any }) => (
@@ -706,7 +714,7 @@ const LogsScreen: React.FC = () => {
             filteredAppLogs.length === 0 ? styles.emptyList : styles.listContent,
             isWide && { paddingHorizontal: sidePadding },
           ]}
-          refreshControl={<RefreshControl refreshing={isRefetching && !liveMode} onRefresh={handleRefresh} tintColor={t.color.brand.base} colors={[t.color.brand.base]} />}
+          refreshControl={<RefreshControl refreshing={pullRefresh.refreshing} onRefresh={pullRefresh.onRefresh} tintColor={t.color.brand.base} colors={[t.color.brand.base]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
           maxToRenderPerBatch={20}
@@ -721,7 +729,7 @@ const LogsScreen: React.FC = () => {
             filteredAuditLogs.length === 0 ? styles.emptyList : styles.listContent,
             isWide && { paddingHorizontal: sidePadding },
           ]}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} tintColor={t.color.brand.base} colors={[t.color.brand.base]} />}
+          refreshControl={<RefreshControl refreshing={pullRefresh.refreshing} onRefresh={pullRefresh.onRefresh} tintColor={t.color.brand.base} colors={[t.color.brand.base]} />}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
           maxToRenderPerBatch={20}

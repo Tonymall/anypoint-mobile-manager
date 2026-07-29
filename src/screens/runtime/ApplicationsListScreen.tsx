@@ -43,6 +43,7 @@ import { useApplications } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { getStatusRole, getStatusLabel, formatRelativeTime } from '../../utils/statusHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { useRuntimeTransitionStore } from '../../stores/runtimeTransitionStore';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
@@ -173,7 +174,9 @@ const ApplicationsListScreen: React.FC = () => {
   const [filterVisible, setFilterVisible] = useState(false);
   const [sortOrder, setSortOrder] = useState<'default' | 'az' | 'za'>('default');
 
-  const { data: applications, isLoading, error, refetch, isRefetching } = useApplications({ enabled: isFocused });
+  const { data: applications, isLoading, error, refetch } = useApplications({ enabled: isFocused });
+  // Only a pull shows the spinner — the 30s background poll must stay invisible.
+  const pullRefresh = usePullRefresh(refetch);
 
   const appsList = useMemo(() => applications ?? [], [applications]);
 
@@ -327,7 +330,7 @@ const ApplicationsListScreen: React.FC = () => {
         contentContainerStyle={[styles.listContent, widePadding]}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} colors={[theme.colors.primary]} tintColor={theme.colors.primary} />
+          <RefreshControl {...pullRefresh} colors={[theme.colors.primary]} tintColor={theme.colors.primary} />
         }
         showsVerticalScrollIndicator={false}
         initialNumToRender={15}

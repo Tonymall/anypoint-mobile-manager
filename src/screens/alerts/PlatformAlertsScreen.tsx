@@ -22,7 +22,6 @@ import {
   Searchbar,
   Text,
   Chip,
-  useTheme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -38,6 +37,8 @@ import {
   type Tokens,
 } from '../../theme';
 import { Skeleton } from '../../components/ui';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
+import EmptyState from '../../components/common/EmptyState';
 import { usePlatformAlerts } from '../../hooks/queries/useAlertQueries';
 import { formatRelativeTime, getSeverityRole } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
@@ -212,7 +213,6 @@ const SKELETON_ROWS = [0, 1, 2, 3, 4];
 
 // --- Component ---
 const PlatformAlertsScreen: React.FC = () => {
-  const theme = useTheme();
   const t = useTokens();
   const router = useRouter();
   const isFocused = useIsFocused();
@@ -220,7 +220,9 @@ const PlatformAlertsScreen: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ALL');
 
-  const { data: alerts, isLoading, error, refetch, isRefetching } = usePlatformAlerts(undefined, { enabled: isFocused });
+  const { data: alerts, isLoading, error, refetch } = usePlatformAlerts(undefined, { enabled: isFocused });
+  // Only a pull shows the control; background refetches stay invisible.
+  const pullRefresh = usePullRefresh(refetch);
 
   const alertsList = useMemo(() => ((alerts as any)?.data ?? []) as Alert[], [alerts]);
 
@@ -259,23 +261,33 @@ const PlatformAlertsScreen: React.FC = () => {
     [t, router],
   );
 
+  // Two different situations, two different messages: a filter that
+  // excluded everything is offered a way out, an empty environment is
+  // told what would appear here.
+  const isFiltered = searchQuery !== '' || severityFilter !== 'ALL';
+
   const renderEmptyState = useCallback(
-    () => (
-      <View style={styles.emptyState}>
-        <View style={[styles.emptyIcon, { backgroundColor: t.color.surface.sunken }]}>
-          <Icon name="bell-off-outline" size={36} color={t.color.text.tertiary} />
-        </View>
-        <Text style={[styles.emptyTitle, { color: t.color.text.primary }]}>
-          No platform alerts
-        </Text>
-        <Text style={[styles.emptyBody, { color: t.color.text.secondary }]}>
-          {searchQuery || severityFilter !== 'ALL'
-            ? 'Try adjusting your filters or search query.'
-            : 'All clear! No alerts have been triggered.'}
-        </Text>
-      </View>
-    ),
-    [searchQuery, severityFilter, t],
+    () =>
+      isFiltered ? (
+        <EmptyState
+          icon="filter-remove-outline"
+          title="No alerts match your filters"
+          description={`${alertsList.length} alert${alertsList.length === 1 ? '' : 's'} are hidden by the current search and severity filter.`}
+          actionLabel="Clear filters"
+          onAction={() => {
+            hapticLight();
+            setSearchQuery('');
+            setSeverityFilter('ALL');
+          }}
+        />
+      ) : (
+        <EmptyState
+          icon="bell-off-outline"
+          title="All clear"
+          description="No alerts have been triggered in this environment. Anything your alert rules raise shows up here."
+        />
+      ),
+    [isFiltered, alertsList.length],
   );
 
   if (isLoading) {
@@ -373,14 +385,17 @@ const PlatformAlertsScreen: React.FC = () => {
         data={filteredAlerts}
         keyExtractor={(item) => item.id}
         renderItem={renderAlertCard}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          filteredAlerts.length === 0 && styles.listContentEmpty,
+        ]}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
+            colors={[t.color.brand.base]}
+            tintColor={t.color.brand.base}
           />
         }
         showsVerticalScrollIndicator={false}
@@ -478,7 +493,7 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     marginRight: 10,
   },
-  screenTitle: { ...typeScale.title, fontSize: 20, flex: 1 },
+  screenTitle: { ...typeScale.title, flex: 1 },
   countBadge: {
     paddingHorizontal: 10,
     paddingVertical: spacing.xs,
@@ -514,22 +529,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxxl,
     paddingTop: spacing.xs,
   },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: spacing.xxxl,
+  listContentEmpty: {
+    flexGrow: 1,
   },
-  emptyIcon: {
-    width: 72,
-    height: 72,
-    borderRadius: radii.xl,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  emptyTitle: { ...typeScale.heading, marginBottom: 6 },
-  emptyBody: { ...typeScale.bodySmall, textAlign: 'center' },
 });
 
 export default PlatformAlertsScreen;

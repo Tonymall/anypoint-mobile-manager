@@ -27,6 +27,7 @@ import type { DeploymentHistory, DeploymentStatus } from '../../types';
 import { anypointColors } from '../../theme';
 import { useDeploymentHistory } from '../../hooks/queries/useDeploymentQueries';
 import { useApplications } from '../../hooks/queries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
@@ -231,7 +232,8 @@ const DeploymentHistoryScreen: React.FC = () => {
   const isFocused = useIsFocused();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
 
-  const { data: deployments, isLoading, error, refetch, isRefetching } = useDeploymentHistory(undefined, { enabled: isFocused });
+  const { data: deployments, isLoading, error, refetch } = useDeploymentHistory(undefined, { enabled: isFocused });
+  const pullRefresh = usePullRefresh(refetch);
   const { data: applications } = useApplications();
   const applicationDomains = useMemo(
     () => new Set(((applications as any[]) ?? []).map((app: any) => String(app.domain ?? app.name ?? '').trim()).filter(Boolean)),
@@ -353,8 +355,8 @@ const DeploymentHistoryScreen: React.FC = () => {
         ListEmptyComponent={renderEmptyState}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[theme.colors.primary]}
             tintColor={theme.colors.primary}
           />

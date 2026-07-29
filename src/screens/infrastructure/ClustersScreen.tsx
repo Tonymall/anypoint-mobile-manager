@@ -1,8 +1,12 @@
 // ============================================================
 // Clusters & Server Groups — Combined list with sections
 //
-// Two SectionList-style sections showing clusters and server
-// groups with status indicators, badges, and node counts.
+// Two sections showing clusters and server groups with status
+// indicators, badges, and node counts.
+//
+// Built on the design token layer: status resolves to a semantic
+// status role shared with the servers list, so the same server reads
+// the same way wherever it appears.
 // ============================================================
 
 import React, { useMemo, useCallback } from 'react';
@@ -16,177 +20,111 @@ import {
 import {
   Text,
   Appbar,
-  useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 
-import type { Cluster, ServerGroup, ServerStatus } from '../../types';
-import { anypointColors } from '../../theme';
+import type { Cluster, ServerGroup } from '../../types';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import { Skeleton } from '../../components/ui';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import {
   useClusters,
   useServerGroups,
 } from '../../hooks/queries/useInfrastructureQueries';
 import { hapticLight } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import { getServerStatusRole, getServerStatusLabel } from './ServersScreen';
 import type { IconName } from '../../types/icons';
-
-// --- Status color ---
-const STATUS_COLOR: Record<ServerStatus, string> = {
-  RUNNING: anypointColors.success,
-  DISCONNECTED: anypointColors.error,
-  CREATED: '#6B7280',
-  UPDATED: '#6B7280',
-};
-
-const getStatusColor = (status: string): string =>
-  STATUS_COLOR[status as ServerStatus] ?? '#6B7280';
-
-const getStatusLabel = (status: string): string => {
-  switch (status) {
-    case 'RUNNING': return 'Running';
-    case 'DISCONNECTED': return 'Disconnected';
-    case 'CREATED': return 'Created';
-    case 'UPDATED': return 'Updated';
-    default: return status;
-  }
-};
-
-// Tag helpers
-const tagStyle = (theme: MD3Theme) => ({
-  flexDirection: 'row' as const,
-  alignItems: 'center' as const,
-  gap: 4,
-  paddingHorizontal: 8,
-  paddingVertical: 3,
-  borderRadius: 8,
-  backgroundColor: theme.colors.surfaceVariant + '80',
-});
-
-const tagTextStyle = (theme: MD3Theme) => ({
-  fontSize: 11,
-  color: theme.colors.onSurfaceVariant,
-  fontWeight: '500' as const,
-});
 
 // --- Cluster Card ---
 const ClusterCard = React.memo<{
   cluster: Cluster;
-  theme: MD3Theme;
-}>(({ cluster, theme }) => {
-  const color = getStatusColor(cluster.status);
+  t: Tokens;
+}>(({ cluster, t }) => {
+  const role = getServerStatusRole(t, cluster.status);
   const nodeCount = cluster.serverIds?.length ?? 0;
+
+  const tagStyle = [styles.tag, { backgroundColor: t.color.surface.sunken }];
+  const tagTextStyle = [styles.tagText, { color: t.color.text.secondary }];
 
   return (
     <Pressable
       onPress={() => hapticLight()}
-      accessibilityLabel={`Cluster ${cluster.name}, ${getStatusLabel(cluster.status)}`}
+      accessibilityLabel={`Cluster ${cluster.name}, ${getServerStatusLabel(cluster.status)}`}
       accessibilityRole="button"
       style={({ pressed }) => [
+        styles.card,
         {
-          marginBottom: 8,
-          borderRadius: 18,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-          overflow: 'hidden',
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
           opacity: pressed ? 0.92 : 1,
         },
       ]}
     >
       {/* Accent border at left */}
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 12,
-          bottom: 12,
-          width: 3,
-          borderRadius: 1.5,
-          backgroundColor: color,
-        }}
-      />
+      <View style={[styles.cardAccent, { backgroundColor: role.base }]} />
 
-      <View style={{ padding: 16, paddingLeft: 18 }}>
+      <View style={styles.cardBody}>
         {/* Header: name + status */}
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontSize: 15,
-                fontWeight: '600',
-                color: theme.colors.onSurface,
-                letterSpacing: -0.2,
-              }}
-              numberOfLines={1}
-            >
-              {cluster.name}
-            </Text>
-          </View>
-
-          {/* Status badge */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 10,
-              backgroundColor: color + '12',
-            }}
+        <View style={styles.cardHeader}>
+          <Text
+            style={[styles.cardName, { color: t.color.text.primary }]}
+            numberOfLines={1}
           >
+            {cluster.name}
+          </Text>
+
+          <View style={[styles.statusBadge, { backgroundColor: role.surface }]}>
             <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
-                backgroundColor: color,
-                ...(cluster.status === 'RUNNING'
-                  ? {
-                      shadowColor: color,
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: 0.6,
-                      shadowRadius: 3,
-                    }
-                  : {}),
-              }}
+              style={[
+                styles.statusDot,
+                { backgroundColor: role.base },
+                cluster.status === 'RUNNING' && {
+                  shadowColor: role.base,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.6,
+                  shadowRadius: 3,
+                },
+              ]}
             />
-            <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 }}>
-              {getStatusLabel(cluster.status)}
+            <Text style={[styles.statusText, { color: role.base }]}>
+              {getServerStatusLabel(cluster.status)}
             </Text>
           </View>
         </View>
 
         {/* Meta tags */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-          {/* Multicast badge */}
-          <View style={tagStyle(theme)}>
+        <View style={styles.tagRow}>
+          <View style={tagStyle}>
             <Icon
               name={cluster.multicastEnabled ? 'access-point' : 'access-point-off'}
               size={11}
-              color={theme.colors.onSurfaceVariant}
+              color={t.color.text.secondary}
             />
-            <Text style={tagTextStyle(theme)}>
+            <Text style={tagTextStyle}>
               {cluster.multicastEnabled ? 'Multicast' : 'Unicast'}
             </Text>
           </View>
 
-          {/* Node count */}
-          <View style={tagStyle(theme)}>
-            <Icon name="server" size={11} color={theme.colors.onSurfaceVariant} />
-            <Text style={tagTextStyle(theme)}>
+          <View style={tagStyle}>
+            <Icon name="server" size={11} color={t.color.text.secondary} />
+            <Text style={tagTextStyle}>
               {nodeCount} node{nodeCount !== 1 ? 's' : ''}
             </Text>
           </View>
 
-          {/* Primary node */}
           {cluster.primaryNode != null && (
-            <View style={tagStyle(theme)}>
-              <Icon name="star-outline" size={11} color={theme.colors.onSurfaceVariant} />
-              <Text style={tagTextStyle(theme)}>Primary: {cluster.primaryNode}</Text>
+            <View style={tagStyle}>
+              <Icon name="star-outline" size={11} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>Primary: {cluster.primaryNode}</Text>
             </View>
           )}
         </View>
@@ -199,97 +137,62 @@ ClusterCard.displayName = 'ClusterCard';
 // --- Server Group Card ---
 const ServerGroupCard = React.memo<{
   group: ServerGroup;
-  theme: MD3Theme;
-}>(({ group, theme }) => {
-  const color = getStatusColor(group.status);
+  t: Tokens;
+}>(({ group, t }) => {
+  const role = getServerStatusRole(t, group.status);
   const serverCount = group.serverIds?.length ?? 0;
 
   return (
     <Pressable
       onPress={() => hapticLight()}
-      accessibilityLabel={`Server group ${group.name}, ${getStatusLabel(group.status)}`}
+      accessibilityLabel={`Server group ${group.name}, ${getServerStatusLabel(group.status)}`}
       accessibilityRole="button"
       style={({ pressed }) => [
+        styles.card,
         {
-          marginBottom: 8,
-          borderRadius: 18,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-          overflow: 'hidden',
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
           opacity: pressed ? 0.92 : 1,
         },
       ]}
     >
       {/* Accent border at left */}
-      <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 12,
-          bottom: 12,
-          width: 3,
-          borderRadius: 1.5,
-          backgroundColor: color,
-        }}
-      />
+      <View style={[styles.cardAccent, { backgroundColor: role.base }]} />
 
-      <View style={{ padding: 16, paddingLeft: 18 }}>
+      <View style={styles.cardBody}>
         {/* Header: name + status */}
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ flex: 1 }}>
-            <Text
-              style={{
-                fontSize: 15,
-                fontWeight: '600',
-                color: theme.colors.onSurface,
-                letterSpacing: -0.2,
-              }}
-              numberOfLines={1}
-            >
-              {group.name}
-            </Text>
-          </View>
-
-          {/* Status badge */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 5,
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 10,
-              backgroundColor: color + '12',
-            }}
+        <View style={styles.cardHeader}>
+          <Text
+            style={[styles.cardName, { color: t.color.text.primary }]}
+            numberOfLines={1}
           >
+            {group.name}
+          </Text>
+
+          <View style={[styles.statusBadge, { backgroundColor: role.surface }]}>
             <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
-                backgroundColor: color,
-                ...(group.status === 'RUNNING'
-                  ? {
-                      shadowColor: color,
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: 0.6,
-                      shadowRadius: 3,
-                    }
-                  : {}),
-              }}
+              style={[
+                styles.statusDot,
+                { backgroundColor: role.base },
+                group.status === 'RUNNING' && {
+                  shadowColor: role.base,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.6,
+                  shadowRadius: 3,
+                },
+              ]}
             />
-            <Text style={{ color, fontSize: 11, fontWeight: '700', letterSpacing: 0.2 }}>
-              {getStatusLabel(group.status)}
+            <Text style={[styles.statusText, { color: role.base }]}>
+              {getServerStatusLabel(group.status)}
             </Text>
           </View>
         </View>
 
         {/* Meta tags */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-          <View style={tagStyle(theme)}>
-            <Icon name="server-network" size={11} color={theme.colors.onSurfaceVariant} />
-            <Text style={tagTextStyle(theme)}>
+        <View style={styles.tagRow}>
+          <View style={[styles.tag, { backgroundColor: t.color.surface.sunken }]}>
+            <Icon name="server-network" size={11} color={t.color.text.secondary} />
+            <Text style={[styles.tagText, { color: t.color.text.secondary }]}>
               {serverCount} server{serverCount !== 1 ? 's' : ''}
             </Text>
           </View>
@@ -304,68 +207,130 @@ ServerGroupCard.displayName = 'ServerGroupCard';
 const SectionTitle: React.FC<{
   title: string;
   count: number;
-  accentColor: string;
-  theme: MD3Theme;
-}> = ({ title, count, accentColor, theme }) => (
-  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4, marginTop: 20, marginBottom: 12 }}>
-    <View style={{ width: 3, height: 14, borderRadius: 2, backgroundColor: accentColor }} />
-    <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8, flex: 1 }}>
+  role: StatusRole;
+  t: Tokens;
+}> = ({ title, count, role, t }) => (
+  <View style={styles.sectionHeader}>
+    <View style={[styles.sectionAccent, { backgroundColor: role.base }]} />
+    <Text style={[styles.sectionTitle, { color: t.color.text.tertiary }]}>
       {title}
     </Text>
-    <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: accentColor + '12' }}>
-      <Text style={{ fontSize: 12, fontWeight: '700', color: accentColor }}>{count}</Text>
+    <View style={[styles.countBadge, { backgroundColor: role.surface }]}>
+      <Text style={[styles.countBadgeText, { color: role.base }]}>{count}</Text>
     </View>
   </View>
 );
 
-// --- Empty State ---
-const EmptySection: React.FC<{ icon: IconName; message: string; theme: MD3Theme }> = ({
-  icon,
-  message,
-  theme,
-}) => (
-  <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+// --- Empty section ---
+// Compact by design: two of these can be on screen at once, so it says
+// what would be here without taking over the page.
+const EmptySection: React.FC<{
+  icon: IconName;
+  title: string;
+  description: string;
+  t: Tokens;
+}> = ({ icon, title, description, t }) => (
+  <View style={styles.emptySection}>
     <View
-      style={{
-        width: 56,
-        height: 56,
-        borderRadius: 18,
-        backgroundColor: theme.colors.surfaceVariant,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 12,
-      }}
+      style={[
+        styles.emptyIcon,
+        {
+          backgroundColor: t.color.surface.sunken,
+          borderColor: t.color.border.subtle,
+        },
+      ]}
     >
-      <Icon name={icon} size={28} color={theme.colors.onSurfaceVariant} />
+      <Icon name={icon} size={24} color={t.color.text.tertiary} />
     </View>
-    <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant, textAlign: 'center' }}>
-      {message}
+    <Text style={[styles.emptyTitle, { color: t.color.text.primary }]}>
+      {title}
+    </Text>
+    <Text style={[styles.emptyBody, { color: t.color.text.secondary }]}>
+      {description}
     </Text>
   </View>
 );
+
+// ── Loading placeholder ──
+const CardSkeleton = React.memo<{ t: Tokens }>(({ t }) => (
+  <View
+    style={[
+      styles.card,
+      {
+        backgroundColor: t.color.surface.raised,
+        borderColor: t.color.border.subtle,
+      },
+    ]}
+  >
+    <View style={[styles.cardAccent, { backgroundColor: t.color.border.default }]} />
+    <View style={styles.cardBody}>
+      <View style={styles.cardHeader}>
+        <Skeleton width="45%" height={15} />
+        <Skeleton width={88} height={22} />
+      </View>
+      <View style={styles.tagRow}>
+        <Skeleton width={84} height={18} />
+        <Skeleton width={64} height={18} />
+      </View>
+    </View>
+  </View>
+));
+CardSkeleton.displayName = 'CardSkeleton';
+
+const SKELETON_ROWS = [0, 1];
 
 // --- Main Screen ---
 const ClustersScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
-  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const clustersQuery = useClusters();
   const serverGroupsQuery = useServerGroups();
 
   const isLoading = clustersQuery.isLoading && serverGroupsQuery.isLoading;
   const hasError = clustersQuery.isError && serverGroupsQuery.isError;
-  const isRefetching = clustersQuery.isRefetching || serverGroupsQuery.isRefetching;
+  const refetchAll = useCallback(
+    () => Promise.allSettled([clustersQuery.refetch(), serverGroupsQuery.refetch()]),
+    [clustersQuery, serverGroupsQuery],
+  );
 
-  const refetchAll = useCallback(() => {
-    clustersQuery.refetch();
-    serverGroupsQuery.refetch();
-  }, [clustersQuery, serverGroupsQuery]);
+  // Any one background poll used to open the control; now only a pull does.
+  const pullRefresh = usePullRefresh(refetchAll);
 
-  const clusters = (clustersQuery.data ?? []) as Cluster[];
-  const serverGroups = (serverGroupsQuery.data ?? []) as ServerGroup[];
+  const clusters = useMemo(
+    () => (clustersQuery.data ?? []) as Cluster[],
+    [clustersQuery.data],
+  );
+  const serverGroups = useMemo(
+    () => (serverGroupsQuery.data ?? []) as ServerGroup[],
+    [serverGroupsQuery.data],
+  );
 
-  if (isLoading) return <LoadingState message="Loading clusters and server groups..." />;
+  const appbar = (
+    <Appbar.Header style={{ backgroundColor: t.color.surface.canvas }} elevated={false}>
+      <Appbar.BackAction onPress={() => router.back()} />
+      <Appbar.Content title="Clusters & Groups" titleStyle={styles.appbarTitle} />
+      <Appbar.Action icon="refresh" onPress={refetchAll} />
+    </Appbar.Header>
+  );
+
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+        {appbar}
+        <View style={styles.scrollContent}>
+          <SectionTitle title="CLUSTERS" count={0} role={t.color.accent.secondary} t={t} />
+          {SKELETON_ROWS.map((row) => (
+            <CardSkeleton key={`cluster-${row}`} t={t} />
+          ))}
+          <SectionTitle title="SERVER GROUPS" count={0} role={t.color.status.success} t={t} />
+          {SKELETON_ROWS.map((row) => (
+            <CardSkeleton key={`group-${row}`} t={t} />
+          ))}
+        </View>
+      </View>
+    );
+  }
   if (hasError) {
     return (
       <ErrorState
@@ -376,23 +341,19 @@ const ClustersScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
       {/* Header */}
-      <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
-        <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Clusters & Groups" titleStyle={{ fontWeight: '600', letterSpacing: -0.3 }} />
-        <Appbar.Action icon="refresh" onPress={refetchAll} />
-      </Appbar.Header>
+      {appbar}
 
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={refetchAll}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
+            colors={[t.color.brand.base]}
+            tintColor={t.color.brand.base}
           />
         }
       >
@@ -400,30 +361,40 @@ const ClustersScreen: React.FC = () => {
         <SectionTitle
           title="CLUSTERS"
           count={clusters.length}
-          accentColor={anypointColors.secondary}
-          theme={theme}
+          role={t.color.accent.secondary}
+          t={t}
         />
         {clusters.length > 0 ? (
           clusters.map((cluster) => (
-            <ClusterCard key={cluster.id} cluster={cluster} theme={theme} />
+            <ClusterCard key={cluster.id} cluster={cluster} t={t} />
           ))
         ) : (
-          <EmptySection icon="lan-disconnect" message="No clusters configured" theme={theme} />
+          <EmptySection
+            icon="lan-disconnect"
+            title="No clusters"
+            description="Servers joined into a high-availability cluster appear here with their nodes and primary."
+            t={t}
+          />
         )}
 
         {/* Server Groups Section */}
         <SectionTitle
           title="SERVER GROUPS"
           count={serverGroups.length}
-          accentColor={anypointColors.accent}
-          theme={theme}
+          role={t.color.status.success}
+          t={t}
         />
         {serverGroups.length > 0 ? (
           serverGroups.map((group) => (
-            <ServerGroupCard key={group.id} group={group} theme={theme} />
+            <ServerGroupCard key={group.id} group={group} t={t} />
           ))
         ) : (
-          <EmptySection icon="server-network-off" message="No server groups configured" theme={theme} />
+          <EmptySection
+            icon="server-network-off"
+            title="No server groups"
+            description="Groups let you deploy to several servers at once. Any you create in Anypoint show up here."
+            t={t}
+          />
         )}
       </ScrollView>
     </View>
@@ -431,16 +402,109 @@ const ClustersScreen: React.FC = () => {
 };
 
 // --- Styles ---
-const createStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    scrollContent: {
-      paddingHorizontal: 16,
-      paddingBottom: 40,
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  appbarTitle: typeScale.heading,
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 40,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.xs,
+    marginTop: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  sectionAccent: {
+    width: 3,
+    height: 14,
+    borderRadius: 2,
+  },
+  sectionTitle: { ...typeScale.label, letterSpacing: 0.8, flex: 1 },
+  countBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  countBadgeText: { ...typeScale.label, fontWeight: '700' },
+  card: {
+    marginBottom: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    position: 'absolute',
+    left: 0,
+    top: spacing.md,
+    bottom: spacing.md,
+    width: 3,
+    borderRadius: 1.5,
+  },
+  cardBody: {
+    padding: spacing.lg,
+    paddingLeft: 18,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  cardName: { ...typeScale.subheading, flex: 1 },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: radii.pill,
+  },
+  statusText: { ...typeScale.caption, fontWeight: '700' },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.md,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+  },
+  tagText: { ...typeScale.caption, fontWeight: '500' },
+  emptySection: {
+    alignItems: 'center',
+    paddingVertical: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+  },
+  emptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  emptyTitle: { ...typeScale.subheading, marginBottom: spacing.xs },
+  emptyBody: {
+    ...typeScale.bodySmall,
+    fontWeight: '400',
+    textAlign: 'center',
+    maxWidth: 280,
+  },
+});
 
 export default ClustersScreen;

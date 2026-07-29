@@ -1,8 +1,17 @@
+// ============================================================
+// SeverityIndicator — icon + label for an alert severity
+// ============================================================
+// Built on the design token layer: severity resolves to a semantic
+// status role, the same one the alert lists use.
+// ============================================================
+
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Text, useTheme } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
-import { severityColors } from '../../theme';
+
+import { spacing, typeScale, useTokens } from '../../theme';
+import { getSeverityRole } from '../../utils/statusHelpers';
 import type { AlertSeverity } from '../../types';
 import type { IconName } from '../../types/icons';
 
@@ -25,35 +34,27 @@ const severityLabelMap: Record<AlertSeverity, string> = {
 };
 
 const sizeMap = {
-  small: { icon: 14, font: 10 as const },
-  medium: { icon: 18, font: 12 as const },
-  large: { icon: 22, font: 14 as const },
-};
+  small: { icon: 14, label: typeScale.micro },
+  medium: { icon: 18, label: typeScale.label },
+  large: { icon: 22, label: typeScale.body },
+} as const;
 
 const SeverityIndicator: React.FC<SeverityIndicatorProps> = ({
   severity,
   showLabel = true,
   size = 'medium',
 }) => {
-  const theme = useTheme();
-  const color = severityColors[severity] ?? theme.colors.outline;
+  const t = useTokens();
+  const role = getSeverityRole(t, severity);
   const iconName = severityIconMap[severity] ?? 'information';
   const label = severityLabelMap[severity] ?? severity;
   const dimensions = sizeMap[size];
 
   return (
     <View style={styles.container}>
-      <Icon name={iconName} size={dimensions.icon} color={color} />
+      <Icon name={iconName} size={dimensions.icon} color={role.base} />
       {showLabel && (
-        <Text
-          style={[
-            styles.label,
-            {
-              color,
-              fontSize: dimensions.font,
-            },
-          ]}
-        >
+        <Text style={[styles.label, dimensions.label, { color: role.base }]}>
           {label}
         </Text>
       )}
@@ -67,7 +68,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   label: {
-    marginLeft: 4,
+    marginLeft: spacing.xs,
     fontWeight: '600',
   },
 });

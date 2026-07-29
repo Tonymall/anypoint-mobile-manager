@@ -1,3 +1,10 @@
+// ============================================================
+// Report a Bug — free-text report submitted from inside the app
+//
+// Built on the design token layer, so the hero card, form card and
+// helper copy are defined for both colour schemes in one place.
+// ============================================================
+
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -14,22 +21,20 @@ import {
   Portal,
   Text,
   TextInput,
-  useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { submitBugReport } from '../../services/bugReportService';
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
-import { anypointColors } from '../../theme';
+import { radii, spacing, typeScale, useTokens, type Tokens } from '../../theme';
 import logger from '../../utils/logger';
 
 const ReportBugScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const styles = useMemo(() => createStyles(theme), [theme]);
+  const styles = useMemo(() => createStyles(t), [t]);
   const showError = useErrorDialogStore((s) => s.showError);
 
   const [description, setDescription] = useState('');
@@ -73,10 +78,10 @@ const ReportBugScreen: React.FC = () => {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 12 : 0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + spacing.md : 0}
     >
       <Appbar.Header
-        style={{ backgroundColor: theme.colors.background }}
+        style={styles.appbar}
         statusBarHeight={insets.top}
       >
         <Appbar.BackAction onPress={goToSettings} />
@@ -89,27 +94,23 @@ const ReportBugScreen: React.FC = () => {
       <ScrollView
         style={styles.container}
         contentContainerStyle={{
-          paddingTop: 8,
+          paddingTop: spacing.sm,
           paddingBottom: insets.bottom + 28,
         }}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.heroCard}>
           <View style={styles.iconWrap}>
-            <Icon name="bug-outline" size={28} color={anypointColors.warning} />
+            <Icon name="bug-outline" size={28} color={t.color.status.warning.base} />
           </View>
-          <Text variant="headlineSmall" style={styles.title}>
-            Report a Bug
-          </Text>
-          <Text variant="bodyMedium" style={styles.subtitle}>
+          <Text style={styles.title}>Report a Bug</Text>
+          <Text style={styles.subtitle}>
             Describe what happened and send it directly from the app.
           </Text>
         </View>
 
         <View style={styles.formCard}>
-          <Text variant="labelLarge" style={styles.label}>
-            Bug description
-          </Text>
+          <Text style={styles.label}>Bug description</Text>
           <TextInput
             mode="outlined"
             multiline
@@ -118,11 +119,12 @@ const ReportBugScreen: React.FC = () => {
             placeholder="What were you doing? What did you expect? What actually happened?"
             numberOfLines={10}
             style={styles.input}
+            outlineStyle={styles.inputOutline}
             contentStyle={styles.inputContent}
             autoFocus
           />
 
-          <Text variant="bodySmall" style={styles.helper}>
+          <Text style={styles.helper}>
             Include the screen or action that caused the issue and any visible error message.
           </Text>
 
@@ -133,6 +135,8 @@ const ReportBugScreen: React.FC = () => {
             disabled={!description.trim() || isSubmitting}
             style={styles.submitButton}
             contentStyle={styles.submitButtonContent}
+            buttonColor={t.color.brand.base}
+            textColor={t.color.text.inverse}
           >
             Report Bug
           </Button>
@@ -143,7 +147,7 @@ const ReportBugScreen: React.FC = () => {
         <Dialog visible={thankYouVisible} onDismiss={handleContinue} style={styles.dialog}>
           <Dialog.Title>Thank you</Dialog.Title>
           <Dialog.Content>
-            <Text variant="bodyMedium">
+            <Text style={styles.dialogBody}>
               Thank you for reporting the bug. You can continue using the app.
             </Text>
           </Dialog.Content>
@@ -158,79 +162,89 @@ const ReportBugScreen: React.FC = () => {
   );
 };
 
-const createStyles = (theme: MD3Theme) =>
+const createStyles = (t: Tokens) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: theme.colors.background,
+      backgroundColor: t.color.surface.canvas,
     },
-    headerTitle: {
-      fontSize: 20,
-      fontWeight: '700',
-      letterSpacing: -0.3,
+    appbar: {
+      backgroundColor: t.color.surface.canvas,
     },
+    headerTitle: typeScale.title,
     heroCard: {
-      marginHorizontal: 16,
-      marginTop: 8,
-      marginBottom: 16,
-      padding: 20,
-      borderRadius: 20,
-      backgroundColor: theme.colors.surface,
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.sm,
+      marginBottom: spacing.lg,
+      padding: spacing.xl,
+      borderRadius: radii.xl,
+      backgroundColor: t.color.surface.raised,
       borderWidth: 1,
-      borderColor: theme.colors.outlineVariant,
+      borderColor: t.color.border.subtle,
     },
     iconWrap: {
       width: 56,
       height: 56,
-      borderRadius: 16,
+      borderRadius: radii.lg,
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 14,
-      backgroundColor: anypointColors.warning + '18',
+      backgroundColor: t.color.status.warning.surface,
     },
     title: {
-      color: theme.colors.onSurface,
-      fontWeight: '700',
+      ...typeScale.title,
+      color: t.color.text.primary,
       marginBottom: 6,
     },
     subtitle: {
-      color: theme.colors.onSurfaceVariant,
-      lineHeight: 20,
+      ...typeScale.body,
+      color: t.color.text.secondary,
     },
     formCard: {
-      marginHorizontal: 16,
-      padding: 20,
-      borderRadius: 20,
-      backgroundColor: theme.colors.surface,
+      marginHorizontal: spacing.lg,
+      padding: spacing.xl,
+      borderRadius: radii.xl,
+      backgroundColor: t.color.surface.raised,
       borderWidth: 1,
-      borderColor: theme.colors.outlineVariant,
+      borderColor: t.color.border.subtle,
     },
     label: {
-      color: theme.colors.onSurface,
+      ...typeScale.subheading,
+      color: t.color.text.primary,
       marginBottom: 10,
-      fontWeight: '600',
     },
     input: {
-      backgroundColor: theme.colors.surface,
+      backgroundColor: t.color.surface.sunken,
+      ...typeScale.body,
+    },
+    inputOutline: {
+      borderRadius: radii.md,
+      borderColor: t.color.border.default,
     },
     inputContent: {
       minHeight: 180,
-      paddingTop: 12,
+      paddingTop: spacing.md,
     },
     helper: {
-      color: theme.colors.onSurfaceVariant,
+      ...typeScale.bodySmall,
+      fontWeight: '400',
+      color: t.color.text.tertiary,
       marginTop: 10,
-      lineHeight: 18,
     },
     submitButton: {
       marginTop: 18,
-      borderRadius: 14,
+      borderRadius: radii.md,
     },
     submitButtonContent: {
       height: 48,
     },
     dialog: {
-      borderRadius: 24,
+      borderRadius: radii.xl,
+      backgroundColor: t.color.surface.raised,
+    },
+    dialogBody: {
+      ...typeScale.body,
+      color: t.color.text.secondary,
     },
   });
 

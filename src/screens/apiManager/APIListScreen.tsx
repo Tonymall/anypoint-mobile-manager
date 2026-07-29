@@ -29,6 +29,7 @@ import {
 import { Skeleton } from '../../components/ui';
 import { useManagedAPIs } from '../../hooks/queries';
 import { useDebounce } from '../../hooks/useDebounce';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import ErrorState from '../../components/common/ErrorState';
 
 // ── Status filter options ────────────────────────────────────
@@ -326,8 +327,9 @@ const APIListScreen: React.FC = () => {
     isLoading,
     error,
     refetch,
-    isRefetching,
   } = useManagedAPIs({ query: debouncedSearch || undefined }, { enabled: isFocused });
+
+  const pullRefresh = usePullRefresh(refetch);
 
   const allApis = useMemo(() => apisResponse ?? [], [apisResponse]);
 
@@ -445,8 +447,8 @@ const APIListScreen: React.FC = () => {
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[t.color.brand.base]}
             tintColor={t.color.brand.base}
           />

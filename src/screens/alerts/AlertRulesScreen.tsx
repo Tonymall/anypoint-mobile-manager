@@ -1,9 +1,13 @@
 // ============================================================
-// Alert Rules — Rule List with Toggle & CRUD (2026 Design)
+// Alert Rules — Rule List with Toggle & CRUD
 //
 // FlatList of alert rule cards with enabled/disabled switch,
 // FAB for creating new rules, long-press to delete, and
 // pull-to-refresh.
+//
+// Built on the design token layer: severity resolves to a semantic
+// status role, so the accent bar and badge tint stay in step across
+// light and dark.
 // ============================================================
 
 import React, { useState, useCallback, useMemo } from 'react';
@@ -19,31 +23,34 @@ import {
   Text,
   Switch,
   FAB,
-  useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
-import type { AlertRule, AlertSeverity, AlertType } from '../../types';
-import { anypointColors, severityColors } from '../../theme';
+import type { AlertRule, AlertType } from '../../types';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  type Tokens,
+} from '../../theme';
+import { Skeleton } from '../../components/ui';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import {
   useAlertRules,
   useUpdateAlertRule,
   useDeleteAlertRule,
 } from '../../hooks/queries/useAlertQueries';
+import { getSeverityRole } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
+import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import type { IconName } from '../../types/icons';
 
 // --- Helpers ---
-const getSeverityColor = (severity: AlertSeverity): string => {
-  return severityColors[severity] ?? anypointColors.info;
-};
-
 const getTypeIcon = (type: AlertType): IconName => {
   switch (type) {
     case 'response-time': return 'timer-outline';
@@ -71,10 +78,13 @@ const RuleCard = React.memo<{
   onToggle: (enabled: boolean) => void;
   onLongPress: () => void;
   isUpdating: boolean;
-  theme: MD3Theme;
-}>(({ rule, onToggle, onLongPress, isUpdating, theme }) => {
-  const sevColor = getSeverityColor(rule.severity);
+  t: Tokens;
+}>(({ rule, onToggle, onLongPress, isUpdating, t }) => {
+  const sevRole = getSeverityRole(t, rule.severity);
   const typeIcon = getTypeIcon(rule.type);
+
+  const tagStyle = [styles.tag, { backgroundColor: t.color.surface.sunken }];
+  const tagTextStyle = [styles.tagText, { color: t.color.text.secondary }];
 
   return (
     <Pressable
@@ -86,41 +96,38 @@ const RuleCard = React.memo<{
       accessibilityRole="button"
       accessibilityHint="Long press to delete"
       style={({ pressed }) => [
+        styles.card,
         {
-          marginBottom: 8,
-          borderRadius: 18,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: theme.colors.outlineVariant,
-          overflow: 'hidden',
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
           opacity: pressed ? 0.92 : 1,
         },
       ]}
     >
       {/* Severity accent border at left */}
       <View
-        style={{
-          position: 'absolute',
-          left: 0,
-          top: 12,
-          bottom: 12,
-          width: 3,
-          borderRadius: 1.5,
-          backgroundColor: rule.enabled ? sevColor : theme.colors.outline,
-        }}
+        style={[
+          styles.cardAccent,
+          {
+            backgroundColor: rule.enabled
+              ? sevRole.base
+              : t.color.status.neutral.base,
+          },
+        ]}
       />
 
-      <View style={{ padding: 16, paddingLeft: 18 }}>
+      <View style={styles.cardBody}>
         {/* Header: name + toggle */}
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={styles.cardHeader}>
           <Text
-            style={{
-              fontSize: 15,
-              fontWeight: '600',
-              color: rule.enabled ? theme.colors.onSurface : theme.colors.onSurfaceVariant,
-              letterSpacing: -0.2,
-              flex: 1,
-            }}
+            style={[
+              styles.ruleName,
+              {
+                color: rule.enabled
+                  ? t.color.text.primary
+                  : t.color.text.tertiary,
+              },
+            ]}
             numberOfLines={1}
           >
             {rule.name}
@@ -132,43 +139,28 @@ const RuleCard = React.memo<{
               onToggle(val);
             }}
             disabled={isUpdating}
-            color={anypointColors.primary}
+            color={t.color.brand.base}
           />
         </View>
 
         {/* Type + Severity badges */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-          {/* Type badge */}
-          <View style={badgeStyle(theme)}>
-            <Icon name={typeIcon} size={12} color={theme.colors.onSurfaceVariant} />
-            <Text style={badgeTextStyle(theme)}>{formatType(rule.type)}</Text>
+        <View style={styles.tagRow}>
+          <View style={tagStyle}>
+            <Icon name={typeIcon} size={12} color={t.color.text.secondary} />
+            <Text style={tagTextStyle}>{formatType(rule.type)}</Text>
           </View>
 
-          {/* Severity badge */}
-          <View
-            style={[
-              badgeStyle(theme),
-              { backgroundColor: sevColor + '15' },
-            ]}
-          >
-            <View
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: sevColor,
-              }}
-            />
-            <Text style={[badgeTextStyle(theme), { color: sevColor }]}>
+          <View style={[styles.tag, { backgroundColor: sevRole.surface }]}>
+            <View style={[styles.sevDot, { backgroundColor: sevRole.base }]} />
+            <Text style={[styles.tagText, { color: sevRole.base }]}>
               {rule.severity}
             </Text>
           </View>
 
-          {/* Applications count */}
           {rule.applicationIds && rule.applicationIds.length > 0 && (
-            <View style={badgeStyle(theme)}>
-              <Icon name="application-outline" size={12} color={theme.colors.onSurfaceVariant} />
-              <Text style={badgeTextStyle(theme)}>
+            <View style={tagStyle}>
+              <Icon name="application-outline" size={12} color={t.color.text.secondary} />
+              <Text style={tagTextStyle}>
                 {rule.applicationIds.length} app{rule.applicationIds.length !== 1 ? 's' : ''}
               </Text>
             </View>
@@ -177,11 +169,7 @@ const RuleCard = React.memo<{
 
         {/* Condition summary */}
         <Text
-          style={{
-            fontSize: 12,
-            color: theme.colors.onSurfaceVariant,
-            marginTop: 8,
-          }}
+          style={[styles.condition, { color: t.color.text.tertiary }]}
           numberOfLines={1}
         >
           {rule.condition.metric} {rule.condition.operator} {rule.condition.threshold} over {rule.condition.periodMinutes}m
@@ -192,30 +180,45 @@ const RuleCard = React.memo<{
 });
 RuleCard.displayName = 'RuleCard';
 
-// Badge helpers
-const badgeStyle = (theme: MD3Theme) => ({
-  flexDirection: 'row' as const,
-  alignItems: 'center' as const,
-  gap: 4,
-  paddingHorizontal: 8,
-  paddingVertical: 3,
-  borderRadius: 8,
-  backgroundColor: theme.colors.surfaceVariant + '80',
-});
+// ── Loading placeholder ──
+// Card-shaped so the list does not jump when the rules land.
+const RuleCardSkeleton = React.memo<{ t: Tokens }>(({ t }) => (
+  <View
+    style={[
+      styles.card,
+      {
+        backgroundColor: t.color.surface.raised,
+        borderColor: t.color.border.subtle,
+      },
+    ]}
+  >
+    <View style={[styles.cardAccent, { backgroundColor: t.color.border.default }]} />
+    <View style={styles.cardBody}>
+      <View style={styles.cardHeader}>
+        <Skeleton width="55%" height={15} />
+        <Skeleton width={48} height={28} radius={radii.pill} />
+      </View>
+      <View style={styles.tagRow}>
+        <Skeleton width={104} height={20} />
+        <Skeleton width={72} height={20} />
+      </View>
+      <Skeleton width="70%" height={12} style={styles.skeletonCondition} />
+    </View>
+  </View>
+));
+RuleCardSkeleton.displayName = 'RuleCardSkeleton';
 
-const badgeTextStyle = (theme: MD3Theme) => ({
-  fontSize: 11,
-  color: theme.colors.onSurfaceVariant,
-  fontWeight: '500' as const,
-});
+const SKELETON_ROWS = [0, 1, 2, 3, 4];
 
 // --- Component ---
 const AlertRulesScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const { data: rules, isLoading, error, refetch, isRefetching } = useAlertRules();
+  const { data: rules, isLoading, error, refetch } = useAlertRules();
+  // Only a pull shows the control; background refetches stay invisible.
+  const pullRefresh = usePullRefresh(refetch);
   const updateMutation = useUpdateAlertRule();
   const deleteMutation = useDeleteAlertRule();
 
@@ -250,81 +253,62 @@ const AlertRulesScreen: React.FC = () => {
         onToggle={(enabled) => handleToggle(item, enabled)}
         onLongPress={() => setDeleteTarget(item)}
         isUpdating={updatingRuleId === item.id}
-        theme={theme}
+        t={t}
       />
     ),
-    [theme, handleToggle, updatingRuleId],
+    [t, handleToggle, updatingRuleId],
   );
 
+  // No filters on this screen, so there is only one empty case: nothing
+  // has been created yet. Say what a rule does and offer to make one.
   const renderEmptyState = useCallback(
     () => (
-      <View style={styles.emptyState}>
-        <View
-          style={{
-            width: 72,
-            height: 72,
-            borderRadius: 24,
-            backgroundColor: theme.colors.surfaceVariant,
-            justifyContent: 'center',
-            alignItems: 'center',
-            marginBottom: 16,
-          }}
-        >
-          <Icon name="bell-cog-outline" size={36} color={theme.colors.onSurfaceVariant} />
-        </View>
-        <Text
-          style={{
-            fontSize: 17,
-            fontWeight: '700',
-            color: theme.colors.onSurface,
-            marginBottom: 6,
-          }}
-        >
-          No alert rules configured
-        </Text>
-        <Text
-          style={{
-            fontSize: 13,
-            color: theme.colors.onSurfaceVariant,
-            textAlign: 'center',
-          }}
-        >
-          Create an alert rule to get notified when conditions are met.
-        </Text>
-      </View>
+      <EmptyState
+        icon="bell-cog-outline"
+        title="No alert rules yet"
+        description="A rule watches a metric — CPU, errors, response time — and notifies you when it crosses your threshold."
+        actionLabel="Create a rule"
+        onAction={() => {
+          hapticLight();
+          router.push('/(main)/alerts/create-rule' as any);
+        }}
+      />
     ),
-    [theme],
+    [router],
   );
 
-  if (isLoading) return <LoadingState message="Loading alert rules..." />;
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+        <View style={styles.topBar}>
+          <View style={styles.titleRow}>
+            <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+            <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
+              Alert Rules
+            </Text>
+          </View>
+        </View>
+        <View style={styles.listContent}>
+          {SKELETON_ROWS.map((row) => (
+            <RuleCardSkeleton key={row} t={t} />
+          ))}
+        </View>
+      </View>
+    );
+  }
   if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
       {/* ── Header ── */}
-      <View style={[styles.topBar, { paddingTop: 12 }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4 }}>
-          <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
-          <Text
-            style={{
-              fontSize: 20,
-              fontWeight: '700',
-              color: theme.colors.onSurface,
-              flex: 1,
-              letterSpacing: -0.3,
-            }}
-          >
+      <View style={styles.topBar}>
+        <View style={styles.titleRow}>
+          <View style={[styles.sectionAccent, { backgroundColor: t.color.brand.base }]} />
+          <Text style={[styles.screenTitle, { color: t.color.text.primary }]}>
             Alert Rules
           </Text>
-          <View
-            style={{
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 10,
-              backgroundColor: anypointColors.primary + '12',
-            }}
-          >
-            <Text style={{ fontSize: 12, fontWeight: '700', color: anypointColors.primary }}>
+          <View style={[styles.countBadge, { backgroundColor: t.color.brand.surface }]}>
+            <Text style={[styles.countBadgeText, { color: t.color.text.accent }]}>
               {rulesList.length}
             </Text>
           </View>
@@ -336,14 +320,17 @@ const AlertRulesScreen: React.FC = () => {
         data={rulesList}
         keyExtractor={(item) => item.id}
         renderItem={renderRuleCard}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[
+          styles.listContent,
+          rulesList.length === 0 && styles.listContentEmpty,
+        ]}
         ListEmptyComponent={renderEmptyState}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
+            colors={[t.color.brand.base]}
+            tintColor={t.color.brand.base}
           />
         }
         showsVerticalScrollIndicator={false}
@@ -359,11 +346,11 @@ const AlertRulesScreen: React.FC = () => {
         style={[
           styles.fab,
           {
-            backgroundColor: anypointColors.primary,
-            bottom: insets.bottom + 16,
+            backgroundColor: t.color.brand.base,
+            bottom: insets.bottom + spacing.lg,
           },
         ]}
-        color="#FFFFFF"
+        color={t.color.text.inverse}
         onPress={() => {
           hapticLight();
           router.push('/(main)/alerts/create-rule' as any);
@@ -391,8 +378,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topBar: {
-    paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xs,
   },
   sectionAccent: {
     width: 3,
@@ -400,21 +393,73 @@ const styles = StyleSheet.create({
     borderRadius: 1.5,
     marginRight: 10,
   },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 96,
-    paddingTop: 4,
+  screenTitle: { ...typeScale.title, flex: 1 },
+  countBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
   },
-  emptyState: {
+  countBadgeText: { ...typeScale.label, fontWeight: '700' },
+  card: {
+    marginBottom: spacing.sm,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  cardAccent: {
+    position: 'absolute',
+    left: 0,
+    top: spacing.md,
+    bottom: spacing.md,
+    width: 3,
+    borderRadius: 1.5,
+  },
+  cardBody: {
+    padding: spacing.lg,
+    paddingLeft: 18,
+  },
+  cardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 80,
-    paddingHorizontal: 32,
+    gap: spacing.md,
+  },
+  ruleName: { ...typeScale.subheading, flex: 1 },
+  tagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+  },
+  tagText: { ...typeScale.caption, fontWeight: '500' },
+  sevDot: {
+    width: 6,
+    height: 6,
+    borderRadius: radii.pill,
+  },
+  condition: { ...typeScale.caption, marginTop: spacing.sm },
+  skeletonCondition: {
+    marginTop: spacing.md,
+  },
+  listContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: 96,
+    paddingTop: spacing.xs,
+  },
+  listContentEmpty: {
+    flexGrow: 1,
   },
   fab: {
     position: 'absolute',
-    right: 16,
-    borderRadius: 18,
+    right: spacing.lg,
+    borderRadius: radii.xl,
   },
 });
 

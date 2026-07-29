@@ -26,6 +26,7 @@ import { useRouter } from 'expo-router';
 import { anypointColors } from '../../theme';
 import { hapticLight } from '../../utils/haptics';
 import { useUsers } from '../../hooks/queries/useAccessManagementQueries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 
@@ -166,7 +167,8 @@ const UsersScreen: React.FC = () => {
   const styles = useMemo(() => createStyles(theme), [theme]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const { data: users, isLoading, error, refetch, isRefetching } = useUsers();
+  const { data: users, isLoading, error, refetch } = useUsers();
+  const pullRefresh = usePullRefresh(refetch);
 
   const usersList = useMemo(() => (users as any)?.data ?? [], [users]) as User[];
 
@@ -272,8 +274,8 @@ const UsersScreen: React.FC = () => {
         ListEmptyComponent={renderEmpty}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             colors={[theme.colors.primary]}
             tintColor={theme.colors.primary}
           />

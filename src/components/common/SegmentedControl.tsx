@@ -7,7 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { View, Pressable, StyleSheet, LayoutChangeEvent } from 'react-native';
-import { Text, useTheme } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -15,7 +15,7 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { hapticLight } from '../../utils/haptics';
-import { anypointColors } from '../../theme';
+import { radii, spacing, typeScale, useTokens } from '../../theme';
 
 export interface Segment {
   key: string;
@@ -35,7 +35,7 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
   activeKey,
   onChange,
 }) => {
-  const theme = useTheme();
+  const t = useTokens();
   const containerWidth = useSharedValue(0);
   const segmentCount = segments.length;
   const activeIndex = useMemo(
@@ -83,8 +83,8 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
       style={[
         styles.container,
         {
-          backgroundColor: theme.colors.surfaceVariant,
-          borderColor: theme.colors.outlineVariant,
+          backgroundColor: t.color.surface.sunken,
+          borderColor: t.color.border.subtle,
         },
       ]}
     >
@@ -93,7 +93,7 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
         style={[
           styles.indicator,
           indicatorStyle,
-          { backgroundColor: theme.colors.surface },
+          { backgroundColor: t.color.surface.raised, shadowColor: t.color.shadow },
         ]}
       />
 
@@ -110,12 +110,13 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
             accessibilityLabel={segment.label}
           >
             <Text
-              variant="labelMedium"
-              style={{
-                color: isActive ? anypointColors.primary : theme.colors.onSurfaceVariant,
-                fontWeight: isActive ? '700' : '500',
-                textAlign: 'center',
-              }}
+              style={[
+                styles.label,
+                {
+                  color: isActive ? t.color.text.accent : t.color.text.tertiary,
+                  fontWeight: isActive ? '700' : '500',
+                },
+              ]}
               numberOfLines={1}
             >
               {segment.label}
@@ -130,9 +131,9 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    marginHorizontal: 16,
-    marginVertical: 8,
-    borderRadius: 12,
+    marginHorizontal: spacing.lg,
+    marginVertical: spacing.sm,
+    borderRadius: radii.md,
     borderWidth: 1,
     padding: 3,
     position: 'relative',
@@ -142,8 +143,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 3,
     bottom: 3,
-    borderRadius: 10,
-    shadowColor: '#000',
+    borderRadius: radii.sm,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 4,
@@ -155,6 +155,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1,
   },
+  label: { ...typeScale.label, textAlign: 'center' },
 });
 
 export default SegmentedControl;

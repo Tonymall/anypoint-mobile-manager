@@ -8,6 +8,7 @@ import { Appbar, Text, Switch, Card, useTheme, Snackbar, IconButton, type MD3The
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSchedulers, useUpdateScheduler, useRunScheduler } from '../../hooks/queries';
+import { usePullRefresh } from '../../hooks/usePullRefresh';
 import type { Schedule } from '../../services/runtimeService';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
@@ -153,8 +154,9 @@ const SchedulersScreen: React.FC = () => {
     isError,
     error,
     refetch,
-    isRefetching,
   } = useSchedulers(domain as string);
+
+  const pullRefresh = usePullRefresh(refetch);
 
   const updateMutation = useUpdateScheduler();
   const runMutation = useRunScheduler();
@@ -304,8 +306,8 @@ const SchedulersScreen: React.FC = () => {
         contentContainerStyle={scheduleList.length === 0 ? styles.emptyListContent : styles.listContent}
         refreshControl={
           <RefreshControl
-            refreshing={isRefetching}
-            onRefresh={() => refetch()}
+            refreshing={pullRefresh.refreshing}
+            onRefresh={pullRefresh.onRefresh}
             tintColor={theme.colors.primary}
             colors={[theme.colors.primary]}
           />

@@ -1,12 +1,16 @@
 // ============================================================
-// Alert Detail — Single Alert View with Actions (2026 Design)
+// Alert Detail — Single Alert View with Actions
 //
 // Displays full alert information with severity/status badges,
 // info rows, and contextual action buttons (acknowledge,
 // resolve, dismiss) protected by confirmation dialogs.
+//
+// Built on the design token layer: severity and alert status both
+// resolve to semantic status roles, so the badges, dot and read-only
+// notice stay in step across light and dark.
 // ============================================================
 
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   ScrollView,
@@ -16,34 +20,35 @@ import {
   Appbar,
   Text,
   Button,
-  useTheme,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import type { AlertSeverity, AlertStatus } from '../../types';
-import { anypointColors, severityColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import { Skeleton } from '../../components/ui';
 import {
   usePlatformAlert,
   useAcknowledgeAlert,
   useResolveAlert,
   useDismissAlert,
 } from '../../hooks/queries/useAlertQueries';
-import { formatRelativeTime } from '../../utils/statusHelpers';
+import { formatRelativeTime, getSeverityRole } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 import InfoRow from '../../components/common/InfoRow';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
 import type { IconName } from '../../types/icons';
 
 // --- Helpers ---
-const getSeverityColor = (severity?: AlertSeverity | null): string => {
-  return severity ? (severityColors[severity] ?? anypointColors.info) : anypointColors.info;
-};
-
 const getSeverityIcon = (severity?: AlertSeverity | null): IconName => {
   switch (severity) {
     case 'CRITICAL': return 'alert-octagon';
@@ -53,13 +58,14 @@ const getSeverityIcon = (severity?: AlertSeverity | null): IconName => {
   }
 };
 
-const getStatusColor = (status?: AlertStatus | null): string => {
+/** Alert lifecycle status → semantic status role. */
+const getAlertStatusRole = (t: Tokens, status?: AlertStatus | null): StatusRole => {
   switch (status) {
-    case 'ACTIVE': return anypointColors.error;
-    case 'ACKNOWLEDGED': return anypointColors.warning;
-    case 'RESOLVED': return anypointColors.success;
-    case 'DISMISSED': return '#6B7280';
-    default: return '#6B7280';
+    case 'ACTIVE': return t.color.status.danger;
+    case 'ACKNOWLEDGED': return t.color.status.warning;
+    case 'RESOLVED': return t.color.status.success;
+    case 'DISMISSED': return t.color.status.neutral;
+    default: return t.color.status.neutral;
   }
 };
 
@@ -75,12 +81,47 @@ const getStatusIcon = (status?: AlertStatus | null): IconName => {
 
 type ConfirmAction = 'acknowledge' | 'resolve' | 'dismiss' | null;
 
+// ── Loading placeholder ──
+// Shaped like the detail content below, so nothing jumps on arrival.
+const DetailSkeleton: React.FC<{ t: Tokens }> = ({ t }) => (
+  <View style={styles.scrollContent}>
+    <View style={styles.badgeRow}>
+      <Skeleton width={132} height={38} radius={radii.lg} />
+      <Skeleton width={104} height={38} radius={radii.lg} />
+    </View>
+    <Skeleton width="80%" height={26} style={styles.skeletonName} />
+    <View
+      style={[styles.messageSection, { backgroundColor: t.color.surface.sunken }]}
+    >
+      <Skeleton width={72} height={11} />
+      <Skeleton width="100%" height={13} style={styles.skeletonLine} />
+      <Skeleton width="65%" height={13} style={styles.skeletonLine} />
+    </View>
+    <View
+      style={[
+        styles.infoSection,
+        styles.infoSectionSkeleton,
+        {
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
+        },
+      ]}
+    >
+      {[0, 1, 2, 3, 4, 5].map((row) => (
+        <View key={row} style={styles.skeletonInfoRow}>
+          <Skeleton width={96} height={13} />
+          <Skeleton width={120} height={13} />
+        </View>
+      ))}
+    </View>
+  </View>
+);
+
 const AlertDetailScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { alertId } = useLocalSearchParams<{ alertId: string }>();
-  const styles = useMemo(() => createStyles(theme), [theme]);
 
   const { data: alert, isLoading, error, refetch } = usePlatformAlert(alertId ?? '');
   const acknowledgeMutation = useAcknowledgeAlert();
@@ -139,25 +180,49 @@ const AlertDetailScreen: React.FC = () => {
     }
   };
 
-  if (isLoading) return <LoadingState message="Loading alert..." />;
+  const appbar = (
+    <Appbar.Header
+      style={{ backgroundColor: t.color.surface.canvas }}
+      elevated={false}
+    >
+      <Appbar.BackAction onPress={() => router.back()} />
+      <Appbar.Content title="Alert Detail" titleStyle={styles.appbarTitle} />
+    </Appbar.Header>
+  );
+
+  if (isLoading) {
+    return (
+      <View
+        style={[
+          styles.container,
+          { backgroundColor: t.color.surface.canvas, paddingBottom: insets.bottom },
+        ]}
+      >
+        {appbar}
+        <DetailSkeleton t={t} />
+      </View>
+    );
+  }
   if (error) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   if (!alert) return <ErrorState message="Alert not found" />;
 
   const severity = alert.severity ?? 'INFO';
   const status = alert.status ?? 'ACTIVE';
-  const sevColor = getSeverityColor(severity);
-  const statColor = getStatusColor(status);
+  const sevRole = getSeverityRole(t, severity);
+  const statRole = getAlertStatusRole(t, status);
   const isActionable = status === 'ACTIVE' || status === 'ACKNOWLEDGED';
   const isMutating =
     acknowledgeMutation.isPending || resolveMutation.isPending || dismissMutation.isPending;
 
   return (
-    <View style={[styles.container, { paddingBottom: insets.bottom }]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: t.color.surface.canvas, paddingBottom: insets.bottom },
+      ]}
+    >
       {/* ── Header ── */}
-      <Appbar.Header style={{ backgroundColor: theme.colors.background }} elevated={false}>
-        <Appbar.BackAction onPress={() => router.back()} />
-        <Appbar.Content title="Alert Detail" titleStyle={{ fontWeight: '600' }} />
-      </Appbar.Header>
+      {appbar}
 
       <ScrollView
         style={styles.scrollView}
@@ -166,65 +231,57 @@ const AlertDetailScreen: React.FC = () => {
       >
         {/* ── Severity + Status Badges ── */}
         <View style={styles.badgeRow}>
-          {/* Severity badge (large) */}
-          <View
-            style={[
-              styles.severityBadge,
-              { backgroundColor: sevColor + '18' },
-            ]}
-          >
-            <Icon name={getSeverityIcon(severity)} size={20} color={sevColor} />
-            <Text style={[styles.severityText, { color: sevColor }]}>
+          <View style={[styles.severityBadge, { backgroundColor: sevRole.surface }]}>
+            <Icon name={getSeverityIcon(severity)} size={20} color={sevRole.base} />
+            <Text style={[styles.severityText, { color: sevRole.base }]}>
               {severity}
             </Text>
           </View>
 
-          {/* Status badge */}
-          <View
-            style={[
-              styles.statusBadge,
-              { backgroundColor: statColor + '12' },
-            ]}
-          >
+          <View style={[styles.statusBadge, { backgroundColor: statRole.surface }]}>
             <View
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                backgroundColor: statColor,
-                ...(status === 'ACTIVE'
-                  ? {
-                      shadowColor: statColor,
-                      shadowOffset: { width: 0, height: 0 },
-                      shadowOpacity: 0.6,
-                      shadowRadius: 4,
-                    }
-                  : {}),
-              }}
+              style={[
+                styles.statusDot,
+                { backgroundColor: statRole.base },
+                status === 'ACTIVE' && {
+                  shadowColor: statRole.base,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.6,
+                  shadowRadius: 4,
+                },
+              ]}
             />
-            <Text style={[styles.statusText, { color: statColor }]}>
+            <Text style={[styles.statusText, { color: statRole.base }]}>
               {status}
             </Text>
           </View>
         </View>
 
         {/* ── Alert Name ── */}
-        <Text style={[styles.alertName, { color: theme.colors.onSurface }]}>
+        <Text style={[styles.alertName, { color: t.color.text.primary }]}>
           {alert.name}
         </Text>
 
         {/* ── Message Section ── */}
-        <View style={[styles.messageSection, { backgroundColor: theme.colors.surfaceVariant + '60' }]}>
-          <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.onSurfaceVariant, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 8 }}>
-            Message
+        <View style={[styles.messageSection, { backgroundColor: t.color.surface.sunken }]}>
+          <Text style={[styles.messageLabel, { color: t.color.text.tertiary }]}>
+            MESSAGE
           </Text>
-          <Text style={{ fontSize: 14, color: theme.colors.onSurface, lineHeight: 22 }}>
+          <Text style={[styles.messageBody, { color: t.color.text.primary }]}>
             {alert.message}
           </Text>
         </View>
 
         {/* ── Info Section ── */}
-        <View style={[styles.infoSection, { backgroundColor: theme.colors.surface, borderColor: theme.colors.outlineVariant }]}>
+        <View
+          style={[
+            styles.infoSection,
+            {
+              backgroundColor: t.color.surface.raised,
+              borderColor: t.color.border.subtle,
+            },
+          ]}
+        >
           <InfoRow label="Type" value={alert.type} icon="tag-outline" />
           <InfoRow label="Source" value={alert.source} icon="source-branch" />
           {alert.applicationName && (
@@ -272,7 +329,8 @@ const AlertDetailScreen: React.FC = () => {
                   style={styles.actionButton}
                   loading={acknowledgeMutation.isPending}
                   disabled={isMutating}
-                  buttonColor={anypointColors.primary}
+                  buttonColor={t.color.brand.base}
+                  textColor={t.color.text.inverse}
                 >
                   Acknowledge
                 </Button>
@@ -286,7 +344,7 @@ const AlertDetailScreen: React.FC = () => {
                   style={styles.actionButton}
                   loading={dismissMutation.isPending}
                   disabled={isMutating}
-                  textColor={theme.colors.onSurfaceVariant}
+                  textColor={t.color.text.secondary}
                 >
                   Dismiss
                 </Button>
@@ -304,7 +362,8 @@ const AlertDetailScreen: React.FC = () => {
                   style={styles.actionButton}
                   loading={resolveMutation.isPending}
                   disabled={isMutating}
-                  buttonColor={anypointColors.success}
+                  buttonColor={t.color.status.success.base}
+                  textColor={t.color.text.inverse}
                 >
                   Resolve
                 </Button>
@@ -318,7 +377,7 @@ const AlertDetailScreen: React.FC = () => {
                   style={styles.actionButton}
                   loading={dismissMutation.isPending}
                   disabled={isMutating}
-                  textColor={theme.colors.onSurfaceVariant}
+                  textColor={t.color.text.secondary}
                 >
                   Dismiss
                 </Button>
@@ -329,9 +388,9 @@ const AlertDetailScreen: React.FC = () => {
 
         {/* Read-only notice for resolved/dismissed */}
         {!isActionable && (
-          <View style={[styles.readOnlyNotice, { backgroundColor: theme.colors.surfaceVariant + '60' }]}>
-            <Icon name={getStatusIcon(status)} size={18} color={statColor} />
-            <Text style={{ fontSize: 13, color: theme.colors.onSurfaceVariant, marginLeft: 8 }}>
+          <View style={[styles.readOnlyNotice, { backgroundColor: t.color.surface.sunken }]}>
+            <Icon name={getStatusIcon(status)} size={18} color={statRole.base} />
+            <Text style={[styles.readOnlyText, { color: t.color.text.secondary }]}>
               This alert has been {String(status).toLowerCase()}. No further actions available.
             </Text>
           </View>
@@ -350,84 +409,94 @@ const AlertDetailScreen: React.FC = () => {
 };
 
 // --- Styles ---
-const createStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    scrollView: {
-      flex: 1,
-    },
-    scrollContent: {
-      paddingHorizontal: 16,
-      paddingBottom: 32,
-    },
-    badgeRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      marginTop: 8,
-      marginBottom: 16,
-    },
-    severityBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 14,
-    },
-    severityText: {
-      fontSize: 14,
-      fontWeight: '700',
-      letterSpacing: 0.3,
-    },
-    statusBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
-      borderRadius: 14,
-    },
-    statusText: {
-      fontSize: 13,
-      fontWeight: '700',
-      letterSpacing: 0.2,
-    },
-    alertName: {
-      fontSize: 22,
-      fontWeight: '700',
-      letterSpacing: -0.3,
-      marginBottom: 16,
-    },
-    messageSection: {
-      padding: 16,
-      borderRadius: 16,
-      marginBottom: 16,
-    },
-    infoSection: {
-      borderRadius: 18,
-      borderWidth: 1,
-      overflow: 'hidden',
-      marginBottom: 24,
-    },
-    actionSection: {
-      gap: 12,
-      marginBottom: 16,
-    },
-    actionButton: {
-      borderRadius: 16,
-      paddingVertical: 4,
-    },
-    readOnlyNotice: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: 16,
-      borderRadius: 14,
-      marginBottom: 16,
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  appbarTitle: typeScale.heading,
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxxl,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  severityBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: 14,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.lg,
+  },
+  severityText: { ...typeScale.body, fontWeight: '700', letterSpacing: 0.3 },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.lg,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: radii.pill,
+  },
+  statusText: { ...typeScale.bodySmall, fontWeight: '700' },
+  alertName: { ...typeScale.title, marginBottom: spacing.lg },
+  messageSection: {
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    marginBottom: spacing.lg,
+  },
+  messageLabel: { ...typeScale.caption, marginBottom: spacing.sm },
+  messageBody: { ...typeScale.body, lineHeight: 22 },
+  infoSection: {
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
+    marginBottom: spacing.xxl,
+  },
+  infoSectionSkeleton: {
+    padding: spacing.lg,
+    gap: spacing.lg,
+  },
+  actionSection: {
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  actionButton: {
+    borderRadius: radii.lg,
+    paddingVertical: spacing.xs,
+  },
+  readOnlyNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderRadius: radii.lg,
+    marginBottom: spacing.lg,
+  },
+  readOnlyText: { ...typeScale.bodySmall, flex: 1 },
+  skeletonName: {
+    marginBottom: spacing.lg,
+  },
+  skeletonLine: {
+    marginTop: spacing.sm,
+  },
+  skeletonInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+});
 
 export default AlertDetailScreen;

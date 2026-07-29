@@ -1,20 +1,27 @@
-﻿// ============================================================
-// Settings Screen - App preferences, region, theme, logout
-// 2026 Modern Dark-First Design
+// ============================================================
+// Settings — account, organization, appearance, notifications
+// ============================================================
+// One list, not several improvised ones: every section is the same
+// shape (a labelled header over a single card), every row is the same
+// height, and every icon sits in the same 34pt well tinted with its
+// own status role. Section rhythm and row rhythm each come from one
+// constant, so the page reads as a single stack.
+//
+// Built on the design token layer — no raw colours, no `color + 'NN'`
+// alpha strings, no ad-hoc font sizes, and light mode is defined by
+// construction rather than inherited by accident.
 // ============================================================
 
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo, type ReactNode } from 'react';
 import { useRouter } from 'expo-router';
 import { Linking, StyleSheet, View, ScrollView, Pressable } from 'react-native';
 import {
   Text,
   Switch,
-  useTheme,
   Button,
   RadioButton,
   Portal,
   Dialog,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,7 +37,15 @@ import { activateRememberedAccount } from '../../services/rememberedAccountServi
 import { resetSessionFlags } from '../../services/runtimeService';
 import { getRegionById } from '../../config/regions';
 import { hapticWarning, hapticSelection } from '../../utils/haptics';
-import { anypointColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  useTokens,
+  withAlpha,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
 import { requestPermissions } from '../../services/notificationService';
 import { useNotificationStore } from '../../stores/notificationStore';
 import { useRemoteConfigStore } from '../../stores/remoteConfigStore';
@@ -42,6 +57,12 @@ import type { IconName } from '../../types/icons';
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 const RELEASE_STAGE = ((Constants.expoConfig?.extra as { releaseStage?: string } | undefined)?.releaseStage ?? 'beta').toUpperCase();
 const PRIVACY_POLICY_URL = `${(process.env.EXPO_PUBLIC_BACKEND_URL ?? 'https://muleops-backend.onrender.com').replace(/\/$/, '')}/privacy-policy`;
+
+/** One icon well size, one row height — the rhythm of the whole page. */
+const ICON_WELL = 34;
+const ROW_HEIGHT = 60;
+/** Separator starts where the row text starts, so the list reads as one column. */
+const SEPARATOR_INSET = spacing.lg + ICON_WELL + spacing.md;
 
 async function openExternalUrl(url: string): Promise<void> {
   try {
@@ -57,47 +78,97 @@ async function openExternalUrl(url: string): Promise<void> {
   }
 }
 
-// â”€â”€ Reusable Setting Row â”€â”€
+// ── Section: label + single card, the only section shape on the page ──
+const SettingsSection: React.FC<{
+  title: string;
+  role: StatusRole;
+  children: ReactNode;
+  t: Tokens;
+}> = ({ title, role, children, t }) => {
+  const rows = React.Children.toArray(children).filter(Boolean);
+
+  return (
+    <>
+      <View style={styles.sectionHeader}>
+        <View style={[styles.sectionAccent, { backgroundColor: role.base }]} />
+        <Text style={[styles.sectionTitle, { color: t.color.text.tertiary }]}>
+          {title}
+        </Text>
+      </View>
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: t.color.surface.raised,
+            borderColor: t.color.border.subtle,
+          },
+        ]}
+      >
+        {rows.map((row, index) => (
+          <React.Fragment key={index}>
+            {index > 0 ? (
+              <View
+                style={[styles.separator, { backgroundColor: t.color.border.subtle }]}
+              />
+            ) : null}
+            {row}
+          </React.Fragment>
+        ))}
+      </View>
+    </>
+  );
+};
+
+// ── Row: one height, one icon well, one type pairing ──
 const SettingRow: React.FC<{
   icon: IconName;
-  iconColor?: string;
-  iconBg?: string;
+  role?: StatusRole;
   title: string;
   subtitle?: string;
   right?: React.ReactNode;
   onPress?: () => void;
   showChevron?: boolean;
-}> = ({ icon, iconColor, iconBg, title, subtitle, right, onPress, showChevron }) => {
-  const theme = useTheme();
+  t: Tokens;
+}> = ({ icon, role, title, subtitle, right, onPress, showChevron, t }) => {
+  const wellColor = role?.base ?? t.color.text.secondary;
+  const wellSurface = role?.surface ?? t.color.surface.sunken;
+
   const content = (
-    <View style={rowStyles.container}>
-      <View style={[rowStyles.iconBox, { backgroundColor: iconBg ?? theme.colors.surfaceVariant }]}>
-        <Icon name={icon} size={18} color={iconColor ?? theme.colors.onSurfaceVariant} />
+    <View style={styles.row}>
+      <View style={[styles.iconWell, { backgroundColor: wellSurface }]}>
+        <Icon name={icon} size={18} color={wellColor} />
       </View>
-      <View style={rowStyles.textCol}>
-        <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '500' }}>
+      <View style={styles.rowText}>
+        <Text style={[styles.rowTitle, { color: t.color.text.primary }]}>
           {title}
         </Text>
         {subtitle ? (
-          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }} numberOfLines={1}>
+          <Text
+            style={[styles.rowSubtitle, { color: t.color.text.tertiary }]}
+            numberOfLines={1}
+          >
             {subtitle}
           </Text>
         ) : null}
       </View>
       {right}
       {showChevron && !right && (
-        <Icon name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.5 }} />
+        <Icon name="chevron-right" size={20} color={t.color.text.tertiary} />
       )}
     </View>
   );
+
   if (onPress) {
     return (
       <Pressable
         onPress={onPress}
-        android_ripple={{ color: theme.colors.primaryContainer }}
+        android_ripple={{ color: t.color.brand.surface }}
         accessibilityLabel={`${title}${subtitle ? ': ' + subtitle : ''}`}
         accessibilityRole="button"
         accessibilityHint="Double tap to change"
+        style={({ pressed }) => [
+          pressed && { backgroundColor: withAlpha(t.color.text.primary, 'faint') },
+        ]}
       >
         {content}
       </Pressable>
@@ -106,31 +177,10 @@ const SettingRow: React.FC<{
   return content;
 };
 
-const rowStyles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 14,
-  },
-  iconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  textCol: {
-    flex: 1,
-  },
-});
-
 const SettingsScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(theme), [theme]);
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const selectedRegion = useAuthStore((s) => s.selectedRegion);
@@ -185,7 +235,7 @@ const SettingsScreen: React.FC = () => {
     } finally {
       queryClient.clear();
       logger.log('[Settings] queryClient cleared');
-      // Clear notifications â€” they belong to the current account/session.
+      // Clear notifications — they belong to the current account/session.
       // Prevents stale notifications from showing on a different account.
       const { clearAll } = require('../../stores/notificationStore').useNotificationStore.getState();
       clearAll();
@@ -255,60 +305,76 @@ const SettingsScreen: React.FC = () => {
     ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`
     : '?';
 
-  const envColor = currentEnv?.isProduction ? anypointColors.success : anypointColors.warning;
+  const envRole = currentEnv?.isProduction
+    ? t.color.status.success
+    : t.color.status.warning;
 
   return (
     <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 40 }}
+      style={[styles.container, { backgroundColor: t.color.surface.canvas }]}
+      contentContainerStyle={{ paddingTop: insets.top + spacing.sm, paddingBottom: 40 }}
       showsVerticalScrollIndicator={false}
     >
-      {/* â”€â”€ Profile Card â”€â”€ */}
-      <View style={styles.profileCard}>
-        {/* Accent glow at top */}
-        <View style={styles.profileAccent} />
+      {/* ── Profile Card ── */}
+      <View
+        style={[
+          styles.profileCard,
+          {
+            backgroundColor: t.color.surface.raised,
+            borderColor: t.color.border.subtle,
+          },
+        ]}
+      >
+        <View style={[styles.profileAccent, { backgroundColor: t.color.brand.base }]} />
 
         <View style={styles.profileContent}>
           {/* Avatar */}
-          <View style={[styles.avatar, { backgroundColor: theme.colors.primary + '18' }]}>
-            <Text style={[styles.avatarText, { color: theme.colors.primary }]}>
+          <View style={[styles.avatar, { backgroundColor: t.color.brand.surface }]}>
+            <Text style={[styles.avatarText, { color: t.color.text.accent }]}>
               {initials}
             </Text>
-            {/* Online indicator */}
-            <View style={styles.onlineDot} />
+            <View
+              style={[
+                styles.onlineDot,
+                {
+                  backgroundColor: t.color.status.success.base,
+                  borderColor: t.color.surface.raised,
+                },
+              ]}
+            />
           </View>
 
-          <Text variant="titleLarge" style={[styles.profileName, { color: theme.colors.onSurface }]}>
+          <Text style={[styles.profileName, { color: t.color.text.primary }]}>
             {user ? `${user.firstName} ${user.lastName}` : 'User'}
           </Text>
-          <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+          <Text style={[styles.profileEmail, { color: t.color.text.tertiary }]}>
             {user?.email ?? ''}
           </Text>
 
           {/* Chips row */}
           <View style={styles.chipsRow}>
-            <View style={[styles.chip, { backgroundColor: theme.colors.primary + '14' }]}>
-              <Icon name="domain" size={13} color={theme.colors.primary} />
-              <Text style={[styles.chipText, { color: theme.colors.primary }]}>
+            <View style={[styles.chip, { backgroundColor: t.color.brand.surface }]}>
+              <Icon name="domain" size={13} color={t.color.text.accent} />
+              <Text style={[styles.chipText, { color: t.color.text.accent }]}>
                 {currentOrg?.name ?? user?.organizationName ?? 'N/A'}
               </Text>
             </View>
-            <View style={[styles.chip, { backgroundColor: theme.colors.secondary + '14' }]}>
-              <Icon name="earth" size={13} color={theme.colors.secondary} />
-              <Text style={[styles.chipText, { color: theme.colors.secondary }]}>
+            <View style={[styles.chip, { backgroundColor: t.color.accent.secondary.surface }]}>
+              <Icon name="earth" size={13} color={t.color.accent.secondary.base} />
+              <Text style={[styles.chipText, { color: t.color.accent.secondary.base }]}>
                 {currentRegion.label}
               </Text>
             </View>
           </View>
 
           {currentEnv && (
-            <View style={[styles.chip, { backgroundColor: envColor + '14', marginTop: 6 }]}>
+            <View style={[styles.chip, styles.envChip, { backgroundColor: envRole.surface }]}>
               <Icon
                 name={currentEnv.isProduction ? 'shield-check' : 'test-tube'}
                 size={13}
-                color={envColor}
+                color={envRole.base}
               />
-              <Text style={[styles.chipText, { color: envColor }]}>
+              <Text style={[styles.chipText, { color: envRole.base }]}>
                 {currentEnv.name}
               </Text>
             </View>
@@ -316,17 +382,12 @@ const SettingsScreen: React.FC = () => {
         </View>
       </View>
 
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          ACCOUNTS
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Accounts ── */}
+      <SettingsSection title="ACCOUNTS" role={t.color.accent.brand} t={t}>
         <SettingRow
+          t={t}
           icon="account-switch-outline"
-          iconColor={theme.colors.primary}
-          iconBg={theme.colors.primary + '14'}
+          role={t.color.accent.brand}
           title="Switch Account"
           subtitle={
             otherRememberedAccounts.length > 0
@@ -337,127 +398,94 @@ const SettingsScreen: React.FC = () => {
           showChevron={otherRememberedAccounts.length > 0}
           right={
             switchingAccountId ? (
-              <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+              <Text style={[styles.rowMeta, { color: t.color.text.tertiary }]}>
                 Switching...
               </Text>
             ) : undefined
           }
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="account-plus-outline"
-          iconColor={theme.colors.secondary}
-          iconBg={theme.colors.secondary + '14'}
+          role={t.color.accent.secondary}
           title="Add Another Account"
           subtitle="Keep your current account and sign in to another client"
           onPress={handleAddAnotherAccount}
           showChevron
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Administration Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          ADMINISTRATION
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Administration ── */}
+      <SettingsSection title="ADMINISTRATION" role={t.color.accent.tertiary} t={t}>
         <SettingRow
+          t={t}
           icon="shield-crown-outline"
-          iconColor={anypointColors.mulePurple}
-          iconBg={anypointColors.mulePurple + '14'}
+          role={t.color.accent.tertiary}
           title="Admin Panel"
           subtitle="Users, Connected Apps, Secrets"
           onPress={() => router.push('/(main)/admin' as any)}
           showChevron
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Organization Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.primary }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          ORGANIZATION
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Organization ── */}
+      <SettingsSection title="ORGANIZATION" role={t.color.accent.brand} t={t}>
         <SettingRow
+          t={t}
           icon="domain"
-          iconColor={theme.colors.primary}
-          iconBg={theme.colors.primary + '14'}
+          role={t.color.accent.brand}
           title="Switch Organization"
           subtitle={currentOrg?.name ?? 'Not selected'}
           onPress={handleSwitchOrg}
           showChevron
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="server"
-          iconColor={theme.colors.tertiary}
-          iconBg={theme.colors.tertiary + '14'}
+          role={t.color.status.success}
           title="Switch Environment"
           subtitle={currentEnv?.name ?? 'Not selected'}
           onPress={handleSwitchEnv}
           showChevron
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Connection Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.secondary }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          CONNECTION
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Connection ── */}
+      <SettingsSection title="CONNECTION" role={t.color.accent.secondary} t={t}>
         <SettingRow
+          t={t}
           icon="earth"
-          iconColor={theme.colors.secondary}
-          iconBg={theme.colors.secondary + '14'}
+          role={t.color.accent.secondary}
           title="Control Plane"
           subtitle={`${currentRegion.label} - ${currentRegion.notes}`}
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="link-variant"
-          iconColor={theme.colors.onSurfaceVariant}
           title="API Endpoint"
           subtitle={currentRegion.url}
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Appearance Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.mulePurple }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          APPEARANCE
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Appearance ── */}
+      <SettingsSection title="APPEARANCE" role={t.color.accent.tertiary} t={t}>
         <SettingRow
+          t={t}
           icon={themeIcon}
-          iconColor={anypointColors.mulePurple}
-          iconBg={anypointColors.mulePurple + '14'}
+          role={t.color.accent.tertiary}
           title="Theme"
           subtitle={themeLabel}
           onPress={() => setThemeDialogVisible(true)}
           showChevron
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Notifications Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: anypointColors.warning }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          NOTIFICATIONS
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Notifications ── */}
+      <SettingsSection title="NOTIFICATIONS" role={t.color.status.warning} t={t}>
         <SettingRow
+          t={t}
           icon="bell-outline"
-          iconColor={anypointColors.warning}
-          iconBg={anypointColors.warning + '14'}
+          role={t.color.status.warning}
           title="Push Notifications"
           right={
             <Switch
@@ -476,11 +504,10 @@ const SettingsScreen: React.FC = () => {
             />
           }
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="alert-circle-outline"
-          iconColor={anypointColors.error}
-          iconBg={anypointColors.error + '14'}
+          role={t.color.status.danger}
           title="Critical Alerts"
           right={
             <Switch
@@ -498,11 +525,10 @@ const SettingsScreen: React.FC = () => {
             />
           }
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="rocket-launch-outline"
-          iconColor={anypointColors.info}
-          iconBg={anypointColors.info + '14'}
+          role={t.color.status.info}
           title="Deployment Updates"
           right={
             <Switch
@@ -520,34 +546,27 @@ const SettingsScreen: React.FC = () => {
             />
           }
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Legal Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.tertiary }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          LEGAL
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── Legal ── */}
+      <SettingsSection title="LEGAL" role={t.color.status.success} t={t}>
         <SettingRow
+          t={t}
           icon="file-document-outline"
-          iconColor={theme.colors.tertiary}
-          iconBg={theme.colors.tertiary + '14'}
+          role={t.color.status.success}
           title="Terms & Conditions"
           subtitle={
             termsAcceptance
-              ? `Accepted \u00B7 Version ${termsAcceptance.version}`
+              ? `Accepted · Version ${termsAcceptance.version}`
               : `Version ${TERMS_VERSION}`
           }
           onPress={() => router.push('/(main)/terms' as any)}
           showChevron
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="shield-account-outline"
-          iconColor={theme.colors.primary}
-          iconBg={theme.colors.primary + '14'}
+          role={t.color.accent.brand}
           title="Privacy Policy"
           subtitle="How MuleOps handles data"
           onPress={() => {
@@ -555,45 +574,44 @@ const SettingsScreen: React.FC = () => {
           }}
           showChevron
         />
-        <View style={[styles.separator, { backgroundColor: theme.colors.outlineVariant }]} />
         <SettingRow
+          t={t}
           icon="bug-outline"
-          iconColor={anypointColors.warning}
-          iconBg={anypointColors.warning + '14'}
+          role={t.color.status.warning}
           title="Report a Bug"
           subtitle="Tell us what went wrong"
           onPress={() => router.push('/(main)/report-bug' as any)}
           showChevron
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ About Section â”€â”€ */}
-      <View style={styles.sectionHeader}>
-        <View style={[styles.sectionAccent, { backgroundColor: theme.colors.onSurfaceVariant }]} />
-        <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-          ABOUT
-        </Text>
-      </View>
-      <View style={styles.card}>
+      {/* ── About ── */}
+      <SettingsSection title="ABOUT" role={t.color.status.neutral} t={t}>
         <SettingRow
+          t={t}
           icon="information-outline"
-          iconColor={theme.colors.onSurfaceVariant}
           title="Version"
           subtitle={`${APP_VERSION} (${(remoteReleaseStage ?? RELEASE_STAGE.toLowerCase()).toUpperCase()})`}
         />
-      </View>
+      </SettingsSection>
 
-      {/* â”€â”€ Sign Out â”€â”€ */}
+      {/* ── Sign Out ── */}
       <Pressable
         onPress={() => setLogoutDialogVisible(true)}
         disabled={loggingOut}
-        style={[styles.logoutBtn, { borderColor: theme.colors.error + '40' }]}
-        android_ripple={{ color: theme.colors.error + '20' }}
+        style={[
+          styles.logoutBtn,
+          {
+            borderColor: t.color.status.danger.border,
+            backgroundColor: t.color.status.danger.surface,
+          },
+        ]}
+        android_ripple={{ color: t.color.status.danger.surface }}
         accessibilityLabel="Sign out"
         accessibilityRole="button"
       >
-        <Icon name="logout" size={18} color={theme.colors.error} />
-        <Text style={[styles.logoutText, { color: theme.colors.error }]}>
+        <Icon name="logout" size={18} color={t.color.status.danger.base} />
+        <Text style={[styles.logoutText, { color: t.color.status.danger.base }]}>
           {loggingOut ? 'Signing Out...' : 'Sign Out'}
         </Text>
       </Pressable>
@@ -603,7 +621,7 @@ const SettingsScreen: React.FC = () => {
         <Dialog
           visible={accountDialogVisible}
           onDismiss={() => setAccountDialogVisible(false)}
-          style={styles.dialog}
+          style={[styles.dialog, { backgroundColor: t.color.surface.raised }]}
         >
           <Dialog.Title>Switch Account</Dialog.Title>
           <Dialog.Content>
@@ -621,25 +639,32 @@ const SettingsScreen: React.FC = () => {
                   style={[
                     styles.accountOption,
                     {
-                      borderColor: isCurrent ? theme.colors.primary : theme.colors.outlineVariant,
+                      borderColor: isCurrent
+                        ? t.color.brand.base
+                        : t.color.border.subtle,
                       backgroundColor: isCurrent
-                        ? theme.colors.primary + '12'
-                        : theme.colors.surface,
+                        ? t.color.brand.surface
+                        : t.color.surface.sunken,
                     },
                   ]}
                 >
                   <View style={styles.accountOptionText}>
-                    <Text variant="bodyLarge" style={{ color: theme.colors.onSurface, fontWeight: '600' }}>
+                    <Text style={[styles.accountName, { color: t.color.text.primary }]}>
                       {fullName || account.user.username}
                     </Text>
-                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                    <Text style={[styles.accountMeta, { color: t.color.text.tertiary }]}>
                       {account.user.email || account.user.username}
                     </Text>
-                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                    <Text style={[styles.accountMeta, { color: t.color.text.tertiary }]}>
                       {account.currentOrganization?.name ?? account.user.organizationName}
                     </Text>
                   </View>
-                  <Text variant="bodySmall" style={{ color: isCurrent ? theme.colors.primary : theme.colors.onSurfaceVariant }}>
+                  <Text
+                    style={[
+                      styles.accountMeta,
+                      { color: isCurrent ? t.color.text.accent : t.color.text.tertiary },
+                    ]}
+                  >
                     {isCurrent ? 'Current' : getRegionById(account.selectedRegion).label}
                   </Text>
                 </Pressable>
@@ -654,7 +679,7 @@ const SettingsScreen: React.FC = () => {
         <Dialog
           visible={themeDialogVisible}
           onDismiss={() => setThemeDialogVisible(false)}
-          style={styles.dialog}
+          style={[styles.dialog, { backgroundColor: t.color.surface.raised }]}
         >
           <Dialog.Title>Choose Theme</Dialog.Title>
           <Dialog.Content>
@@ -678,17 +703,17 @@ const SettingsScreen: React.FC = () => {
         <Dialog
           visible={logoutDialogVisible}
           onDismiss={() => setLogoutDialogVisible(false)}
-          style={styles.dialog}
+          style={[styles.dialog, { backgroundColor: t.color.surface.raised }]}
         >
           <Dialog.Title>Sign Out</Dialog.Title>
           <Dialog.Content>
-            <Text variant="bodyMedium">
+            <Text style={[styles.dialogBody, { color: t.color.text.secondary }]}>
               Are you sure you want to sign out? You will need to enter your credentials again to access the platform.
             </Text>
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setLogoutDialogVisible(false)}>Cancel</Button>
-            <Button onPress={handleLogout} textColor={theme.colors.error}>Sign Out</Button>
+            <Button onPress={handleLogout} textColor={t.color.status.danger.base}>Sign Out</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
@@ -697,142 +722,145 @@ const SettingsScreen: React.FC = () => {
   );
 };
 
-const createStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    // â”€â”€ Profile Card â”€â”€
-    profileCard: {
-      marginHorizontal: 16,
-      marginBottom: 8,
-      borderRadius: 20,
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.outlineVariant,
-      overflow: 'hidden',
-    },
-    profileAccent: {
-      height: 3,
-      backgroundColor: theme.colors.primary,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-    },
-    profileContent: {
-      alignItems: 'center',
-      padding: 24,
-      paddingTop: 20,
-    },
-    avatar: {
-      width: 72,
-      height: 72,
-      borderRadius: 18,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    avatarText: {
-      fontSize: 26,
-      fontWeight: '700',
-    },
-    onlineDot: {
-      position: 'absolute',
-      bottom: 2,
-      right: 2,
-      width: 14,
-      height: 14,
-      borderRadius: 7,
-      backgroundColor: anypointColors.success,
-      borderWidth: 2.5,
-      borderColor: theme.colors.surface,
-    },
-    profileName: {
-      fontWeight: '700',
-      marginBottom: 2,
-      letterSpacing: -0.3,
-    },
-    chipsRow: {
-      flexDirection: 'row',
-      gap: 8,
-      marginTop: 12,
-    },
-    chip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      borderRadius: 10,
-      gap: 5,
-    },
-    chipText: {
-      fontSize: 11,
-      fontWeight: '600',
-      letterSpacing: 0.2,
-    },
-    // â”€â”€ Sections â”€â”€
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingHorizontal: 20,
-      marginTop: 20,
-      marginBottom: 8,
-    },
-    sectionAccent: {
-      width: 3,
-      height: 14,
-      borderRadius: 2,
-    },
-    card: {
-      marginHorizontal: 16,
-      borderRadius: 16,
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      borderColor: theme.colors.outlineVariant,
-      overflow: 'hidden',
-    },
-    separator: {
-      height: StyleSheet.hairlineWidth,
-      marginLeft: 66,
-    },
-    accountOption: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      borderWidth: 1,
-      borderRadius: 14,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      marginBottom: 10,
-      gap: 12,
-    },
-    accountOptionText: {
-      flex: 1,
-      gap: 2,
-    },
-    // â”€â”€ Logout â”€â”€
-    logoutBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      marginHorizontal: 16,
-      marginTop: 28,
-      paddingVertical: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-    },
-    logoutText: {
-      fontSize: 15,
-      fontWeight: '600',
-    },
-    // â”€â”€ Dialog â”€â”€
-    dialog: {
-      borderRadius: 24,
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  // ── Profile Card ──
+  profileCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  profileAccent: {
+    height: 3,
+  },
+  profileContent: {
+    alignItems: 'center',
+    padding: spacing.xxl,
+    paddingTop: spacing.xl,
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: radii.xl,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  avatarText: typeScale.metric,
+  onlineDot: {
+    position: 'absolute',
+    bottom: 2,
+    right: 2,
+    width: 14,
+    height: 14,
+    borderRadius: radii.pill,
+    borderWidth: 2.5,
+  },
+  profileName: { ...typeScale.title, marginBottom: 2 },
+  profileEmail: typeScale.bodySmall,
+  chipsRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+    gap: 5,
+  },
+  envChip: {
+    marginTop: 6,
+  },
+  chipText: typeScale.caption,
+  // ── Sections ──
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.xl,
+    marginTop: spacing.xxl,
+    marginBottom: spacing.sm,
+  },
+  sectionAccent: {
+    width: 3,
+    height: 14,
+    borderRadius: 2,
+  },
+  sectionTitle: { ...typeScale.label, letterSpacing: 0.8 },
+  card: {
+    marginHorizontal: spacing.lg,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  separator: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: SEPARATOR_INSET,
+  },
+  // ── Rows ──
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: ROW_HEIGHT,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+  },
+  iconWell: {
+    width: ICON_WELL,
+    height: ICON_WELL,
+    borderRadius: radii.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rowText: {
+    flex: 1,
+  },
+  rowTitle: typeScale.subheading,
+  rowSubtitle: { ...typeScale.bodySmall, fontWeight: '400', marginTop: 1 },
+  rowMeta: typeScale.bodySmall,
+  // ── Dialogs ──
+  accountOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: radii.md,
+    paddingHorizontal: 14,
+    paddingVertical: spacing.md,
+    marginBottom: 10,
+    gap: spacing.md,
+  },
+  accountOptionText: {
+    flex: 1,
+    gap: 2,
+  },
+  accountName: typeScale.subheading,
+  accountMeta: typeScale.bodySmall,
+  dialog: {
+    borderRadius: radii.xl,
+  },
+  dialogBody: typeScale.body,
+  // ── Logout ──
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: 28,
+    paddingVertical: 14,
+    borderRadius: radii.md,
+    borderWidth: 1,
+  },
+  logoutText: typeScale.subheading,
+});
 
 export default SettingsScreen;
-
-

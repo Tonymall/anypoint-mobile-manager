@@ -1,27 +1,37 @@
 // ============================================================
 // Server Detail — Server info, runtime metrics, and actions
 //
-// Modern dark-first design with status banner, runtime info
-// progress bars, IP list, deployed apps, and restart action.
+// Status banner, runtime info with usage bars, IP list, deployed
+// apps, and a restart action.
+//
+// Built on the design token layer: status resolves to a semantic
+// status role shared with the servers list, and each info section
+// names an accent role rather than a colour.
 // ============================================================
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { StyleSheet, View, ScrollView, Pressable } from 'react-native';
 import {
   Text,
-  useTheme,
   Appbar,
   Portal,
   Snackbar,
   ProgressBar,
   ActivityIndicator,
-  type MD3Theme,
 } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
-import type { ServerStatus } from '../../types';
-import { anypointColors } from '../../theme';
+import {
+  radii,
+  spacing,
+  typeScale,
+  monoFontFamily,
+  useTokens,
+  type StatusRole,
+  type Tokens,
+} from '../../theme';
+import { Skeleton } from '../../components/ui';
 import { ConfirmDialog } from '../../components/common';
 import {
   useServer,
@@ -29,77 +39,47 @@ import {
 } from '../../hooks/queries/useInfrastructureQueries';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticSuccess, hapticError } from '../../utils/haptics';
-import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import { getServerStatusRole, getServerStatusLabel } from './ServersScreen';
 import type { IconName } from '../../types/icons';
 
-// --- Server status color ---
-const SERVER_STATUS_COLOR: Record<ServerStatus, string> = {
-  RUNNING: anypointColors.success,
-  DISCONNECTED: anypointColors.error,
-  CREATED: '#6B7280',
-  UPDATED: '#6B7280',
-};
-
-const getServerStatusColor = (status: string): string =>
-  SERVER_STATUS_COLOR[status as ServerStatus] ?? '#6B7280';
-
-const getServerStatusLabel = (status: string): string => {
-  switch (status) {
-    case 'RUNNING': return 'Running';
-    case 'DISCONNECTED': return 'Disconnected';
-    case 'CREATED': return 'Created';
-    case 'UPDATED': return 'Updated';
-    default: return status;
-  }
-};
-
 // --- InfoItem ---
-const InfoItem: React.FC<{ label: string; value: string; icon?: IconName; iconColor?: string }> = ({
-  label, value, icon, iconColor,
-}) => {
-  const theme = useTheme();
-  return (
-    <View style={infoStyles.row}>
-      {icon && (
-        <View style={[infoStyles.iconBox, { backgroundColor: (iconColor ?? theme.colors.onSurfaceVariant) + '14' }]}>
-          <Icon name={icon} size={14} color={iconColor ?? theme.colors.onSurfaceVariant} />
-        </View>
-      )}
-      <Text
-        variant="labelMedium"
-        style={{ color: theme.colors.onSurfaceVariant, width: icon ? 100 : 110, flexShrink: 0 }}
-        numberOfLines={1}
+const InfoItem: React.FC<{
+  label: string;
+  value: string;
+  icon?: IconName;
+  role?: StatusRole;
+  t: Tokens;
+}> = ({ label, value, icon, role, t }) => (
+  <View style={styles.infoRow}>
+    {icon && (
+      <View
+        style={[
+          styles.infoIconWell,
+          { backgroundColor: role?.surface ?? t.color.surface.sunken },
+        ]}
       >
-        {label}
-      </Text>
-      <Text
-        variant="bodyMedium"
-        style={{ color: theme.colors.onSurface, flex: 1 }}
-        selectable
-        numberOfLines={2}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-};
-
-const infoStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 7,
-    gap: 8,
-  },
-  iconBox: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
+        <Icon name={icon} size={14} color={role?.base ?? t.color.text.secondary} />
+      </View>
+    )}
+    <Text
+      style={[
+        styles.infoLabel,
+        { color: t.color.text.tertiary, width: icon ? 100 : 110 },
+      ]}
+      numberOfLines={1}
+    >
+      {label}
+    </Text>
+    <Text
+      style={[styles.infoValue, { color: t.color.text.primary }]}
+      selectable
+      numberOfLines={2}
+    >
+      {value}
+    </Text>
+  </View>
+);
 
 // --- Resource Bar ---
 const ResourceBar: React.FC<{
@@ -108,30 +88,35 @@ const ResourceBar: React.FC<{
   value: number;
   total: number;
   unit: string;
-  color: string;
-}> = ({ label, icon, value, total, unit, color }) => {
-  const theme = useTheme();
+  role: StatusRole;
+  t: Tokens;
+}> = ({ label, icon, value, total, unit, role, t }) => {
   const percent = total > 0 ? value / total : 0;
   const isWarning = percent > 0.8;
-  const barColor = isWarning ? anypointColors.error : color;
+  const barRole = isWarning ? t.color.status.danger : role;
 
   return (
-    <View style={{ marginBottom: 14 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-        <Icon name={icon} size={14} color={barColor} style={{ marginRight: 6 }} />
-        <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.onSurfaceVariant, flex: 1 }}>
+    <View style={styles.resourceBar}>
+      <View style={styles.resourceHeader}>
+        <Icon name={icon} size={14} color={barRole.base} style={styles.resourceIcon} />
+        <Text style={[styles.resourceLabel, { color: t.color.text.secondary }]}>
           {label}
         </Text>
-        <Text style={{ fontSize: 12, fontWeight: '700', color: isWarning ? anypointColors.error : theme.colors.onSurface }}>
+        <Text
+          style={[
+            styles.resourcePercent,
+            { color: isWarning ? barRole.base : t.color.text.primary },
+          ]}
+        >
           {Math.round(percent * 100)}%
         </Text>
       </View>
       <ProgressBar
         progress={percent}
-        color={barColor}
-        style={{ height: 6, borderRadius: 3, backgroundColor: theme.colors.surfaceVariant }}
+        color={barRole.base}
+        style={[styles.progress, { backgroundColor: t.color.surface.sunken }]}
       />
-      <Text style={{ fontSize: 10, color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+      <Text style={[styles.resourceMeta, { color: t.color.text.tertiary }]}>
         {value} / {total} {unit}
       </Text>
     </View>
@@ -142,70 +127,103 @@ const ResourceBar: React.FC<{
 const ActionButton: React.FC<{
   icon: IconName;
   label: string;
-  color?: string;
+  role: StatusRole;
   onPress: () => void;
   loading?: boolean;
   disabled?: boolean;
-}> = ({ icon, label, color, onPress, loading, disabled }) => {
-  const theme = useTheme();
-  const btnColor = color ?? theme.colors.primary;
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled || loading}
-      accessibilityLabel={`${label}${disabled ? ', disabled' : ''}`}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: !!disabled || !!loading }}
+  t: Tokens;
+}> = ({ icon, label, role, onPress, loading, disabled, t }) => (
+  <Pressable
+    onPress={onPress}
+    disabled={disabled || loading}
+    accessibilityLabel={`${label}${disabled ? ', disabled' : ''}`}
+    accessibilityRole="button"
+    accessibilityState={{ disabled: !!disabled || !!loading }}
+    style={[
+      styles.actionBtn,
+      {
+        backgroundColor: disabled ? t.color.surface.sunken : role.surface,
+        borderColor: disabled ? t.color.border.subtle : role.border,
+        opacity: disabled ? 0.5 : 1,
+      },
+    ]}
+  >
+    {loading ? (
+      <ActivityIndicator size={16} color={role.base} />
+    ) : (
+      <Icon
+        name={icon}
+        size={16}
+        color={disabled ? t.color.text.tertiary : role.base}
+      />
+    )}
+    <Text
       style={[
-        actionBtnStyles.btn,
+        styles.actionLabel,
+        { color: disabled ? t.color.text.tertiary : role.base },
+      ]}
+    >
+      {label}
+    </Text>
+  </Pressable>
+);
+
+// ── Section header ──
+const SectionHeading: React.FC<{ title: string; role: StatusRole; t: Tokens }> = ({
+  title,
+  role,
+  t,
+}) => (
+  <View style={styles.sectionHeader}>
+    <View style={[styles.sectionAccent, { backgroundColor: role.base }]} />
+    <Text style={[styles.sectionTitle, { color: t.color.text.tertiary }]}>
+      {title}
+    </Text>
+  </View>
+);
+
+// ── Loading placeholder ──
+// Shaped like the status card and the first info section below it.
+const DetailSkeleton: React.FC<{ t: Tokens }> = ({ t }) => (
+  <View style={styles.skeletonWrap}>
+    <View
+      style={[
+        styles.card,
+        styles.skeletonStatusCard,
         {
-          backgroundColor: disabled ? theme.colors.surfaceVariant : btnColor + '14',
-          borderColor: disabled ? theme.colors.outlineVariant : btnColor + '30',
-          opacity: disabled ? 0.5 : 1,
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
         },
       ]}
     >
-      {loading ? (
-        <ActivityIndicator size={16} color={btnColor} />
-      ) : (
-        <Icon name={icon} size={16} color={disabled ? theme.colors.onSurfaceVariant : btnColor} />
-      )}
-      <Text
-        style={{
-          fontSize: 12,
-          fontWeight: '600',
-          color: disabled ? theme.colors.onSurfaceVariant : btnColor,
-          letterSpacing: 0.2,
-        }}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-};
-
-const actionBtnStyles = StyleSheet.create({
-  btn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    minWidth: 80,
-    flex: 1,
-  },
-});
-
-// --- Helpers ---
+      <Skeleton width={132} height={20} />
+      <Skeleton width={72} height={22} style={styles.skeletonGap} />
+    </View>
+    <View
+      style={[
+        styles.card,
+        styles.skeletonInfoCard,
+        {
+          backgroundColor: t.color.surface.raised,
+          borderColor: t.color.border.subtle,
+        },
+      ]}
+    >
+      {[0, 1, 2, 3, 4, 5].map((row) => (
+        <View key={row} style={styles.skeletonRow}>
+          <Skeleton width={26} height={26} radius={radii.sm} />
+          <Skeleton width={88} height={12} />
+          <Skeleton width="40%" height={12} />
+        </View>
+      ))}
+    </View>
+  </View>
+);
 
 // --- Main Screen ---
 const ServerDetailScreen: React.FC = () => {
-  const theme = useTheme();
+  const t = useTokens();
   const router = useRouter();
-  const styles = useMemo(() => createStyles(theme), [theme]);
   const { serverId } = useLocalSearchParams<{ serverId: string }>();
 
   const {
@@ -229,7 +247,7 @@ const ServerDetailScreen: React.FC = () => {
 
   const srv = server as any;
   const status: string = srv?.status ?? 'UNKNOWN';
-  const statusColor = getServerStatusColor(status);
+  const statusRole = getServerStatusRole(t, status);
   const statusLabel = getServerStatusLabel(status);
   const runtime = srv?.runtimeInformation ?? {};
 
@@ -272,22 +290,22 @@ const ServerDetailScreen: React.FC = () => {
   // --- Loading / Error states ---
   if (isLoading) {
     return (
-      <View style={styles.container}>
-        <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
+      <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+        <Appbar.Header style={{ backgroundColor: t.color.surface.canvas }} elevated={false}>
           <Appbar.BackAction onPress={() => router.back()} />
-          <Appbar.Content title="Server" titleStyle={{ fontWeight: '600' }} />
+          <Appbar.Content title="Server" titleStyle={styles.appbarTitle} />
         </Appbar.Header>
-        <LoadingState message="Loading server details..." />
+        <DetailSkeleton t={t} />
       </View>
     );
   }
 
   if (isError || !srv) {
     return (
-      <View style={styles.container}>
-        <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
+      <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
+        <Appbar.Header style={{ backgroundColor: t.color.surface.canvas }} elevated={false}>
           <Appbar.BackAction onPress={() => router.back()} />
-          <Appbar.Content title="Server" titleStyle={{ fontWeight: '600' }} />
+          <Appbar.Content title="Server" titleStyle={styles.appbarTitle} />
         </Appbar.Header>
         <ErrorState
           message={error?.message ?? 'Failed to load server details.'}
@@ -298,49 +316,52 @@ const ServerDetailScreen: React.FC = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: t.color.surface.canvas }]}>
       {/* Header */}
-      <Appbar.Header style={{ backgroundColor: theme.colors.surface, elevation: 0 }}>
+      <Appbar.Header style={{ backgroundColor: t.color.surface.canvas }} elevated={false}>
         <Appbar.BackAction onPress={() => router.back()} />
         <Appbar.Content
           title={srv.name ?? 'Server'}
-          titleStyle={{ fontWeight: '600', letterSpacing: -0.3 }}
+          titleStyle={styles.appbarTitle}
         />
         <Appbar.Action icon="refresh" onPress={() => refetch()} />
       </Appbar.Header>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Status Card */}
-        <View style={[styles.statusCard, { borderLeftColor: statusColor, borderColor: theme.colors.outlineVariant }]}>
-          <View style={[styles.statusGlow, { backgroundColor: statusColor }]} />
+        <View
+          style={[
+            styles.statusCard,
+            {
+              backgroundColor: t.color.surface.raised,
+              borderColor: statusRole.border,
+            },
+          ]}
+        >
+          <View style={[styles.statusGlow, { backgroundColor: statusRole.base }]} />
           <View style={styles.statusContent}>
             <View style={styles.statusRow}>
               <View
                 style={[
                   styles.statusDot,
                   {
-                    backgroundColor: statusColor,
-                    shadowColor: statusColor,
+                    backgroundColor: statusRole.base,
+                    shadowColor: statusRole.base,
                     shadowOffset: { width: 0, height: 0 },
                     shadowOpacity: status === 'RUNNING' ? 0.6 : 0,
                     shadowRadius: 6,
                   },
                 ]}
               />
-              <Text variant="titleMedium" style={{ color: statusColor, fontWeight: '700', letterSpacing: -0.2 }}>
+              <Text style={[styles.statusLabel, { color: statusRole.base }]}>
                 {statusLabel}
               </Text>
             </View>
 
             {/* Type badge */}
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-              <View style={{
-                paddingHorizontal: 10,
-                paddingVertical: 4,
-                borderRadius: 10,
-                backgroundColor: anypointColors.primary + '12',
-              }}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: anypointColors.primary }}>
+            <View style={styles.typeRow}>
+              <View style={[styles.typeBadge, { backgroundColor: t.color.brand.surface }]}>
+                <Text style={[styles.typeBadgeText, { color: t.color.text.accent }]}>
                   {srv.type}
                 </Text>
               </View>
@@ -353,74 +374,85 @@ const ServerDetailScreen: React.FC = () => {
           <ActionButton
             icon="restart"
             label="Restart Server"
-            color={anypointColors.warning}
+            role={t.color.status.warning}
             onPress={handleRestart}
             loading={restartMutation.isPending}
             disabled={restartMutation.isPending}
+            t={t}
           />
         </View>
 
         {/* Server Info */}
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionAccent, { backgroundColor: theme.colors.secondary }]} />
-          <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-            SERVER INFO
-          </Text>
-        </View>
-        <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
-          <InfoItem label="Name" value={srv.name ?? 'N/A'} icon="server" iconColor={theme.colors.primary} />
-          <InfoItem label="Type" value={srv.type ?? 'N/A'} icon="shape-outline" iconColor={anypointColors.secondary} />
-          <InfoItem label="Status" value={statusLabel} icon="circle-outline" iconColor={statusColor} />
-          <InfoItem label="Mule Version" value={srv.muleVersion ?? 'N/A'} icon="puzzle-outline" iconColor={anypointColors.accent} />
-          <InfoItem label="Agent Version" value={srv.agentVersion ?? 'N/A'} icon="cog-outline" iconColor={anypointColors.info} />
+        <SectionHeading title="SERVER INFO" role={t.color.accent.secondary} t={t} />
+        <View
+          style={[
+            styles.card,
+            {
+              backgroundColor: t.color.surface.raised,
+              borderColor: t.color.border.subtle,
+            },
+          ]}
+        >
+          <InfoItem t={t} label="Name" value={srv.name ?? 'N/A'} icon="server" role={t.color.accent.brand} />
+          <InfoItem t={t} label="Type" value={srv.type ?? 'N/A'} icon="shape-outline" role={t.color.accent.secondary} />
+          <InfoItem t={t} label="Status" value={statusLabel} icon="circle-outline" role={statusRole} />
+          <InfoItem t={t} label="Mule Version" value={srv.muleVersion ?? 'N/A'} icon="puzzle-outline" role={t.color.status.success} />
+          <InfoItem t={t} label="Agent Version" value={srv.agentVersion ?? 'N/A'} icon="cog-outline" role={t.color.status.info} />
           <InfoItem
+            t={t}
             label="Last Connected"
             value={srv.lastConnected ? formatRelativeTime(srv.lastConnected) : 'N/A'}
             icon="clock-outline"
-            iconColor={anypointColors.warning}
+            role={t.color.status.warning}
           />
         </View>
 
         {/* Runtime Info */}
         {hasRuntimeInfo && (
           <>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionAccent, { backgroundColor: anypointColors.primary }]} />
-              <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-                RUNTIME INFO
-              </Text>
-            </View>
-            <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+            <SectionHeading title="RUNTIME INFO" role={t.color.accent.brand} t={t} />
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: t.color.surface.raised,
+                  borderColor: t.color.border.subtle,
+                },
+              ]}
+            >
               {runtime.javaVersion && (
-                <InfoItem label="Java" value={runtime.javaVersion} icon="language-java" iconColor={anypointColors.error} />
+                <InfoItem t={t} label="Java" value={runtime.javaVersion} icon="language-java" role={t.color.status.danger} />
               )}
               {(runtime.osName || runtime.osVersion) && (
                 <InfoItem
+                  t={t}
                   label="OS"
                   value={`${runtime.osName ?? ''} ${runtime.osVersion ?? ''}`.trim() || 'N/A'}
                   icon="laptop"
-                  iconColor={anypointColors.info}
+                  role={t.color.status.info}
                 />
               )}
               {processors > 0 && (
                 <InfoItem
+                  t={t}
                   label="Processors"
                   value={String(processors)}
                   icon="cpu-64-bit"
-                  iconColor={anypointColors.mulePurple}
+                  role={t.color.accent.tertiary}
                 />
               )}
 
               {/* CPU progress bar */}
               {cpuUsage > 0 && (
-                <View style={{ marginTop: 12 }}>
+                <View style={styles.firstBar}>
                   <ResourceBar
+                    t={t}
                     label="CPU Usage"
                     icon="cpu-64-bit"
                     value={Math.round(cpuUsage)}
                     total={100}
                     unit="%"
-                    color={anypointColors.primary}
+                    role={t.color.accent.brand}
                   />
                 </View>
               )}
@@ -428,24 +460,26 @@ const ServerDetailScreen: React.FC = () => {
               {/* Memory progress bar */}
               {memTotal > 0 && (
                 <ResourceBar
+                  t={t}
                   label="Memory"
                   icon="memory"
                   value={Math.round(memUsed / (1024 * 1024))}
                   total={Math.round(memTotal / (1024 * 1024))}
                   unit="MB"
-                  color={anypointColors.secondary}
+                  role={t.color.accent.secondary}
                 />
               )}
 
               {/* Disk progress bar */}
               {diskTotal > 0 && (
                 <ResourceBar
+                  t={t}
                   label="Disk"
                   icon="harddisk"
                   value={Math.round(diskUsed / (1024 * 1024 * 1024))}
                   total={Math.round(diskTotal / (1024 * 1024 * 1024))}
                   unit="GB"
-                  color={anypointColors.accent}
+                  role={t.color.status.success}
                 />
               )}
             </View>
@@ -455,25 +489,27 @@ const ServerDetailScreen: React.FC = () => {
         {/* IP Addresses */}
         {srv.addresses && srv.addresses.length > 0 && (
           <>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionAccent, { backgroundColor: anypointColors.info }]} />
-              <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-                IP ADDRESSES
-              </Text>
-            </View>
-            <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+            <SectionHeading title="IP ADDRESSES" role={t.color.status.info} t={t} />
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: t.color.surface.raised,
+                  borderColor: t.color.border.subtle,
+                },
+              ]}
+            >
               {srv.addresses.map((addr: any, idx: number) => (
-                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 }}>
-                  <Icon name="ip-network-outline" size={14} color={anypointColors.info} />
+                <View key={idx} style={styles.listRow}>
+                  <Icon name="ip-network-outline" size={14} color={t.color.status.info.base} />
                   <Text
-                    variant="bodyMedium"
-                    style={{ color: theme.colors.onSurface, flex: 1, fontFamily: 'monospace', fontSize: 13 }}
+                    style={[styles.monoValue, { color: t.color.text.primary }]}
                     selectable
                   >
                     {addr.ip}
                   </Text>
                   {addr.networkInterface && (
-                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                    <Text style={[styles.listMeta, { color: t.color.text.tertiary }]}>
                       {addr.networkInterface}
                     </Text>
                   )}
@@ -486,17 +522,24 @@ const ServerDetailScreen: React.FC = () => {
         {/* Deployed Applications */}
         {srv.applications && srv.applications.length > 0 && (
           <>
-            <View style={styles.sectionHeader}>
-              <View style={[styles.sectionAccent, { backgroundColor: anypointColors.accent }]} />
-              <Text variant="labelLarge" style={{ color: theme.colors.onSurfaceVariant, letterSpacing: 0.8 }}>
-                DEPLOYED APPLICATIONS ({srv.applications.length})
-              </Text>
-            </View>
-            <View style={[styles.card, { borderColor: theme.colors.outlineVariant }]}>
+            <SectionHeading
+              title={`DEPLOYED APPLICATIONS (${srv.applications.length})`}
+              role={t.color.status.success}
+              t={t}
+            />
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor: t.color.surface.raised,
+                  borderColor: t.color.border.subtle,
+                },
+              ]}
+            >
               {srv.applications.map((appName: string, idx: number) => (
-                <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, gap: 8 }}>
-                  <Icon name="application-outline" size={14} color={anypointColors.accent} />
-                  <Text variant="bodyMedium" style={{ color: theme.colors.onSurface, flex: 1 }}>
+                <View key={idx} style={styles.listRow}>
+                  <Icon name="application-outline" size={14} color={t.color.status.success.base} />
+                  <Text style={[styles.listValue, { color: t.color.text.primary }]}>
                     {appName}
                   </Text>
                 </View>
@@ -533,70 +576,156 @@ const ServerDetailScreen: React.FC = () => {
 };
 
 // --- Styles ---
-const createStyles = (theme: MD3Theme) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-    },
-    scrollContent: {
-      paddingBottom: 40,
-    },
-    statusCard: {
-      marginHorizontal: 16,
-      marginTop: 12,
-      borderLeftWidth: 3,
-      borderRadius: 18,
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      overflow: 'hidden',
-    },
-    statusGlow: {
-      height: 2,
-      borderTopLeftRadius: 18,
-      borderTopRightRadius: 18,
-    },
-    statusContent: {
-      padding: 16,
-    },
-    statusRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 4,
-    },
-    statusDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-    },
-    actionsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      paddingHorizontal: 16,
-      paddingTop: 12,
-      gap: 8,
-    },
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingHorizontal: 20,
-      marginTop: 24,
-      marginBottom: 10,
-    },
-    sectionAccent: {
-      width: 3,
-      height: 14,
-      borderRadius: 2,
-    },
-    card: {
-      marginHorizontal: 16,
-      borderRadius: 18,
-      backgroundColor: theme.colors.surface,
-      borderWidth: 1,
-      padding: 16,
-    },
-  });
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  appbarTitle: typeScale.heading,
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  statusCard: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.md,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  statusGlow: {
+    height: 3,
+  },
+  statusContent: {
+    padding: spacing.lg,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: radii.pill,
+  },
+  statusLabel: typeScale.heading,
+  typeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  typeBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.sm,
+  },
+  typeBadgeText: { ...typeScale.label, fontWeight: '700' },
+  actionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    gap: spacing.sm,
+  },
+  actionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    minWidth: 80,
+    flex: 1,
+  },
+  actionLabel: typeScale.label,
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: spacing.xl,
+    marginTop: spacing.xxl,
+    marginBottom: 10,
+  },
+  sectionAccent: {
+    width: 3,
+    height: 14,
+    borderRadius: 2,
+  },
+  sectionTitle: { ...typeScale.label, letterSpacing: 0.8 },
+  card: {
+    marginHorizontal: spacing.lg,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    padding: spacing.lg,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 7,
+    gap: spacing.sm,
+  },
+  infoIconWell: {
+    width: 26,
+    height: 26,
+    borderRadius: radii.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoLabel: { ...typeScale.label, flexShrink: 0 },
+  infoValue: { ...typeScale.body, flex: 1 },
+  resourceBar: {
+    marginBottom: 14,
+  },
+  resourceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  resourceIcon: {
+    marginRight: 6,
+  },
+  resourceLabel: { ...typeScale.label, flex: 1 },
+  resourcePercent: { ...typeScale.label, fontWeight: '700' },
+  progress: {
+    height: 6,
+    borderRadius: 3,
+  },
+  resourceMeta: { ...typeScale.micro, marginTop: spacing.xs },
+  firstBar: {
+    marginTop: spacing.md,
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    gap: spacing.sm,
+  },
+  listValue: { ...typeScale.body, flex: 1 },
+  listMeta: typeScale.bodySmall,
+  monoValue: {
+    ...typeScale.bodySmall,
+    fontFamily: monoFontFamily,
+    flex: 1,
+  },
+  skeletonWrap: {
+    paddingTop: spacing.md,
+  },
+  skeletonStatusCard: {
+    marginBottom: spacing.xxl,
+  },
+  skeletonInfoCard: {
+    gap: spacing.md,
+  },
+  skeletonGap: {
+    marginTop: spacing.sm,
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+});
 
 export default ServerDetailScreen;

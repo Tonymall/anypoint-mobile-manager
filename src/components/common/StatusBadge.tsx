@@ -1,46 +1,57 @@
+// ============================================================
+// StatusBadge — a status word as a tinted pill
+// ============================================================
+// Built on the design token layer: the status resolves to a semantic
+// role, so the badge is legible on both colour schemes instead of
+// relying on white-on-saturated-fill.
+// ============================================================
+
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
-import { Text, useTheme } from 'react-native-paper';
-import { statusColors } from '../../theme';
+import { Text } from 'react-native-paper';
 
-type StatusKey = keyof typeof statusColors;
+import { radii, spacing, typeScale, useTokens, type StatusRole, type Tokens } from '../../theme';
 
 interface StatusBadgeProps {
   status: string;
   size?: 'small' | 'medium';
 }
 
+/** Normalised status word → semantic status role. */
+function statusRole(t: Tokens, normalized: string): StatusRole {
+  switch (normalized) {
+    case 'started':
+    case 'active':
+    case 'running':
+    case 'approved':
+    case 'deployed':
+    case 'updated':
+      return t.color.status.success;
+    case 'failed':
+    case 'blocked':
+    case 'disconnected':
+    case 'rejected':
+      return t.color.status.danger;
+    case 'deploying':
+    case 'undeploying':
+    case 'partiallystarted':
+    case 'deprecated':
+    case 'pending':
+    case 'created':
+      return t.color.status.warning;
+    case 'stopped':
+    case 'inactive':
+      return t.color.status.neutral;
+    default:
+      return t.color.status.neutral;
+  }
+}
+
 const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'medium' }) => {
-  const theme = useTheme();
+  const t = useTokens();
 
-  const normalizedStatus = status.toLowerCase().replace(/[_\s]/g, '') as string;
-
-  const statusKeyMap: Record<string, StatusKey> = {
-    started: 'started',
-    stopped: 'stopped',
-    failed: 'failed',
-    deploying: 'deploying',
-    active: 'active',
-    inactive: 'inactive',
-    deprecated: 'deprecated',
-    blocked: 'blocked',
-    running: 'running',
-    disconnected: 'disconnected',
-    pending: 'pending',
-    approved: 'approved',
-    rejected: 'rejected',
-    undeploying: 'stopped',
-    partiallystarted: 'deploying',
-    deployed: 'active',
-    created: 'pending',
-    updated: 'active',
-  };
-
-  const mappedKey = statusKeyMap[normalizedStatus];
-  const backgroundColor = mappedKey
-    ? statusColors[mappedKey]
-    : theme.colors.outline;
-
+  const normalizedStatus = status.toLowerCase().replace(/[_\s]/g, '');
+  const role = statusRole(t, normalizedStatus);
   const isSmall = size === 'small';
 
   return (
@@ -48,22 +59,14 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'medium' }) =>
       style={[
         styles.badge,
         {
-          backgroundColor,
-          paddingVertical: isSmall ? 2 : 4,
-          paddingHorizontal: isSmall ? 8 : 12,
-          borderRadius: isSmall ? 10 : 12,
+          backgroundColor: role.surface,
+          paddingVertical: isSmall ? 2 : spacing.xs,
+          paddingHorizontal: isSmall ? spacing.sm : spacing.md,
+          borderRadius: radii.sm,
         },
       ]}
     >
-      <Text
-        style={[
-          styles.text,
-          {
-            fontSize: isSmall ? 10 : 12,
-            lineHeight: isSmall ? 14 : 16,
-          },
-        ]}
-      >
+      <Text style={[isSmall ? styles.textSmall : styles.text, { color: role.base }]}>
         {status.replace(/_/g, ' ')}
       </Text>
     </View>
@@ -75,8 +78,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   text: {
-    color: '#FFFFFF',
-    fontWeight: '600',
+    ...typeScale.label,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  textSmall: {
+    ...typeScale.micro,
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },

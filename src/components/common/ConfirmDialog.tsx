@@ -1,7 +1,8 @@
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { Button, Dialog, Portal, Text, useTheme } from 'react-native-paper';
+import { Button, Dialog, Portal, Text } from 'react-native-paper';
 import { hapticWarning, hapticMedium } from '../../utils/haptics';
+import { radii, spacing, typeScale, useTokens } from '../../theme';
 
 interface ConfirmDialogProps {
   visible: boolean;
@@ -30,17 +31,24 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   cancelDisabled = false,
   confirmLoading = false,
 }) => {
-  const theme = useTheme();
+  const t = useTokens();
 
   return (
     <Portal>
-      <Dialog visible={visible} onDismiss={onCancel} style={styles.dialog} testID={`confirm-dialog-${title}`}>
+      <Dialog
+        visible={visible}
+        onDismiss={onCancel}
+        style={[styles.dialog, { backgroundColor: t.color.surface.raised }]}
+        testID={`confirm-dialog-${title}`}
+      >
         <Dialog.Title>{title}</Dialog.Title>
         <Dialog.Content>
-          <Text variant="bodyMedium">{message}</Text>
+          <Text style={[styles.message, { color: t.color.text.secondary }]}>
+            {message}
+          </Text>
         </Dialog.Content>
         <Dialog.Actions style={styles.actions}>
-          <Button onPress={onCancel} textColor={theme.colors.onSurfaceVariant} disabled={cancelDisabled}>
+          <Button onPress={onCancel} textColor={t.color.text.secondary} disabled={cancelDisabled}>
             {cancelLabel}
           </Button>
           <Button
@@ -49,11 +57,9 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
             disabled={confirmDisabled}
             loading={confirmLoading}
             buttonColor={
-              destructive ? theme.colors.error : theme.colors.primary
+              destructive ? t.color.status.danger.base : t.color.brand.base
             }
-            textColor={
-              destructive ? '#FFFFFF' : theme.colors.onPrimary
-            }
+            textColor={t.color.text.inverse}
             style={styles.confirmButton}
           >
             {confirmLabel}
@@ -66,15 +72,16 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
 const styles = StyleSheet.create({
   dialog: {
-    borderRadius: 16,
+    borderRadius: radii.lg,
   },
+  message: typeScale.body,
   actions: {
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.lg,
   },
   confirmButton: {
-    borderRadius: 20,
-    marginLeft: 8,
+    borderRadius: radii.xl,
+    marginLeft: spacing.sm,
   },
 });
 
