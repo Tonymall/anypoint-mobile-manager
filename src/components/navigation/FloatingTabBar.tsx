@@ -1,23 +1,37 @@
-import React, { memo, useEffect, useMemo } from 'react';
+// ═══════════════════════════════════════════════════════════════════
+// Floating tab bar
+// ═══════════════════════════════════════════════════════════════════
+// A single sliding pill marks the active tab, rather than the halo +
+// underline pair that previously signalled it twice. The pill is the
+// only moving part: it springs between tabs while the icon and label
+// crossfade, which reads as one gesture instead of several.
+//
+// Colours come from the design tokens, so the bar follows the scheme
+// instead of pinning itself to a dark background. The shell uses the
+// translucent `surface.overlay` role rather than a real blur: expo-blur
+// is a native module and adding it would require rebuilding the dev
+// client, so that upgrade is deliberately deferred.
+// ═══════════════════════════════════════════════════════════════════
+
+import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import type { Tabs } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Text, useTheme, type MD3Theme } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Animated, {
-  Easing,
   interpolate,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { hapticSelection } from '../../utils/haptics';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { radii, spacing, typeScale, useTokens, withAlpha, type Tokens } from '../../theme';
 import type { IconName } from '../../types/icons';
-
-const ACTIVE_COLOR = '#31C1FF';
 
 const TAB_ITEMS: Record<string, { title: string; icon: IconName; iconFocused?: IconName }> = {
   index: { title: 'Home', icon: 'home-variant-outline', iconFocused: 'home-variant' },
@@ -35,83 +49,73 @@ const HIDDEN_TAB_PARENTS: Record<string, keyof typeof TAB_ITEMS> = {
   workers: 'runtime',
 };
 
+const BAR_HEIGHT = 64;
+const PILL_INSET = 4;
+
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-const FloatingTabItem = memo(function FloatingTabItem({
-  route,
+const TabItem = memo(function TabItem({
+  routeName,
   isFocused,
   onPress,
   unreadCount,
-  theme,
+  t,
 }: {
-  route: any;
+  routeName: string;
   isFocused: boolean;
   onPress: () => void;
   unreadCount: number;
-  theme: MD3Theme;
+  t: Tokens;
 }) {
-  const scale = useSharedValue(isFocused ? 1 : 0.94);
-  const glow = useSharedValue(isFocused ? 1 : 0);
-  const tabDef = TAB_ITEMS[route.name];
+  const tabDef = TAB_ITEMS[routeName];
+  const focus = useSharedValue(isFocused ? 1 : 0);
 
   useEffect(() => {
-    scale.value = withTiming(isFocused ? 1 : 0.94, {
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-    });
-    glow.value = withTiming(isFocused ? 1 : 0, {
-      duration: 220,
-      easing: Easing.out(Easing.cubic),
-    });
-  }, [glow, isFocused, scale]);
+    focus.value = withTiming(isFocused ? 1 : 0, { duration: t.motion.duration.quick });
+  }, [focus, isFocused, t.motion.duration.quick]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  const glowStyle = useAnimatedStyle(() => ({
-    opacity: glow.value,
-    transform: [{ scaleX: interpolate(glow.value, [0, 1], [0.5, 1]) }],
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(focus.value, [0, 1], [0, -1]) }],
   }));
 
   const iconName = isFocused
     ? (tabDef?.iconFocused ?? tabDef?.icon ?? 'circle')
     : (tabDef?.icon ?? 'circle');
-  const inactiveColor = theme.dark ? 'rgba(255,255,255,0.56)' : 'rgba(17,24,39,0.48)';
-  const haloColor = theme.dark ? 'rgba(49,193,255,0.12)' : 'rgba(49,193,255,0.16)';
+
+  const color = isFocused ? t.color.text.accent : t.color.text.tertiary;
 
   return (
     <AnimatedPressable
       onPress={onPress}
-      style={[styles.tabButton, animatedStyle]}
-      accessibilityLabel={`${tabDef?.title ?? route.name} tab`}
+      style={styles.tab}
+      accessibilityLabel={`${tabDef?.title ?? routeName} tab`}
       accessibilityRole="tab"
       accessibilityState={{ selected: isFocused }}
     >
-      <View style={styles.iconWrap}>
-        <Animated.View style={[styles.activeHalo, { backgroundColor: haloColor }, glowStyle]} />
-        <MaterialCommunityIcons
-          name={iconName}
-          size={22}
-          color={isFocused ? ACTIVE_COLOR : inactiveColor}
-        />
-        {route.name === 'alerts' && unreadCount > 0 && (
-          <View style={styles.badgeDot} />
-        )}
-      </View>
+      <Animated.View style={[styles.iconWrap, iconStyle]}>
+        <MaterialCommunityIcons name={iconName} size={22} color={color} />
+        {routeName === 'alerts' && unreadCount > 0 ? (
+          <View
+            style={[
+              styles.badge,
+              {
+                backgroundColor: t.color.status.danger.base,
+                borderColor: t.color.surface.canvas,
+              },
+            ]}
+          />
+        ) : null}
+      </Animated.View>
       <Text
         numberOfLines={1}
         style={[
-          styles.tabLabel,
-          {
-            color: isFocused ? ACTIVE_COLOR : inactiveColor,
-            fontWeight: isFocused ? '700' : '500',
-          },
+          typeScale.micro,
+          styles.label,
+          { color, fontWeight: isFocused ? '700' : '500' },
         ]}
       >
-        {tabDef?.title ?? route.name}
+        {tabDef?.title ?? routeName}
       </Text>
-      <Animated.View style={[styles.activeUnderline, glowStyle]} />
     </AnimatedPressable>
   );
 });
@@ -121,10 +125,11 @@ type TabBarProps = Parameters<
 >[0];
 
 export default function FloatingTabBar({ state, navigation }: TabBarProps) {
-  const theme = useTheme();
+  const t = useTokens();
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const [barWidth, setBarWidth] = useState(0);
 
   const visibleRoutes = useMemo(
     () => state.routes.filter((route) => TAB_ITEMS[route.name] !== undefined),
@@ -136,64 +141,93 @@ export default function FloatingTabBar({ state, navigation }: TabBarProps) {
     ? activeRoute.name
     : (HIDDEN_TAB_PARENTS[activeRoute?.name] ?? 'index');
 
-  const barWidth = Math.min(screenWidth * 0.9, 760);
-  const bottomOffset = Math.max(insets.bottom, 10);
-  const shellGradient: [string, string] = theme.dark
-    ? ['rgba(5,8,22,0.96)', 'rgba(10,23,48,0.98)']
-    : ['rgba(248,251,255,0.96)', 'rgba(234,242,252,0.98)'];
-  const borderColor = theme.dark ? 'rgba(94,168,255,0.12)' : 'rgba(49,193,255,0.16)';
-  const glassColor = theme.dark ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.42)';
+  const activeIndex = Math.max(
+    0,
+    visibleRoutes.findIndex((route) => route.name === activeTabName),
+  );
+
+  const shellWidth = Math.min(screenWidth - spacing.lg * 2, 560);
+  const bottomOffset = Math.max(insets.bottom, spacing.md);
+
+  // The pill tracks the active tab. Springing a single indicator reads as
+  // one continuous motion; the previous halo-plus-underline pair signalled
+  // the same thing twice and neither moved.
+  const slot = useDerivedValue(() => {
+    const inner = barWidth - PILL_INSET * 2;
+    const width = visibleRoutes.length > 0 ? inner / visibleRoutes.length : 0;
+    return { width, x: PILL_INSET + width * activeIndex };
+  }, [barWidth, visibleRoutes.length, activeIndex]);
+
+  const pillStyle = useAnimatedStyle(() => ({
+    width: slot.value.width,
+    transform: [{ translateX: withSpring(slot.value.x, t.motion.spring) }],
+    opacity: slot.value.width > 0 ? 1 : 0,
+  }));
+
+  const handlePress = useCallback(
+    (routeName: string, routeKey: string, isFocused: boolean) => {
+      const event = navigation.emit({
+        type: 'tabPress',
+        target: routeKey,
+        canPreventDefault: true,
+      });
+
+      if (!isFocused && !event.defaultPrevented) {
+        const jumpTo = (
+          navigation as TabBarProps['navigation'] & { jumpTo?: (name: string) => void }
+        ).jumpTo;
+        if (jumpTo) {
+          jumpTo(routeName);
+        } else {
+          navigation.navigate(routeName);
+        }
+        hapticSelection();
+      }
+    },
+    [navigation],
+  );
 
   return (
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: bottomOffset }]}>
-      <LinearGradient
-        colors={shellGradient}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+      <View
+        onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
         style={[
-          styles.gradientShell,
+          styles.shell,
           {
-            width: barWidth,
-            borderColor,
-            shadowColor: theme.dark ? '#02101f' : '#03162c',
+            width: shellWidth,
+            borderColor: t.color.border.subtle,
+            shadowColor: t.color.shadow,
+            backgroundColor: t.color.surface.overlay,
           },
         ]}
       >
-        <View style={[styles.innerGlass, { backgroundColor: glassColor }]}>
-          {visibleRoutes.map((route) => {
-            const isFocused = route.name === activeTabName;
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.pill,
+            pillStyle,
+            {
+              backgroundColor: withAlpha(t.color.text.accent, 'subtle'),
+              borderColor: withAlpha(t.color.text.accent, 'border'),
+            },
+          ]}
+        />
 
-            const handlePress = () => {
-              const event = navigation.emit({
-                type: 'tabPress',
-                target: route.key,
-                canPreventDefault: true,
-              });
-
-              if (!isFocused && !event.defaultPrevented) {
-                const jumpTo = (navigation as TabBarProps['navigation'] & { jumpTo?: (name: string) => void }).jumpTo;
-                if (jumpTo) {
-                  jumpTo(route.name);
-                } else {
-                  navigation.navigate(route.name);
-                }
-                hapticSelection();
+        <View style={styles.row}>
+          {visibleRoutes.map((route) => (
+            <TabItem
+              key={route.key}
+              routeName={route.name}
+              isFocused={route.name === activeTabName}
+              unreadCount={unreadCount}
+              t={t}
+              onPress={() =>
+                handlePress(route.name, route.key, route.name === activeTabName)
               }
-            };
-
-            return (
-              <FloatingTabItem
-                key={route.key}
-                route={route}
-                isFocused={isFocused}
-                onPress={handlePress}
-                unreadCount={unreadCount}
-                theme={theme}
-              />
-            );
-          })}
+            />
+          ))}
         </View>
-      </LinearGradient>
+      </View>
     </View>
   );
 }
@@ -205,71 +239,52 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
-  gradientShell: {
-    height: 72,
-    borderRadius: 34,
-    borderWidth: 1,
+  shell: {
+    height: BAR_HEIGHT,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 18 },
-    shadowOpacity: 0.28,
-    shadowRadius: 26,
-    elevation: 18,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.24,
+    shadowRadius: 20,
+    elevation: 14,
+    justifyContent: 'center',
   },
-  innerGlass: {
-    flex: 1,
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    backgroundColor: 'rgba(255,255,255,0.015)',
+    height: '100%',
+    paddingHorizontal: PILL_INSET,
   },
-  tabButton: {
+  pill: {
+    position: 'absolute',
+    top: PILL_INSET,
+    bottom: PILL_INSET,
+    left: 0,
+    borderRadius: radii.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  tab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     height: '100%',
-    paddingVertical: 10,
-    borderRadius: 26,
   },
   iconWrap: {
-    minHeight: 28,
+    minHeight: 24,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
   },
-  activeHalo: {
-    position: 'absolute',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(49,193,255,0.12)',
-    shadowColor: ACTIVE_COLOR,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-  },
-  activeUnderline: {
-    width: 24,
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: ACTIVE_COLOR,
+  label: {
     marginTop: 2,
-    shadowColor: ACTIVE_COLOR,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
   },
-  tabLabel: {
-    fontSize: 10.5,
-    letterSpacing: 0.2,
-    textAlign: 'center',
-  },
-  badgeDot: {
+  badge: {
     position: 'absolute',
-    top: 0,
-    right: -2,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#FF5C7A',
+    top: -2,
+    right: -6,
+    width: 9,
+    height: 9,
+    borderRadius: radii.pill,
+    borderWidth: 1.5,
   },
 });
