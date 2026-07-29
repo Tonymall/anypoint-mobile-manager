@@ -1,5 +1,6 @@
 import api from './api';
-import { toNumber, toStringValue, unwrapCollection, withOptionalFallback } from './controlPlaneCommon';
+import logger from '../utils/logger';
+import { getStatusCode, toNumber, toStringValue, unwrapCollection, withOptionalFallback } from './controlPlaneCommon';
 
 const CLOUDHUB_NOTIFICATIONS_BASE = '/cloudhub/api/notifications';
 
@@ -39,9 +40,28 @@ export async function getNotifications(
   }, []);
 }
 
+/**
+ * Unread notification count.
+ *
+ * The `/count` endpoint answers with a BARE NUMBER as `text/plain`. The shared
+ * axios instance sends `Accept: application/json`, which makes the server
+ * reply 406 Not Acceptable, so this one request opts into a permissive Accept
+ * header (the global default is left untouched). The response therefore has to
+ * be parsed from a bare number, a numeric string, or a `{ count: n }` body.
+ *
+ * The badge is decorative: any failure degrades to 0 rather than throwing.
+ */
 export async function getNotificationCount(status = 'unread'): Promise<number> {
-  return withOptionalFallback(async () => {
-    const { data } = await api.get(`${CLOUDHUB_NOTIFICATIONS_BASE}/count`, { params: { status, _: Date.now() } });
-    return toNumber(data) ?? toNumber((data as any)?.count) ?? 0;
-  }, 0);
+  try {
+    return await withOptionalFallback(async () => {
+      const { data } = await api.get(`${CLOUDHUB_NOTIFICATIONS_BASE}/count`, {
+        params: { status, _: Date.now() },
+        headers: { Accept: '*/*' },
+      });
+      return toNumber(data) ?? toNumber((data as any)?.count) ?? 0;
+    }, 0);
+  } catch (error) {
+    logger.warn(`[CloudHubNotifications] count unavailable: ${getStatusCode(error) ?? (error as Error)?.message ?? 'unknown error'}`);
+    return 0;
+  }
 }

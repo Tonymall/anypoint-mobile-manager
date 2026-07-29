@@ -20,7 +20,13 @@ import { WebView, type WebViewNavigation, type WebViewMessageEvent } from 'react
 import { useRouter } from 'expo-router';
 
 import { useAuthStore } from '../../stores';
-import { getBaseUrl, setAuthHeader, storeTokens, enableCookieSessionAuth } from '../../services/api';
+import {
+  getBaseUrl,
+  setAuthHeader,
+  storeTokens,
+  enableCookieSessionAuth,
+  clearSessionAuth,
+} from '../../services/api';
 import * as authService from '../../services/authService';
 import type { AuthTokens } from '../../types';
 import logger from '../../utils/logger';
@@ -223,6 +229,9 @@ const SILENT_AUTH_JS = `
   })();
   true;
 `;
+/** How many times we re-run silent auth before falling back to cookie session. */
+const MAX_SILENT_AUTH_ATTEMPTS = 3;
+
 const POST_LOGIN_PATHS = [
   '/home/',
   '/home',
@@ -255,6 +264,16 @@ const SSOLoginScreen: React.FC = () => {
   const hasPrefilledRef = useRef(false);
   const hasRetriedSilentAuthRef = useRef(false);
   const retryCountRef = useRef(0);
+  /**
+   * Silent auth can legitimately need several passes: the browser fires
+   * auth_complete as soon as the login page settles, which on an MFA flow is
+   * before the user has finished verifying. One retry was not enough — the
+   * second auth_complete fell straight through to the cookie fallback and
+   * failed with a 401 while the user was still on the verification screen.
+   */
+  const silentAuthAttemptsRef = useRef(0);
+  /** True while the WebView is sitting on an MFA/verification page. */
+  const isOnMfaPageRef = useRef(false);
   const timeoutIdsRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const baseUrl = pendingMfaChallenge?.baseUrl ?? getBaseUrl();
   const loginUrl = `${baseUrl}/login/signin`;
@@ -436,19 +455,30 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         if (!token || typeof token !== 'string' || token.length === 0) {
-          if (!hasRetriedSilentAuthRef.current) {
+          // Still on the verification screen: auth_complete fired for the MFA
+          // page itself, not for a completed login. Keep waiting — falling back
+          // here would authenticate against a session that does not exist yet.
+          if (isOnMfaPageRef.current) {
+            logger.log('[SSO] auth_complete while on verification page — waiting for the user to finish');
+            setIsExtracting(false);
+            return;
+          }
+
+          if (silentAuthAttemptsRef.current < MAX_SILENT_AUTH_ATTEMPTS) {
+            silentAuthAttemptsRef.current += 1;
             hasRetriedSilentAuthRef.current = true;
+            const attempt = silentAuthAttemptsRef.current;
             logger.log(
-              isMfaContinuation
-                ? '[SSO] No bearer token yet after MFA browser login; waiting for silent auth token'
-                : '[SSO] No bearer token yet after browser login; retrying silent auth token capture',
+              `[SSO] No bearer token yet (attempt ${attempt}/${MAX_SILENT_AUTH_ATTEMPTS}); retrying silent auth token capture`,
             );
+            // Back off a little further each pass so a slow MFA round-trip has
+            // room to finish before we give up on the bearer token.
             scheduleTimeout(() => {
               webViewRef.current?.injectJavaScript(silentAuthJs);
-            }, 250);
+            }, 250 * attempt);
             scheduleTimeout(() => {
               webViewRef.current?.injectJavaScript(INJECTED_JS);
-            }, 3000);
+            }, 1500 + 1500 * attempt);
             setIsExtracting(false);
             return;
           }
@@ -456,7 +486,23 @@ const SSOLoginScreen: React.FC = () => {
           if (xsrfToken) {
             logger.log('[SSO] No bearer token, falling back to session-cookie auth');
             await enableCookieSessionAuth(xsrfToken);
-            const sessionUser = await authService.getCurrentUser(undefined, baseUrl);
+            let sessionUser: Awaited<ReturnType<typeof authService.getCurrentUser>>;
+            try {
+              sessionUser = await authService.getCurrentUser(undefined, baseUrl);
+            } catch (sessionError: any) {
+              // The cookie session is not actually usable. Committing it would
+              // drop the user into the app "logged in" with no usable
+              // credentials, where every request fails with a missing-header
+              // 401. Clear it and report a real failure instead.
+              await clearSessionAuth();
+              logger.warn(
+                `[SSO] Session-cookie fallback rejected (${sessionError?.response?.status ?? sessionError?.message}) — not committing a broken session`,
+              );
+              throw new Error(
+                'Your browser session could not be verified. Please try signing in again, ' +
+                  'or use username and password.',
+              );
+            }
             const sessionOrgs = organizations ?? sessionUser.memberOfOrganizations ?? [];
             const sessionTokens: AuthTokens = {
               accessToken: '',
@@ -508,6 +554,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Authentication complete, navigating to org selection');
+        silentAuthAttemptsRef.current = 0;
         hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
@@ -547,6 +594,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Session-cookie authentication complete');
+        silentAuthAttemptsRef.current = 0;
         hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
@@ -588,6 +636,7 @@ const SSOLoginScreen: React.FC = () => {
         }
 
         logger.log('[SSO] Token-only authentication complete');
+        silentAuthAttemptsRef.current = 0;
         hasRetriedSilentAuthRef.current = false;
         router.replace('/(auth)/select-org');
       } catch (error: any) {
@@ -661,6 +710,7 @@ const SSOLoginScreen: React.FC = () => {
         url.includes('/mfa')
       ) {
         logger.log('[SSO] MFA/verification page — waiting for user');
+        isOnMfaPageRef.current = true;
         return;
       }
 
@@ -668,6 +718,8 @@ const SSOLoginScreen: React.FC = () => {
         logger.log('[SSO] Post-login redirect detected');
         hasInjectedRef.current = true;
         retryCountRef.current = 0;
+        isOnMfaPageRef.current = false;
+        silentAuthAttemptsRef.current = 0;
         hasRetriedSilentAuthRef.current = false;
         scheduleTimeout(() => {
           webViewRef.current?.injectJavaScript(silentAuthJs);
@@ -702,6 +754,7 @@ const SSOLoginScreen: React.FC = () => {
 
           case 'spa_token':
             logger.log('[SSO] anypoint_spa token captured from silent auth iframe');
+            silentAuthAttemptsRef.current = 0;
             hasRetriedSilentAuthRef.current = false;
             completeWithTokenOnly(data.token);
             break;

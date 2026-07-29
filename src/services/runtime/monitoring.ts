@@ -1089,12 +1089,16 @@ export async function getDashboardStats(
     // Determine appropriate time interval based on the period
     const amqlInterval = periodMinutes <= 60 ? 'PT1M' : periodMinutes <= 720 ? 'PT1H' : 'P1D';
 
-    const monAttempts: Array<{ label: string; fn: () => Promise<any> }> = [
-      // Grafana-style monitoring archive query (requires Titanium/Platinum)
-      {
+    const monAttempts: Array<{ label: string; fn: () => Promise<any> }> = [];
+
+    // Grafana-style monitoring archive query (requires Titanium/Platinum).
+    // Once the tenant has told us it is unavailable, drop the attempt entirely
+    // rather than queueing one that only throws — otherwise every app logs a
+    // "failed: Archive disabled" line on every dashboard load.
+    if (sessionState._archiveAvailable) {
+      monAttempts.push({
         label: 'monitoring-archive',
         fn: async () => {
-          if (!sessionState._archiveAvailable) throw new Error('Archive disabled');
           try {
             return await api.post(`/monitoring/archive/api/v1/organizations/${orgId}/environments/${envId}/query`, {
               targets: [
@@ -1113,9 +1117,9 @@ export async function getDashboardStats(
             throw err;
           }
         },
-      },
-      // Observability Metrics API — inbound request metrics (correct AMQL)
-    ];
+      });
+    }
+    // Observability Metrics API — inbound request metrics (correct AMQL)
 
     for (const attempt of monAttempts) {
       try {

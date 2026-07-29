@@ -144,21 +144,87 @@ function normalizeAuditResponse(raw: any): AuditLogResponse {
 }
 
 /**
- * Normalize a single audit log entry.
+ * Keys that, when present on an object-valued field, carry the
+ * human-meaningful label for that object. Checked in this order.
  */
-function normalizeEntry(raw: any): AuditLogEntry {
-  const fallbackIdSeed = `${raw.timestamp ?? raw.createdAt ?? raw.date ?? 'ts'}-${raw.action ?? raw.actionName ?? 'action'}-${raw.objectId ?? raw.objectName ?? raw.userId ?? 'object'}`;
+const DISPLAY_KEYS = ['name', 'displayName', 'label', 'title', 'value', 'email', 'id'];
+
+/**
+ * Coerce an arbitrary API value into something that is safe to render as a
+ * React text child.
+ *
+ * The audit API is loosely typed: fields declared as strings in
+ * `AuditLogEntry` occasionally arrive as objects, arrays or numbers. Rendering
+ * an object as a React child throws ("Objects are not valid as a React
+ * child"), so the coercion happens here at the service boundary rather than in
+ * the screens.
+ *
+ * Rules:
+ *  - strings pass through untouched
+ *  - finite numbers / booleans / bigints stringify
+ *  - null / undefined / NaN / Infinity -> `fallback`
+ *  - Date -> ISO string
+ *  - arrays -> each element coerced and joined with ", " (empties dropped)
+ *  - objects -> the first meaningful nested field (name, displayName, label,
+ *    title, value, email, id); never "[object Object]"
+ *  - anything else (functions, symbols) -> `fallback`
+ */
+export function toDisplayString(value: unknown, fallback = '', depth = 0): string {
+  if (value === null || value === undefined) return fallback;
+
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : fallback;
+  if (typeof value === 'boolean' || typeof value === 'bigint') return String(value);
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? fallback : value.toISOString();
+  }
+
+  if (depth >= 3) return fallback;
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => toDisplayString(item, '', depth + 1))
+      .filter((part) => part.length > 0);
+    return parts.length > 0 ? parts.join(', ') : fallback;
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    for (const key of DISPLAY_KEYS) {
+      if (record[key] === null || record[key] === undefined) continue;
+      const nested = toDisplayString(record[key], '', depth + 1);
+      if (nested.length > 0) return nested;
+    }
+    return fallback;
+  }
+
+  return fallback;
+}
+
+/**
+ * Normalize a single audit log entry.
+ *
+ * Every field typed as a string on `AuditLogEntry` is run through
+ * `toDisplayString`. The fallback chains below are unchanged — the coercion
+ * only wraps the resolved value, using the chain's original default.
+ * `payload` is deliberately left as-is: it is typed `Record<string, unknown>`
+ * and only its keys are rendered.
+ */
+function normalizeEntry(input: any): AuditLogEntry {
+  const raw: any = input && typeof input === 'object' ? input : {};
+  const fallbackIdSeed = `${toDisplayString(raw.timestamp ?? raw.createdAt ?? raw.date, 'ts')}-${toDisplayString(raw.action ?? raw.actionName, 'action')}-${toDisplayString(raw.objectId ?? raw.objectName ?? raw.userId, 'object')}`;
   return {
-    id: raw.id ?? raw.auditId ?? fallbackIdSeed,
-    action: raw.action ?? raw.actionName ?? 'Unknown',
-    platform: raw.platform ?? raw.platformName ?? raw.product ?? raw.platformType ?? '',
-    objectType: raw.objectType ?? raw.type ?? '',
-    objectId: raw.objectId ?? raw.objectName ?? '',
-    userName: raw.userName ?? raw.userEmail ?? raw.user?.name ?? raw.user?.email ?? '',
-    userId: raw.userId ?? raw.user?.id ?? '',
-    timestamp: raw.timestamp ?? raw.createdAt ?? raw.date ?? '',
-    environmentId: raw.environmentId ?? '',
-    environmentName: raw.environmentName ?? '',
+    id: toDisplayString(raw.id ?? raw.auditId, fallbackIdSeed),
+    action: toDisplayString(raw.action ?? raw.actionName, 'Unknown'),
+    platform: toDisplayString(raw.platform ?? raw.platformName ?? raw.product ?? raw.platformType, ''),
+    objectType: toDisplayString(raw.objectType ?? raw.type, ''),
+    objectId: toDisplayString(raw.objectId ?? raw.objectName, ''),
+    userName: toDisplayString(raw.userName ?? raw.userEmail ?? raw.user?.name ?? raw.user?.email, ''),
+    userId: toDisplayString(raw.userId ?? raw.user?.id, ''),
+    timestamp: toDisplayString(raw.timestamp ?? raw.createdAt ?? raw.date, ''),
+    environmentId: toDisplayString(raw.environmentId, ''),
+    environmentName: toDisplayString(raw.environmentName, ''),
     payload: raw.payload ?? raw.properties ?? raw.details ?? undefined,
   };
 }
