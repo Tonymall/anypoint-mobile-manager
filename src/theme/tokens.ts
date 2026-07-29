@@ -216,6 +216,15 @@ export interface ColorTokens {
     bright: string;
     surface: string;
   };
+  /**
+   * Accents that are not statuses but still need base/surface/border as a
+   * set — categorical colouring for cards, charts and chips.
+   */
+  accent: {
+    brand: StatusRole;
+    secondary: StatusRole;
+    tertiary: StatusRole;
+  };
   status: {
     success: StatusRole;
     warning: StatusRole;
@@ -259,6 +268,11 @@ const darkColors: ColorTokens = {
     bright: palette.blue400,
     surface: withAlpha(palette.blue500, alpha.subtle),
   },
+  accent: {
+    brand: statusRole(palette.blue500),
+    secondary: statusRole(palette.indigo400),
+    tertiary: statusRole(palette.violet400),
+  },
   status: {
     success: statusRole(palette.green500),
     warning: statusRole(palette.amber500),
@@ -292,6 +306,11 @@ const lightColors: ColorTokens = {
     base: palette.blue500,
     bright: palette.blue600,
     surface: withAlpha(palette.blue500, alpha.faint),
+  },
+  accent: {
+    brand: statusRole(palette.blue600),
+    secondary: statusRole('#4F46E5'),
+    tertiary: statusRole('#7C3AED'),
   },
   status: {
     success: statusRole('#15803D'),

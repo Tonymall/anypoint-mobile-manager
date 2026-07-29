@@ -26,10 +26,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuthStore } from '../../stores/authStore';
 import { getRegionById } from '../../config/regions';
-import { anypointColors } from '../../theme';
+import { statusColors, typeScale, useTokens, withAlpha, type Tokens } from '../../theme';
 import { useApplications, useManagedAPIs } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
+import { StatCard } from './home/StatCard';
 import IncidentFeed from './incidents/IncidentFeed';
 import { useIncidentFeed } from './incidents/useIncidentFeed';
 import type { Incident } from '../../services/incidentFeed';
@@ -37,82 +38,20 @@ import type { IconName } from '../../types/icons';
 
 // ── Quick Actions ──
 
-const QUICK_ACTIONS: { icon: IconName; label: string; color: string; route: string }[] = [
-  { icon: 'rocket-launch', label: 'Apps', color: anypointColors.primary, route: '/(main)/runtime' },
-  { icon: 'api', label: 'APIs', color: anypointColors.secondary, route: '/(main)/apis' },
-  { icon: 'chart-line', label: 'Monitor', color: anypointColors.accent, route: '/(main)/monitoring' },
-  { icon: 'cog', label: 'Settings', color: anypointColors.mulePurple, route: '/(main)/settings' },
-];
+type QuickActionRole = 'brand' | 'secondary' | 'tertiary' | 'success';
 
-// ── Glassmorphic Stat Card ──
-
-interface StatCardProps {
-  title: string;
-  value: string | number;
-  icon: IconName;
-  color: string;
-  subtitle?: string;
-  onPress?: () => void;
-  loading?: boolean;
+/** Resolve a quick action's categorical accent from the token set. */
+function quickActionRole(t: Tokens, role: QuickActionRole) {
+  if (role === 'success') return t.color.status.success;
+  return t.color.accent[role];
 }
 
-const StatCard: React.FC<StatCardProps> = ({
-  title, value, icon, color, subtitle, onPress, loading,
-}) => {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityLabel={`${title}: ${loading ? 'loading' : value}${subtitle ? '. ' + subtitle : ''}`}
-      accessibilityRole="button"
-      style={({ pressed }) => [
-        {
-          flex: 1,
-          borderRadius: 20,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 1,
-          borderColor: color + '18',
-          overflow: 'hidden',
-          opacity: pressed ? 0.9 : 1,
-        },
-      ]}
-    >
-      {/* Accent glow at top */}
-      <View style={{ height: 3, backgroundColor: color, opacity: 0.6 }} />
-      <View style={{ padding: 16 }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <View style={{
-            width: 42, height: 42, borderRadius: 14,
-            backgroundColor: color + '15',
-            justifyContent: 'center', alignItems: 'center',
-          }}>
-            <Icon name={icon} size={20} color={color} />
-          </View>
-          <Icon name="chevron-right" size={14} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.4 }} />
-        </View>
-        <Text style={{
-          fontSize: 32, fontWeight: '800', color: theme.colors.onSurface,
-          letterSpacing: -1, marginBottom: 2, lineHeight: 36,
-        }}>
-          {loading ? '—' : value}
-        </Text>
-        <Text style={{ fontSize: 12, fontWeight: '500', color: theme.colors.onSurfaceVariant, letterSpacing: 0.3 }}>
-          {title}
-        </Text>
-        {subtitle && (
-          <View style={{
-            flexDirection: 'row', alignItems: 'center', marginTop: 8,
-            paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8,
-            backgroundColor: color + '12', alignSelf: 'flex-start',
-          }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color, marginRight: 6 }} />
-            <Text style={{ color, fontSize: 11, fontWeight: '600' }}>{subtitle}</Text>
-          </View>
-        )}
-      </View>
-    </Pressable>
-  );
-};
+const QUICK_ACTIONS: { icon: IconName; label: string; role: QuickActionRole; route: string }[] = [
+  { icon: 'rocket-launch', label: 'Apps', role: 'brand', route: '/(main)/runtime' },
+  { icon: 'api', label: 'APIs', role: 'secondary', route: '/(main)/apis' },
+  { icon: 'chart-line', label: 'Monitor', role: 'success', route: '/(main)/monitoring' },
+  { icon: 'cog', label: 'Settings', role: 'tertiary', route: '/(main)/settings' },
+];
 
 // ── App Row Item ──
 
@@ -122,6 +61,7 @@ const AppRowItem: React.FC<{
   onPress: () => void;
   theme: MD3Theme;
 }> = React.memo(({ app, isLast, onPress, theme }) => {
+  const t = useTokens();
   const name = getAppName(app);
   const version = getMuleVersion(app);
   const workerInfo = getWorkerInfo(app);
@@ -129,9 +69,10 @@ const AppRowItem: React.FC<{
   const memUsage = app.monitoring?.memoryUsage ?? 0;
   const memTotal = app.monitoring?.memoryTotal ?? 0;
   const memPct = memTotal > 0 ? Math.round((memUsage / memTotal) * 100) : null;
-  const statusColor = app.status === 'STARTED' ? anypointColors.success
-    : app.status === 'FAILED' ? anypointColors.error
-    : anypointColors.warning;
+  const statusRole = app.status === 'STARTED' ? t.color.status.success
+    : app.status === 'FAILED' ? t.color.status.danger
+    : t.color.status.warning;
+  const statusColor = statusRole.base;
 
   return (
     <Pressable
@@ -144,7 +85,7 @@ const AppRowItem: React.FC<{
         paddingHorizontal: 16,
         borderBottomWidth: isLast ? 0 : 1,
         borderBottomColor: theme.colors.outlineVariant,
-        backgroundColor: pressed ? theme.colors.surfaceVariant + '40' : 'transparent',
+        backgroundColor: pressed ? withAlpha(t.color.text.primary, 'faint') : 'transparent',
       })}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -172,7 +113,7 @@ const AppRowItem: React.FC<{
             <Text style={{ fontSize: 10, fontWeight: '500', color: theme.colors.onSurfaceVariant, width: 26 }}>CPU</Text>
             <ProgressBar
               progress={cpu / 100}
-              color={cpu > 80 ? anypointColors.error : cpu > 60 ? anypointColors.warning : anypointColors.primary}
+              color={(cpu > 80 ? t.color.status.danger : cpu > 60 ? t.color.status.warning : t.color.accent.brand).base}
               style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: theme.colors.surfaceVariant }}
             />
             <Text style={{ fontSize: 10, fontWeight: '600', color: theme.colors.onSurfaceVariant, width: 30, textAlign: 'right' }}>
@@ -184,7 +125,7 @@ const AppRowItem: React.FC<{
               <Text style={{ fontSize: 10, fontWeight: '500', color: theme.colors.onSurfaceVariant, width: 26 }}>MEM</Text>
               <ProgressBar
                 progress={memPct / 100}
-                color={memPct > 80 ? anypointColors.error : anypointColors.secondary}
+                color={(memPct > 80 ? t.color.status.danger : t.color.accent.secondary).base}
                 style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: theme.colors.surfaceVariant }}
               />
               <Text style={{ fontSize: 10, fontWeight: '600', color: theme.colors.onSurfaceVariant, width: 30, textAlign: 'right' }}>
@@ -210,6 +151,7 @@ const DashboardScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const { isLandscape, isPhoneLandscape } = useResponsiveLayout();
+  const t = useTokens();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const scrollRef = useRef<ScrollView>(null);
   const user = useAuthStore((s) => s.user);
@@ -280,8 +222,8 @@ const DashboardScreen: React.FC = () => {
       {/* ── Profile Header ── */}
       <View style={styles.headerSection}>
         <View style={styles.avatarContainer}>
-          <View style={[styles.avatar, { backgroundColor: anypointColors.primary + '20' }]}>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: anypointColors.primary }}>
+          <View style={[styles.avatar, { backgroundColor: t.color.brand.surface }]}>
+            <Text style={[typeScale.subheading, { color: t.color.text.accent }]}>
               {initials}
             </Text>
           </View>
@@ -302,24 +244,24 @@ const DashboardScreen: React.FC = () => {
                 {currentOrg?.name ?? user?.organizationName ?? 'Organization'}
               </Text>
             </View>
-            <View style={[styles.metaChip, { backgroundColor: anypointColors.primary + '12' }]}>
-              <Icon name="earth" size={11} color={anypointColors.primary} />
-              <Text style={[styles.metaText, { color: anypointColors.primary }]}>{region.label}</Text>
+            <View style={[styles.metaChip, { backgroundColor: t.color.brand.surface }]}>
+              <Icon name="earth" size={11} color={t.color.text.accent} />
+              <Text style={[styles.metaText, { color: t.color.text.accent }]}>{region.label}</Text>
             </View>
           </View>
           {currentEnv && (
             <View style={styles.metaRow}>
               <View style={[
                 styles.envBadge,
-                { backgroundColor: currentEnv.isProduction ? anypointColors.success + '15' : anypointColors.warning + '15' },
+                { backgroundColor: (currentEnv.isProduction ? t.color.status.success : t.color.status.warning).surface },
               ]}>
                 <View style={{
                   width: 6, height: 6, borderRadius: 3,
-                  backgroundColor: currentEnv.isProduction ? anypointColors.success : anypointColors.warning,
+                  backgroundColor: (currentEnv.isProduction ? t.color.status.success : t.color.status.warning).base,
                 }} />
                 <Text style={{
                   fontSize: 11, fontWeight: '600',
-                  color: currentEnv.isProduction ? anypointColors.success : anypointColors.warning,
+                  color: (currentEnv.isProduction ? t.color.status.success : t.color.status.warning).base,
                 }}>
                   {currentEnv.name} · {currentEnv.isProduction ? 'PRODUCTION' : 'SANDBOX'}
                 </Text>
@@ -331,8 +273,8 @@ const DashboardScreen: React.FC = () => {
 
       {/* ── Error Banner ── */}
       {(appsError || apisError) && (
-        <View style={[styles.errorBanner, { backgroundColor: anypointColors.error + '10', borderColor: anypointColors.error + '25' }]}>
-          <Icon name="alert-circle" size={18} color={anypointColors.error} />
+        <View style={[styles.errorBanner, { backgroundColor: t.color.status.danger.surface, borderColor: t.color.status.danger.border }]}>
+          <Icon name="alert-circle" size={18} color={t.color.status.danger.base} />
           <View style={{ flex: 1, marginLeft: 10 }}>
             <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.onSurface }}>
               Failed to load data
@@ -342,7 +284,7 @@ const DashboardScreen: React.FC = () => {
             </Text>
           </View>
           <Pressable onPress={handleRefresh} style={styles.retryButton}>
-            <Icon name="refresh" size={16} color={anypointColors.primary} />
+            <Icon name="refresh" size={16} color={t.color.text.accent} />
           </Pressable>
         </View>
       )}
@@ -371,7 +313,7 @@ const DashboardScreen: React.FC = () => {
               title="Applications"
               value={totalApps}
               icon="application-cog"
-              color={anypointColors.primary}
+              role={t.color.status.info}
               subtitle={`${runningApps} running`}
               onPress={() => router.navigate('/(main)/runtime')}
               loading={appsLoading}
@@ -380,7 +322,7 @@ const DashboardScreen: React.FC = () => {
               title="APIs"
               value={totalApis}
               icon="api"
-              color={anypointColors.secondary}
+              role={t.color.accent.secondary}
               subtitle={`${activeApis} active`}
               onPress={() => router.navigate('/(main)/apis')}
               loading={apisLoading}
@@ -389,7 +331,7 @@ const DashboardScreen: React.FC = () => {
               title="Failed"
               value={failedApps}
               icon="alert-circle"
-              color={failedApps > 0 ? anypointColors.error : anypointColors.success}
+              role={failedApps > 0 ? t.color.status.danger : t.color.status.success}
               subtitle={failedApps > 0 ? 'Needs attention' : 'All healthy'}
               loading={appsLoading}
             />
@@ -397,7 +339,7 @@ const DashboardScreen: React.FC = () => {
               title="Workers"
               value={appsList.reduce((sum, a) => sum + (a.workers?.amount ?? 0), 0)}
               icon="server"
-              color={anypointColors.accent}
+              role={t.color.status.success}
               subtitle="Total allocated"
               onPress={() => router.navigate('/(main)/workers' as any)}
               loading={appsLoading}
@@ -410,7 +352,7 @@ const DashboardScreen: React.FC = () => {
                 title="Applications"
                 value={totalApps}
                 icon="application-cog"
-                color={anypointColors.primary}
+                role={t.color.status.info}
                 subtitle={`${runningApps} running`}
                 onPress={() => router.navigate('/(main)/runtime')}
                 loading={appsLoading}
@@ -419,7 +361,7 @@ const DashboardScreen: React.FC = () => {
                 title="APIs"
                 value={totalApis}
                 icon="api"
-                color={anypointColors.secondary}
+                role={t.color.accent.secondary}
                 subtitle={`${activeApis} active`}
                 onPress={() => router.navigate('/(main)/apis')}
                 loading={apisLoading}
@@ -430,7 +372,7 @@ const DashboardScreen: React.FC = () => {
                 title="Failed"
                 value={failedApps}
                 icon="alert-circle"
-                color={failedApps > 0 ? anypointColors.error : anypointColors.success}
+                role={failedApps > 0 ? t.color.status.danger : t.color.status.success}
                 subtitle={failedApps > 0 ? 'Needs attention' : 'All healthy'}
                 loading={appsLoading}
               />
@@ -438,7 +380,7 @@ const DashboardScreen: React.FC = () => {
                 title="Workers"
                 value={appsList.reduce((sum, a) => sum + (a.workers?.amount ?? 0), 0)}
                 icon="server"
-                color={anypointColors.accent}
+                role={t.color.status.success}
                 subtitle="Total allocated"
                 onPress={() => router.navigate('/(main)/workers' as any)}
                 loading={appsLoading}
@@ -455,7 +397,7 @@ const DashboardScreen: React.FC = () => {
             <View style={styles.sectionAccent} />
             <Text style={styles.sectionTitle}>Running Applications</Text>
             <View style={styles.countBadge}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: anypointColors.success }}>{runningApps}</Text>
+              <Text style={[typeScale.caption, { color: t.color.status.success.base }]}>{runningApps}</Text>
             </View>
           </View>
           <View style={styles.appsCard}>
@@ -492,8 +434,8 @@ const DashboardScreen: React.FC = () => {
                   { backgroundColor: theme.colors.surface, opacity: pressed ? 0.85 : 1 },
                 ]}
               >
-                <View style={[styles.actionIcon, { backgroundColor: action.color + '15' }]}>
-                  <Icon name={action.icon} size={18} color={action.color} />
+                <View style={[styles.actionIcon, { backgroundColor: quickActionRole(t, action.role).surface }]}>
+                  <Icon name={action.icon} size={18} color={quickActionRole(t, action.role).base} />
                 </View>
                 <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.onSurface, marginTop: 6 }}>
                   {action.label}
@@ -541,7 +483,7 @@ const createStyles = (theme: MD3Theme) =>
       width: 14,
       height: 14,
       borderRadius: 7,
-      backgroundColor: anypointColors.success,
+      backgroundColor: statusColors.running,
       borderWidth: 2.5,
       borderColor: theme.colors.background,
     },
@@ -627,7 +569,7 @@ const createStyles = (theme: MD3Theme) =>
       paddingHorizontal: 8,
       paddingVertical: 2,
       borderRadius: 8,
-      backgroundColor: anypointColors.success + '15',
+      backgroundColor: withAlpha(statusColors.running, 'subtle'),
     },
 
     // ── Stats ──
