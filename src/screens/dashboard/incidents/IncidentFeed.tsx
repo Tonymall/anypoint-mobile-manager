@@ -8,10 +8,10 @@
 
 import React, { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Text, useTheme, type MD3Theme } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { anypointColors } from '../../../theme';
+import { typeScale, useTokens, withAlpha, type Tokens } from '../../../theme';
 import { hapticSelection } from '../../../utils/haptics';
 import type {
   Incident,
@@ -20,11 +20,12 @@ import type {
 } from '../../../services/incidentFeed';
 import type { IconName } from '../../../types/icons';
 
-const SEVERITY_COLOR: Record<IncidentSeverity, string> = {
-  critical: anypointColors.error,
-  warning: anypointColors.warning,
-  info: anypointColors.info,
-};
+/** Severity maps onto the status roles rather than naming colours. */
+function severityRole(t: Tokens, severity: IncidentSeverity) {
+  if (severity === 'critical') return t.color.status.danger;
+  if (severity === 'warning') return t.color.status.warning;
+  return t.color.status.info;
+}
 
 const SOURCE_ICON: Record<IncidentSource, IconName> = {
   runtime: 'application-cog',
@@ -57,14 +58,14 @@ const IncidentRow = memo(function IncidentRow({
   incident,
   isLast,
   onPress,
-  theme,
+  t,
 }: {
   incident: Incident;
   isLast: boolean;
   onPress: () => void;
-  theme: MD3Theme;
+  t: Tokens;
 }) {
-  const color = SEVERITY_COLOR[incident.severity];
+  const role = severityRole(t, incident.severity);
   const age = relativeTime(incident.timestamp);
 
   return (
@@ -77,57 +78,58 @@ const IncidentRow = memo(function IncidentRow({
         styles.row,
         {
           borderBottomWidth: isLast ? 0 : 1,
-          borderBottomColor: theme.colors.outlineVariant,
-          backgroundColor: pressed ? theme.colors.surfaceVariant + '40' : 'transparent',
+          borderBottomColor: t.color.border.subtle,
+          backgroundColor: pressed
+            ? withAlpha(t.color.text.primary, 'faint')
+            : 'transparent',
         },
       ]}
     >
-      <View style={[styles.severityBar, { backgroundColor: color }]} />
-      <View style={[styles.rowIcon, { backgroundColor: color + '15' }]}>
-        <Icon name={SOURCE_ICON[incident.source]} size={18} color={color} />
+      <View style={[styles.severityBar, { backgroundColor: role.base }]} />
+      <View style={[styles.rowIcon, { backgroundColor: role.surface }]}>
+        <Icon name={SOURCE_ICON[incident.source]} size={18} color={role.base} />
       </View>
       <View style={styles.rowBody}>
         <Text
           numberOfLines={1}
-          style={[styles.rowTitle, { color: theme.colors.onSurface }]}
+          style={[styles.rowTitle, { color: t.color.text.primary }]}
         >
           {incident.title}
         </Text>
         <Text
           numberOfLines={2}
-          style={[styles.rowDetail, { color: theme.colors.onSurfaceVariant }]}
+          style={[styles.rowDetail, { color: t.color.text.secondary }]}
         >
           {incident.detail}
         </Text>
       </View>
       <View style={styles.rowMeta}>
         {age && (
-          <Text style={[styles.rowAge, { color: theme.colors.onSurfaceVariant }]}>
+          <Text style={[styles.rowAge, { color: t.color.text.tertiary }]}>
             {age}
           </Text>
         )}
         <Icon
           name="chevron-right"
           size={14}
-          color={theme.colors.onSurfaceVariant}
-          style={{ opacity: 0.4 }}
+          color={t.color.text.tertiary}
         />
       </View>
     </Pressable>
   );
 });
 
-const AllClear = memo(function AllClear({ theme }: { theme: MD3Theme }) {
+const AllClear = memo(function AllClear({ t }: { t: Tokens }) {
   return (
     <View style={styles.allClear}>
-      <View style={[styles.allClearIcon, { backgroundColor: anypointColors.success + '15' }]}>
-        <Icon name="check-circle-outline" size={22} color={anypointColors.success} />
+      <View style={[styles.allClearIcon, { backgroundColor: t.color.status.success.surface }]}>
+        <Icon name="check-circle-outline" size={22} color={t.color.status.success.base} />
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.allClearTitle, { color: theme.colors.onSurface }]}>
+        <Text style={[styles.allClearTitle, { color: t.color.text.primary }]}>
           All clear
         </Text>
-        <Text style={[styles.allClearBody, { color: theme.colors.onSurfaceVariant }]}>
+        <Text style={[styles.allClearBody, { color: t.color.text.secondary }]}>
           No failing apps, open alerts or elevated error rates.
         </Text>
       </View>
@@ -150,29 +152,29 @@ function IncidentFeed({
   onSelect,
   onViewAll,
 }: IncidentFeedProps) {
-  const theme = useTheme();
+  const t = useTokens();
   const visible = useMemo(() => incidents.slice(0, VISIBLE_LIMIT), [incidents]);
   const hidden = incidents.length - visible.length;
 
-  const headlineColor =
+  const headline =
     summary.critical > 0
-      ? anypointColors.error
+      ? t.color.status.danger
       : summary.warning > 0
-        ? anypointColors.warning
-        : anypointColors.success;
+        ? t.color.status.warning
+        : t.color.status.success;
 
   return (
     <View style={styles.section}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={[styles.headerDot, { backgroundColor: headlineColor }]} />
-          <Text style={[styles.headerTitle, { color: theme.colors.onSurface }]}>
+          <View style={[styles.headerDot, { backgroundColor: headline.base }]} />
+          <Text style={[styles.headerTitle, { color: t.color.text.primary }]}>
             Needs attention
           </Text>
         </View>
         {summary.total > 0 && (
-          <View style={[styles.headerBadge, { backgroundColor: headlineColor + '15' }]}>
-            <Text style={[styles.headerBadgeText, { color: headlineColor }]}>
+          <View style={[styles.headerBadge, { backgroundColor: headline.surface }]}>
+            <Text style={[styles.headerBadgeText, { color: headline.base }]}>
               {summary.critical > 0 ? `${summary.critical} critical` : `${summary.total}`}
             </Text>
           </View>
@@ -183,20 +185,20 @@ function IncidentFeed({
         style={[
           styles.card,
           {
-            backgroundColor: theme.colors.surface,
-            borderColor: headlineColor + '18',
+            backgroundColor: t.color.surface.raised,
+            borderColor: headline.border,
           },
         ]}
       >
-        <View style={{ height: 3, backgroundColor: headlineColor, opacity: 0.6 }} />
+        <View style={{ height: 3, backgroundColor: withAlpha(headline.base, 0.6) }} />
         {isLoading && incidents.length === 0 ? (
           <View style={styles.loading}>
-            <Text style={{ color: theme.colors.onSurfaceVariant, fontSize: 13 }}>
+            <Text style={{ color: t.color.text.secondary, ...t.type.bodySmall }}>
               Checking your estate…
             </Text>
           </View>
         ) : incidents.length === 0 ? (
-          <AllClear theme={theme} />
+          <AllClear t={t} />
         ) : (
           <>
             {visible.map((incident, index) => (
@@ -204,7 +206,7 @@ function IncidentFeed({
                 key={incident.id}
                 incident={incident}
                 isLast={index === visible.length - 1 && hidden === 0}
-                theme={theme}
+                t={t}
                 onPress={() => {
                   hapticSelection();
                   onSelect(incident);
@@ -224,10 +226,10 @@ function IncidentFeed({
                   { opacity: pressed ? 0.7 : 1 },
                 ]}
               >
-                <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>
+                <Text style={[styles.viewAllText, { color: t.color.text.accent }]}>
                   {`${hidden} more`}
                 </Text>
-                <Icon name="chevron-right" size={14} color={theme.colors.primary} />
+                <Icon name="chevron-right" size={14} color={t.color.text.accent} />
               </Pressable>
             )}
           </>
@@ -258,20 +260,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     marginRight: 8,
   },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-  },
+  headerTitle: typeScale.heading,
   headerBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
   },
-  headerBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  headerBadgeText: typeScale.caption,
   card: {
     borderRadius: 20,
     borderWidth: 1,
@@ -305,27 +300,14 @@ const styles = StyleSheet.create({
   rowBody: {
     flex: 1,
   },
-  rowTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    marginBottom: 2,
-  },
-  rowDetail: {
-    fontSize: 12,
-    fontWeight: '500',
-    lineHeight: 16,
-  },
+  rowTitle: { ...typeScale.body, fontWeight: '700', marginBottom: 2 },
+  rowDetail: typeScale.label,
   rowMeta: {
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 8,
   },
-  rowAge: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginRight: 4,
-  },
+  rowAge: { ...typeScale.caption, marginRight: 4 },
   allClear: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -339,27 +321,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 14,
   },
-  allClearTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  allClearBody: {
-    fontSize: 12,
-    fontWeight: '500',
-    lineHeight: 16,
-  },
+  allClearTitle: { ...typeScale.subheading, fontWeight: '700', marginBottom: 2 },
+  allClearBody: typeScale.label,
   viewAll: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
   },
-  viewAllText: {
-    fontSize: 13,
-    fontWeight: '700',
-    marginRight: 2,
-  },
+  viewAllText: { ...typeScale.bodySmall, fontWeight: '700', marginRight: 2 },
 });
 
 export default memo(IncidentFeed);

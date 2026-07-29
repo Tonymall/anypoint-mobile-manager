@@ -191,3 +191,21 @@ export const shadows = {
 } as const;
 
 export { anypointColors };
+
+// ── Design tokens ──
+// The semantic layer: screens name roles, not raw values. See tokens.ts.
+// `anypointColors`/`statusColors` above remain for not-yet-migrated screens.
+export {
+  getTokens,
+  withAlpha,
+  alpha,
+  type as typeScale,
+  motion,
+  monoFontFamily,
+  type Tokens,
+  type TypeToken,
+  type AlphaToken,
+  type ColorTokens,
+  type StatusRole,
+} from './tokens';
+export { useTokens } from './useTokens';
