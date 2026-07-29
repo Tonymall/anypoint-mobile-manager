@@ -3,7 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper';
 import { useRouter, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useAuditLogs } from '../../hooks/queries';
 import type { AuditLogEntry } from '../../types';

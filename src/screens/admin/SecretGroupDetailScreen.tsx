@@ -17,7 +17,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -33,6 +33,7 @@ import {
 } from '../../hooks/queries/useSecretManagerQueries';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // ── Mask sensitive values ──
 const maskValue = (value?: string): string => {
@@ -44,7 +45,7 @@ const maskValue = (value?: string): string => {
 // ── Collapsible Section Component ──
 const CollapsibleSection: React.FC<{
   title: string;
-  icon: string;
+  icon: IconName;
   iconColor: string;
   count: number;
   expanded: boolean;

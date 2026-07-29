@@ -20,7 +20,7 @@ import {
   Appbar, Text, Chip, Searchbar, useTheme, ActivityIndicator, Switch,
   Button, IconButton, type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +31,7 @@ import type { AuditLogEntry } from '../../types';
 import type { AuditLogQueryParams } from '../../services/auditLogService';
 import LoadingState from '../../components/common/LoadingState';
 import logger from '../../utils/logger';
+import type { IconName } from '../../types/icons';
 
 // ---------------------------------------------------------------------------
 // Date-range presets (ordered from smallest to largest)
@@ -290,7 +291,7 @@ const LogDetailSheet: React.FC<{
 // Audit Log Item
 // ═══════════════════════════════════════════════════════════════════
 
-function getActionIcon(action: string): string {
+function getActionIcon(action: string): IconName {
   const l = action.toLowerCase();
   if (l.includes('deploy') || l.includes('redeploy')) return 'rocket-launch';
   if (l.includes('create')) return 'plus-circle-outline';

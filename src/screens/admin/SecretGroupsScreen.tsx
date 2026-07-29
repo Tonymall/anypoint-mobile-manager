@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Appbar, Text, useTheme, type MD3Theme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 

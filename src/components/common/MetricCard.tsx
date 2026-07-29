@@ -1,13 +1,14 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Card, Text, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
+import type { IconName } from '../../types/icons';
 
 interface MetricCardProps {
   title: string;
   value: string | number;
   unit?: string;
-  icon?: string;
+  icon?: IconName;
   trend?: {
     direction: 'up' | 'down';
     percentage: number;

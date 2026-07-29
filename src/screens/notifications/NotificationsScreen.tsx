@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import { Text, useTheme, type MD3Theme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useNotificationStore } from '../../stores/notificationStore';
 import {
@@ -21,8 +21,9 @@ import { anypointColors } from '../../theme';
 import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import type { AppNotification, NotificationAction } from '../../types';
+import type { IconName } from '../../types/icons';
 
-const ACTION_ICONS: Record<NotificationAction, string> = {
+const ACTION_ICONS: Record<NotificationAction, IconName> = {
   start: 'play-circle-outline',
   stop: 'stop-circle-outline',
   restart: 'restart',

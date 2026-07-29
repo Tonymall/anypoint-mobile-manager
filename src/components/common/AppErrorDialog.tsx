@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Button, Dialog, Portal, Text, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
 import { submitBugReport } from '../../services/bugReportService';

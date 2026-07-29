@@ -1,9 +1,10 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { severityColors } from '../../theme';
 import type { AlertSeverity } from '../../types';
+import type { IconName } from '../../types/icons';
 
 interface SeverityIndicatorProps {
   severity: AlertSeverity;
@@ -11,7 +12,7 @@ interface SeverityIndicatorProps {
   size?: 'small' | 'medium' | 'large';
 }
 
-const severityIconMap: Record<AlertSeverity, string> = {
+const severityIconMap: Record<AlertSeverity, IconName> = {
   CRITICAL: 'alert-circle',
   WARNING: 'alert',
   INFO: 'information',

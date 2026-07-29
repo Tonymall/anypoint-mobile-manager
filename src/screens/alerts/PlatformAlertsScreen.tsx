@@ -21,7 +21,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useRouter, useIsFocused } from 'expo-router';
 
@@ -32,6 +32,7 @@ import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // --- Filter Definitions ---
 type SeverityFilter = AlertSeverity | 'ALL';
@@ -48,7 +49,7 @@ const getSeverityColor = (severity: AlertSeverity): string => {
   return severityColors[severity] ?? anypointColors.info;
 };
 
-const getSeverityIcon = (severity: AlertSeverity): string => {
+const getSeverityIcon = (severity: AlertSeverity): IconName => {
   switch (severity) {
     case 'CRITICAL': return 'alert-octagon';
     case 'WARNING': return 'alert';

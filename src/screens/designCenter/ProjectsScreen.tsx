@@ -11,7 +11,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useRouter } from 'expo-router';
 import type { DesignCenterProject } from '../../types';
@@ -21,6 +21,7 @@ import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -50,9 +51,9 @@ const classifierLabel = (classifier?: string | null): string => {
   return map[classifier.toLowerCase()] ?? classifier.toUpperCase();
 };
 
-const classifierIcon = (classifier?: string | null): string => {
+const classifierIcon = (classifier?: string | null): IconName => {
   if (!classifier) return 'file-document-outline';
-  const map: Record<string, string> = {
+  const map: Record<string, IconName> = {
     raml: 'api',
     oas: 'api',
     'raml-fragment': 'puzzle-outline',

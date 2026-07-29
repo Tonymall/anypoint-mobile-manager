@@ -7,7 +7,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { View, ScrollView, RefreshControl, useWindowDimensions } from 'react-native';
 import { Appbar, Text, Card, Chip, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useApplication, useAppMetrics, useDashboardStats } from '../../hooks/queries';
 import { getAppName } from '../../utils/appHelpers';

@@ -10,9 +10,10 @@ import {
   Divider,
   RadioButton,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useAuthStore } from '../../stores';
 import type { Environment } from '../../types';
+import type { IconName } from '../../types/icons';
 
 interface EnvironmentSelectorProps {
   compact?: boolean;
@@ -39,7 +40,7 @@ const EnvironmentSelector: React.FC<EnvironmentSelectorProps> = ({
     [switchEnvironment, onEnvironmentChange],
   );
 
-  const getEnvironmentIcon = (type: Environment['type']): string => {
+  const getEnvironmentIcon = (type: Environment['type']): IconName => {
     switch (type) {
       case 'production':
         return 'shield-check';

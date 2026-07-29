@@ -14,7 +14,7 @@ import {
   Snackbar,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { DesignCenterProject } from '../../types';
 import { anypointColors } from '../../theme';
@@ -24,6 +24,7 @@ import { hapticWarning } from '../../utils/haptics';
 import { ConfirmDialog } from '../../components/common';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -53,9 +54,9 @@ const classifierLabel = (classifier?: string | null): string => {
   return map[classifier.toLowerCase()] ?? classifier.toUpperCase();
 };
 
-const classifierIcon = (classifier?: string | null): string => {
+const classifierIcon = (classifier?: string | null): IconName => {
   if (!classifier) return 'file-document-outline';
-  const map: Record<string, string> = {
+  const map: Record<string, IconName> = {
     raml: 'api',
     oas: 'api',
     'raml-fragment': 'puzzle-outline',
@@ -71,7 +72,7 @@ const classifierIcon = (classifier?: string | null): string => {
 const InfoItem: React.FC<{
   label: string;
   value: string;
-  icon?: string;
+  icon?: IconName;
   iconColor?: string;
 }> = ({ label, value, icon, iconColor }) => {
   const theme = useTheme();

@@ -4,7 +4,7 @@ import { Appbar, Card, Text, useTheme, type MD3Theme } from 'react-native-paper'
 import { useQuery } from '@tanstack/react-query';
 import { useRouter, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useAuthStore } from '../../stores/authStore';
 import { anypointColors } from '../../theme';

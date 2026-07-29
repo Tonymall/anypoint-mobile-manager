@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { statusColors, anypointColors } from '../../theme';
 import { ConfirmDialog } from '../../components/common';
@@ -39,12 +39,13 @@ import { getStatusColor, getStatusLabel, isTransitional } from '../../utils/stat
 import { hapticSuccess, hapticError } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // ---------------------------------------------------------------------------
 // InfoItem — reusable key/value row
 // ---------------------------------------------------------------------------
 
-const InfoItem: React.FC<{ label: string; value: string; icon?: string; iconColor?: string }> = ({
+const InfoItem: React.FC<{ label: string; value: string; icon?: IconName; iconColor?: string }> = ({
   label, value, icon, iconColor,
 }) => {
   const theme = useTheme();
@@ -98,7 +99,7 @@ const MetricBox: React.FC<{
   label: string;
   value: string;
   color: string;
-  icon: string;
+  icon: IconName;
   warning?: boolean;
 }> = ({ label, value, color, icon, warning }) => {
   const theme = useTheme();
@@ -150,7 +151,7 @@ const metricStyles = StyleSheet.create({
 // ---------------------------------------------------------------------------
 
 const ActionButton: React.FC<{
-  icon: string;
+  icon: IconName;
   label: string;
   color?: string;
   onPress: () => void;

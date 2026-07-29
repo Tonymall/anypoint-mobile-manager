@@ -5,7 +5,7 @@
 import React, { useMemo, useCallback } from 'react';
 import { View, FlatList, StyleSheet, RefreshControl, Platform } from 'react-native';
 import { Appbar, Text, Switch, Card, useTheme, Snackbar, IconButton, type MD3Theme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSchedulers, useUpdateScheduler, useRunScheduler } from '../../hooks/queries';
 import type { Schedule } from '../../services/runtimeService';

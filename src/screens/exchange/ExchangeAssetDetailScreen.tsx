@@ -12,7 +12,7 @@ import {
   Appbar,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import type { AssetType, ExchangeAsset, AssetFile, AssetCategory } from '../../types';
 import { anypointColors } from '../../theme';
@@ -21,6 +21,7 @@ import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -59,7 +60,7 @@ const assetTypeLabel = (type: AssetType): string => {
 const InfoItem: React.FC<{
   label: string;
   value: string;
-  icon?: string;
+  icon?: IconName;
   iconColor?: string;
 }> = ({ label, value, icon, iconColor }) => {
   const theme = useTheme();

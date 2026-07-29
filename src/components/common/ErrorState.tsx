@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, Platform } from 'react-native';
 import { Text, Button, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 interface ErrorStateProps {

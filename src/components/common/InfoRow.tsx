@@ -1,13 +1,14 @@
 import React from 'react';
 import { StyleSheet, View, Pressable } from 'react-native';
 import { Text, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
+import type { IconName } from '../../types/icons';
 
 interface InfoRowProps {
   label: string;
   value: string | number;
   onPress?: () => void;
-  icon?: string;
+  icon?: IconName;
   copyable?: boolean;
 }
 

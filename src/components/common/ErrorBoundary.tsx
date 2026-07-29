@@ -6,7 +6,7 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text, Button } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 // ── Fallback UI (functional, uses theme-independent colors) ──

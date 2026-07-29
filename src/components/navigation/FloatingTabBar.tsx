@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import type { Tabs } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Text, useTheme, type MD3Theme } from 'react-native-paper';
-import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import Animated, {
   Easing,
   interpolate,
@@ -15,10 +15,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { hapticSelection } from '../../utils/haptics';
 import { useNotificationStore } from '../../stores/notificationStore';
+import type { IconName } from '../../types/icons';
 
 const ACTIVE_COLOR = '#31C1FF';
 
-const TAB_ITEMS: Record<string, { title: string; icon: string; iconFocused?: string }> = {
+const TAB_ITEMS: Record<string, { title: string; icon: IconName; iconFocused?: IconName }> = {
   index: { title: 'Home', icon: 'home-variant-outline', iconFocused: 'home-variant' },
   runtime: { title: 'Runtime', icon: 'application-cog-outline', iconFocused: 'application-cog' },
   apis: { title: 'APIs', icon: 'api' },

@@ -1,10 +1,11 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text, Button, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
+import type { IconName } from '../../types/icons';
 
 interface EmptyStateProps {
-  icon?: string;
+  icon?: IconName;
   title: string;
   description?: string;
   actionLabel?: string;

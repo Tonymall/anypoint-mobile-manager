@@ -5,7 +5,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Text, Card, Divider, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { anypointColors } from '../../../theme';
 import SimpleLineChart from './SimpleLineChart';
 import DetailRow from './DetailRow';

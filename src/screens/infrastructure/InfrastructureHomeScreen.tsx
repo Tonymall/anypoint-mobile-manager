@@ -18,7 +18,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useIsFocused } from 'expo-router';
 
 import { anypointColors } from '../../theme';
@@ -31,10 +31,11 @@ import {
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // --- Summary Card ---
 const SummaryCard = React.memo<{
-  icon: string;
+  icon: IconName;
   iconColor: string;
   title: string;
   count: number;

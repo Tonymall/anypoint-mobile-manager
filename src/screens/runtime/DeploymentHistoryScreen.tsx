@@ -20,7 +20,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useIsFocused } from 'expo-router';
 
 import type { DeploymentHistory, DeploymentStatus } from '../../types';

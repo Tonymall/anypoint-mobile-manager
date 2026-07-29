@@ -5,7 +5,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Button, Card, Text, useTheme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { anypointColors } from '../../../theme';
 import type { APIPolicy } from '../../../types';

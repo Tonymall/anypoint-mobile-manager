@@ -5,13 +5,15 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Text, type MD3Theme } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
+
+import type { IconName } from '../../../types/icons';
 
 interface MetricCardProps {
   title: string;
   value: string;
   subtitle?: string;
-  icon: string;
+  icon: IconName;
   color: string;
   theme: MD3Theme;
 }

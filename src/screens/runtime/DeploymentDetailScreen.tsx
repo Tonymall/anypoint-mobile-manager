@@ -16,7 +16,7 @@ import {
   ActivityIndicator,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import type { DeploymentStatus } from '../../types';
@@ -31,6 +31,7 @@ import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticSuccess, hapticError } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // --- Status colors for deployment ---
 const DEPLOYMENT_STATUS_COLOR: Record<DeploymentStatus, string> = {
@@ -56,7 +57,7 @@ const getDeploymentStatusLabel = (status: string): string => {
 };
 
 // --- InfoItem ---
-const InfoItem: React.FC<{ label: string; value: string; icon?: string; iconColor?: string }> = ({
+const InfoItem: React.FC<{ label: string; value: string; icon?: IconName; iconColor?: string }> = ({
   label, value, icon, iconColor,
 }) => {
   const theme = useTheme();
@@ -104,7 +105,7 @@ const infoStyles = StyleSheet.create({
 
 // --- Action Button ---
 const ActionButton: React.FC<{
-  icon: string;
+  icon: IconName;
   label: string;
   color?: string;
   onPress: () => void;

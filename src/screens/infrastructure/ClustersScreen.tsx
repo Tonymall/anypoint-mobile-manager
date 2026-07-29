@@ -19,7 +19,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 
 import type { Cluster, ServerGroup, ServerStatus } from '../../types';
@@ -31,6 +31,7 @@ import {
 import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // --- Status color ---
 const STATUS_COLOR: Record<ServerStatus, string> = {
@@ -318,7 +319,7 @@ const SectionTitle: React.FC<{
 );
 
 // --- Empty State ---
-const EmptySection: React.FC<{ icon: string; message: string; theme: MD3Theme }> = ({
+const EmptySection: React.FC<{ icon: IconName; message: string; theme: MD3Theme }> = ({
   icon,
   message,
   theme,

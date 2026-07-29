@@ -26,7 +26,7 @@ import {
   Menu,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -34,6 +34,7 @@ import type { AlertType, AlertSeverity, AlertRecipient } from '../../types';
 import { anypointColors, severityColors } from '../../theme';
 import { useCreateAlertRule } from '../../hooks/queries/useAlertQueries';
 import { hapticLight, hapticSuccess } from '../../utils/haptics';
+import type { IconName } from '../../types/icons';
 
 // --- Option Definitions ---
 const ALERT_TYPES: { label: string; value: AlertType; icon: string }[] = [
@@ -61,7 +62,7 @@ const OPERATOR_OPTIONS: { label: string; value: string }[] = [
   { label: '<= (less or equal)', value: 'lte' },
 ];
 
-const RECIPIENT_TYPES: { label: string; value: AlertRecipient['type']; icon: string }[] = [
+const RECIPIENT_TYPES: { label: string; value: AlertRecipient['type']; icon: IconName }[] = [
   { label: 'Email', value: 'email', icon: 'email-outline' },
   { label: 'Push', value: 'push', icon: 'bell-outline' },
   { label: 'Slack', value: 'slack', icon: 'slack' },

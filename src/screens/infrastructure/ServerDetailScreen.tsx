@@ -17,7 +17,7 @@ import {
   ActivityIndicator,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
 import type { ServerStatus } from '../../types';
@@ -31,6 +31,7 @@ import { formatRelativeTime } from '../../utils/statusHelpers';
 import { hapticSuccess, hapticError } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
+import type { IconName } from '../../types/icons';
 
 // --- Server status color ---
 const SERVER_STATUS_COLOR: Record<ServerStatus, string> = {
@@ -54,7 +55,7 @@ const getServerStatusLabel = (status: string): string => {
 };
 
 // --- InfoItem ---
-const InfoItem: React.FC<{ label: string; value: string; icon?: string; iconColor?: string }> = ({
+const InfoItem: React.FC<{ label: string; value: string; icon?: IconName; iconColor?: string }> = ({
   label, value, icon, iconColor,
 }) => {
   const theme = useTheme();
@@ -103,7 +104,7 @@ const infoStyles = StyleSheet.create({
 // --- Resource Bar ---
 const ResourceBar: React.FC<{
   label: string;
-  icon: string;
+  icon: IconName;
   value: number;
   total: number;
   unit: string;
@@ -139,7 +140,7 @@ const ResourceBar: React.FC<{
 
 // --- Action Button ---
 const ActionButton: React.FC<{
-  icon: string;
+  icon: IconName;
   label: string;
   color?: string;
   onPress: () => void;

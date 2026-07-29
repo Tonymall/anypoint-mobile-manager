@@ -22,7 +22,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
@@ -37,13 +37,14 @@ import { hapticLight } from '../../utils/haptics';
 import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
+import type { IconName } from '../../types/icons';
 
 // --- Helpers ---
 const getSeverityColor = (severity: AlertSeverity): string => {
   return severityColors[severity] ?? anypointColors.info;
 };
 
-const getTypeIcon = (type: AlertType): string => {
+const getTypeIcon = (type: AlertType): IconName => {
   switch (type) {
     case 'response-time': return 'timer-outline';
     case 'error-count': return 'alert-circle-outline';

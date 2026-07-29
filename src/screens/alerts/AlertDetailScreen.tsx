@@ -19,7 +19,7 @@ import {
   useTheme,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 
@@ -37,13 +37,14 @@ import LoadingState from '../../components/common/LoadingState';
 import ErrorState from '../../components/common/ErrorState';
 import InfoRow from '../../components/common/InfoRow';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
+import type { IconName } from '../../types/icons';
 
 // --- Helpers ---
 const getSeverityColor = (severity?: AlertSeverity | null): string => {
   return severity ? (severityColors[severity] ?? anypointColors.info) : anypointColors.info;
 };
 
-const getSeverityIcon = (severity?: AlertSeverity | null): string => {
+const getSeverityIcon = (severity?: AlertSeverity | null): IconName => {
   switch (severity) {
     case 'CRITICAL': return 'alert-octagon';
     case 'WARNING': return 'alert';
@@ -62,7 +63,7 @@ const getStatusColor = (status?: AlertStatus | null): string => {
   }
 };
 
-const getStatusIcon = (status?: AlertStatus | null): string => {
+const getStatusIcon = (status?: AlertStatus | null): IconName => {
   switch (status) {
     case 'ACTIVE': return 'bell-ring-outline';
     case 'ACKNOWLEDGED': return 'eye-check-outline';

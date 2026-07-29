@@ -16,7 +16,7 @@ import {
   Dialog,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useQueryClient } from '@tanstack/react-query';
@@ -37,6 +37,7 @@ import { useRemoteConfigStore } from '../../stores/remoteConfigStore';
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
 import logger from '../../utils/logger';
 import Constants from 'expo-constants';
+import type { IconName } from '../../types/icons';
 
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
 const RELEASE_STAGE = ((Constants.expoConfig?.extra as { releaseStage?: string } | undefined)?.releaseStage ?? 'beta').toUpperCase();
@@ -58,7 +59,7 @@ async function openExternalUrl(url: string): Promise<void> {
 
 // â”€â”€ Reusable Setting Row â”€â”€
 const SettingRow: React.FC<{
-  icon: string;
+  icon: IconName;
   iconColor?: string;
   iconBg?: string;
   title: string;
