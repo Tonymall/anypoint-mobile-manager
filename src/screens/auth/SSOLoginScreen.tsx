@@ -30,6 +30,12 @@ import {
 import * as authService from '../../services/authService';
 import type { AuthTokens } from '../../types';
 import logger from '../../utils/logger';
+import { typeScale, useTokens } from '../../theme';
+import {
+  SILENT_AUTH_CLIENT_IDS,
+  buildSilentAuthUrl,
+  parseAccessTokenFromUrl,
+} from '../../utils/authUrl';
 import { useErrorDialogStore } from '../../stores/errorDialogStore';
 
 const INJECTED_JS = `
@@ -257,7 +263,15 @@ const SSOLoginScreen: React.FC = () => {
   const setOrganizations = useAuthStore((state) => state.setOrganizations);
   const showError = useErrorDialogStore((state) => state.showError);
 
+  const t = useTokens();
   const [isExtracting, setIsExtracting] = useState(false);
+  /**
+   * On an MFA continuation everything before the verification page is
+   * machinery — the sign-in form is auto-filled and submitted for the user.
+   * Showing it just invites them to retype credentials they already gave us,
+   * so the WebView stays covered until the page actually needs a human.
+   */
+  const [awaitingUser, setAwaitingUser] = useState(false);
   const [webViewKey] = useState(1);
 
   const hasInjectedRef = useRef(false);
@@ -278,6 +292,8 @@ const SSOLoginScreen: React.FC = () => {
   const baseUrl = pendingMfaChallenge?.baseUrl ?? getBaseUrl();
   const loginUrl = `${baseUrl}/login/signin`;
   const silentAuthJs = SILENT_AUTH_JS.replace(/__BASE_URL__/g, baseUrl);
+
+  const { callbackUrl: silentAuthCallbackUrl } = buildSilentAuthUrl(baseUrl);
 
   const scheduleTimeout = useCallback((callback: () => void, delay: number) => {
     const timeoutId = setTimeout(() => {
@@ -469,16 +485,30 @@ const SSOLoginScreen: React.FC = () => {
             hasRetriedSilentAuthRef.current = true;
             const attempt = silentAuthAttemptsRef.current;
             logger.log(
-              `[SSO] No bearer token yet (attempt ${attempt}/${MAX_SILENT_AUTH_ATTEMPTS}); retrying silent auth token capture`,
+              `[SSO] No bearer token yet (attempt ${attempt}/${MAX_SILENT_AUTH_ATTEMPTS}); navigating for silent auth`,
             );
-            // Back off a little further each pass so a slow MFA round-trip has
-            // room to finish before we give up on the bearer token.
+            // Drive the authorize request as a TOP-LEVEL navigation rather than
+            // in a hidden iframe. After MFA, Anypoint redirects the WebView
+            // (/home/ then /home/organizations/...), and every navigation tears
+            // down the JS context — taking an injected iframe and its message
+            // listener with it, so the token was delivered to a document that
+            // no longer existed. A navigation survives that: the redirect back
+            // to the callback carries the token in its URL, which we read in
+            // handleShouldStartLoad below.
+            // Each attempt tries the next console OAuth client: anypoint_spa
+            // answers the callback without a token, so the others get a turn
+            // before we fall back to the cookie session.
+            const clientId =
+              SILENT_AUTH_CLIENT_IDS[
+                Math.min(attempt - 1, SILENT_AUTH_CLIENT_IDS.length - 1)
+              ];
+            const { authorizeUrl } = buildSilentAuthUrl(baseUrl, clientId);
+            logger.log(`[SSO] Silent auth via client_id=${clientId}`);
             scheduleTimeout(() => {
-              webViewRef.current?.injectJavaScript(silentAuthJs);
-            }, 250 * attempt);
-            scheduleTimeout(() => {
-              webViewRef.current?.injectJavaScript(INJECTED_JS);
-            }, 1500 + 1500 * attempt);
+              webViewRef.current?.injectJavaScript(
+                `window.location.assign(${JSON.stringify(authorizeUrl)}); true;`,
+              );
+            }, 150 * attempt);
             setIsExtracting(false);
             return;
           }
@@ -568,7 +598,7 @@ const SSOLoginScreen: React.FC = () => {
         setIsExtracting(false);
       }
     },
-    [baseUrl, isMfaContinuation, loginPending, router, scheduleTimeout, setOrganizations, showError, silentAuthJs],
+    [baseUrl, isMfaContinuation, loginPending, router, scheduleTimeout, setOrganizations, showError],
   );
 
   const completeSessionOnly = useCallback(
@@ -653,13 +683,71 @@ const SSOLoginScreen: React.FC = () => {
     [baseUrl, isMfaContinuation, loginPending, router, setOrganizations, showError],
   );
 
+  /**
+   * Catch the silent-auth redirect before the callback page runs.
+   *
+   * The callback immediately closes itself and navigates to /accounts/, so
+   * letting it load would race us. Returning false keeps the WebView where it
+   * is while we finish authenticating with the token from the URL.
+   */
+  const handleShouldStartLoad = useCallback(
+    (request: { url?: string }) => {
+      const url = request?.url ?? '';
+      if (!url.startsWith(silentAuthCallbackUrl)) return true;
+
+      const token = parseAccessTokenFromUrl(url);
+      if (token) {
+        logger.log('[SSO] Bearer token captured from silent auth redirect');
+        silentAuthAttemptsRef.current = 0;
+        hasRetriedSilentAuthRef.current = false;
+        void completeWithTokenOnly(token);
+        return false;
+      }
+
+      // No token in the callback — the session could not be upgraded. Let the
+      // page load and re-run extraction so the existing retry/cookie-fallback
+      // path still runs instead of the flow stalling here.
+      logger.warn('[SSO] Silent auth callback carried no access token');
+      scheduleTimeout(() => {
+        webViewRef.current?.injectJavaScript(INJECTED_JS);
+      }, 1200);
+      return true;
+    },
+    [completeWithTokenOnly, scheduleTimeout, silentAuthCallbackUrl],
+  );
+
   const handleNavigationStateChange = useCallback(
     (navState: WebViewNavigation) => {
       const { url } = navState;
       if (!url) return;
 
+      // Backstop: on some iOS versions a fragment-only redirect reaches
+      // onNavigationStateChange without passing through the load handler.
+      if (url.startsWith(silentAuthCallbackUrl)) {
+        const token = parseAccessTokenFromUrl(url);
+        if (token) {
+          logger.log('[SSO] Bearer token captured from silent auth navigation');
+          silentAuthAttemptsRef.current = 0;
+          hasRetriedSilentAuthRef.current = false;
+          void completeWithTokenOnly(token);
+          return;
+        }
+      }
+
       if (isMfaContinuation) {
         logger.log('[SSO] Hosted MFA page:', url);
+
+        // Reveal the WebView only once the page actually needs the user. The
+        // MFA callback is a machine step even though its URL contains "/mfa",
+        // so it must not count as a verification page.
+        const isCallbackHop = url.includes('mfa_callback');
+        const needsUser =
+          !isCallbackHop &&
+          (url.includes('verify.salesforce.com') ||
+            url.includes('login.salesforce.com') ||
+            url.includes('/verify') ||
+            url.includes('/mfa'));
+        setAwaitingUser(needsUser);
 
         if (
           (url.includes('/accounts/login') || url.includes('/login/signin')) &&
@@ -690,7 +778,7 @@ const SSOLoginScreen: React.FC = () => {
             setIsExtracting(true);
             scheduleTimeout(() => {
               webViewRef.current?.injectJavaScript(silentAuthJs);
-            }, 250);
+            }, 900);
             scheduleTimeout(() => {
               webViewRef.current?.injectJavaScript(INJECTED_JS);
             }, 3500);
@@ -709,13 +797,15 @@ const SSOLoginScreen: React.FC = () => {
         url.includes('/verify') ||
         url.includes('/mfa')
       ) {
-        logger.log('[SSO] MFA/verification page — waiting for user');
+        logger.log('[SSO] MFA/verification page — handing over to the user');
         isOnMfaPageRef.current = true;
+        setAwaitingUser(true);
         return;
       }
 
       if (isPostLoginUrl(url)) {
         logger.log('[SSO] Post-login redirect detected');
+        setAwaitingUser(false);
         hasInjectedRef.current = true;
         retryCountRef.current = 0;
         isOnMfaPageRef.current = false;
@@ -729,7 +819,16 @@ const SSOLoginScreen: React.FC = () => {
         }, 3500);
       }
     },
-    [isMfaContinuation, isPostLoginUrl, prefillCredentialsAndSubmit, scheduleTimeout, showError, silentAuthJs],
+    [
+      completeWithTokenOnly,
+      isMfaContinuation,
+      isPostLoginUrl,
+      prefillCredentialsAndSubmit,
+      scheduleTimeout,
+      showError,
+      silentAuthCallbackUrl,
+      silentAuthJs,
+    ],
   );
 
   const handleWebViewMessage = useCallback(
@@ -832,6 +931,7 @@ const SSOLoginScreen: React.FC = () => {
           source={{ uri: loginUrl }}
           style={styles.webView}
           onNavigationStateChange={handleNavigationStateChange}
+          onShouldStartLoadWithRequest={handleShouldStartLoad}
           onMessage={handleWebViewMessage}
           sharedCookiesEnabled={true}
           thirdPartyCookiesEnabled={true}
@@ -868,6 +968,30 @@ const SSOLoginScreen: React.FC = () => {
           }}
           accessibilityLabel={isMfaContinuation ? 'Identity verification page' : 'Anypoint Platform sign-in page'}
         />
+
+        {/* Cover the hosted page while it is being driven automatically —
+            the credentials were already entered on our own login screen. */}
+        {isMfaContinuation && !awaitingUser && !isExtracting && (
+          <View
+            style={[
+              styles.extractionOverlay,
+              { backgroundColor: t.color.surface.canvas },
+            ]}
+            accessibilityLabel="Preparing identity verification"
+          >
+            <ActivityIndicator animating size="large" color={t.color.text.accent} />
+            <Text
+              style={[typeScale.heading, styles.prepTitle, { color: t.color.text.primary }]}
+            >
+              Signing you in…
+            </Text>
+            <Text
+              style={[typeScale.body, styles.prepBody, { color: t.color.text.secondary }]}
+            >
+              We'll ask for your verification code in a moment.
+            </Text>
+          </View>
+        )}
 
         {isExtracting && (
           <View
@@ -928,6 +1052,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+  },
+  prepTitle: {
+    marginTop: 24,
+    textAlign: 'center',
+  },
+  prepBody: {
+    marginTop: 8,
+    textAlign: 'center',
   },
   extractionTitle: {
     marginTop: 24,
