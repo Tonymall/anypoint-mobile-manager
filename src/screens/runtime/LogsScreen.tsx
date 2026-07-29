@@ -32,6 +32,7 @@ import type { AuditLogQueryParams } from '../../services/auditLogService';
 import LoadingState from '../../components/common/LoadingState';
 import logger from '../../utils/logger';
 import type { IconName } from '../../types/icons';
+import { LogMessage } from './logs';
 
 // ---------------------------------------------------------------------------
 // Date-range presets (ordered from smallest to largest)
@@ -121,7 +122,8 @@ const AppLogCard = React.memo<{
 
   // Extract message — handle nested event wrapper from CH1
   const ev = entry.event;
-  const message = entry.message ?? ev?.message ?? entry.msg ?? (typeof entry.line === 'string' ? entry.line : '') ?? '';
+  const rawMessage = entry.message ?? ev?.message ?? entry.msg ?? (typeof entry.line === 'string' ? entry.line : '') ?? '';
+  const message = typeof rawMessage === 'string' ? rawMessage : JSON.stringify(rawMessage);
   const ts = entry.timestamp ?? ev?.timestamp ?? entry.instant ?? entry.date ?? '';
   const docId = entry.recordId ?? entry.docId ?? entry.id ?? '';
   const loggerName = entry.loggerName ?? ev?.loggerName ?? entry.logger ?? '';
@@ -129,7 +131,7 @@ const AppLogCard = React.memo<{
   return (
     <Pressable
       onPress={() => onPress(entry)}
-      accessibilityLabel={`${priority} log: ${typeof message === 'string' ? message.slice(0, 80) : 'log entry'}. ${fmtTs(ts)}`}
+      accessibilityLabel={`${priority} log: ${message ? message.slice(0, 80) : 'log entry'}. ${fmtTs(ts)}`}
       accessibilityRole="button"
       accessibilityHint="Double tap to view full details"
     >
@@ -144,18 +146,8 @@ const AppLogCard = React.memo<{
         }}
       >
         <View style={{ padding: 12 }}>
-          {/* Message */}
-          <Text
-            style={{
-              fontSize: 13,
-              color: theme.colors.onSurface,
-              lineHeight: 19,
-              marginBottom: 8,
-            }}
-            numberOfLines={4}
-          >
-            {typeof message === 'string' ? message : JSON.stringify(message)}
-          </Text>
+          {/* Message — JSON/XML payloads render as a collapsible block */}
+          <LogMessage message={message} />
 
           {/* Logger name (if present) */}
           {loggerName ? (
