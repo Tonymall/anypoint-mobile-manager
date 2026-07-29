@@ -3,12 +3,15 @@
 //
 // Org/env context is passed via the X-ANYPNT-ORG-ID and
 // X-ANYPNT-ENV-ID headers (set by api.ts), NOT as URL segments.
-// Endpoint paths match the Postman collection:
-//   /armui/api/v1/alerts
-//   /armui/api/v1/alerts/cloudhub
+// Endpoint paths:
+//   /armui/api/{version}/alerts
+//   /armui/api/{version}/alerts/cloudhub
+// The version is negotiated once per session (v2 preferred) —
+// see armApiVersion.ts.
 // ============================================================
 
 import api from './api';
+import { armGetCollection, getArmBase } from './armApiVersion';
 import type {
   Alert,
   AlertRule,
@@ -19,8 +22,6 @@ import type {
   AlertRecipient,
   PaginatedResponse,
 } from '../types';
-
-const ALERTS_BASE = '/armui/api/v1';
 
 // ---------- Alerts ----------
 
@@ -40,11 +41,7 @@ export async function getAlerts(
     limit?: number;
   },
 ): Promise<PaginatedResponse<Alert>> {
-  const { data } = await api.get<PaginatedResponse<Alert>>(
-    `${ALERTS_BASE}/alerts`,
-    { params },
-  );
-  return data;
+  return armGetCollection<PaginatedResponse<Alert>>('/alerts', { params });
 }
 
 /**
@@ -57,7 +54,7 @@ export async function getAlert(
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.get<Alert>(
-    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
+    `${getArmBase()}/alerts/cloudhub/${alertId}`,
   );
   return data;
 }
@@ -73,7 +70,7 @@ export async function acknowledgeAlert(
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.patch<Alert>(
-    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
+    `${getArmBase()}/alerts/cloudhub/${alertId}`,
     { status: 'ACKNOWLEDGED' },
   );
   return data;
@@ -88,7 +85,7 @@ export async function resolveAlert(
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.patch<Alert>(
-    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
+    `${getArmBase()}/alerts/cloudhub/${alertId}`,
     { status: 'RESOLVED' },
   );
   return data;
@@ -103,7 +100,7 @@ export async function dismissAlert(
   alertId: string,
 ): Promise<Alert> {
   const { data } = await api.patch<Alert>(
-    `${ALERTS_BASE}/alerts/cloudhub/${alertId}`,
+    `${getArmBase()}/alerts/cloudhub/${alertId}`,
     { status: 'DISMISSED' },
   );
   return data;
@@ -129,11 +126,9 @@ export async function getAlertRules(
     limit?: number;
   },
 ): Promise<PaginatedResponse<AlertRule>> {
-  const { data } = await api.get<PaginatedResponse<AlertRule>>(
-    `${ALERTS_BASE}/alerts/cloudhub`,
-    { params },
-  );
-  return data;
+  return armGetCollection<PaginatedResponse<AlertRule>>('/alerts/cloudhub', {
+    params,
+  });
 }
 
 /**
@@ -154,7 +149,7 @@ export async function createAlertRule(
   },
 ): Promise<AlertRule> {
   const { data } = await api.post<AlertRule>(
-    `${ALERTS_BASE}/alerts/cloudhub`,
+    `${getArmBase()}/alerts/cloudhub`,
     rule,
   );
   return data;
@@ -178,7 +173,7 @@ export async function updateAlertRule(
   }>,
 ): Promise<AlertRule> {
   const { data } = await api.patch<AlertRule>(
-    `${ALERTS_BASE}/alerts/cloudhub/${ruleId}`,
+    `${getArmBase()}/alerts/cloudhub/${ruleId}`,
     updates,
   );
   return data;
@@ -193,6 +188,6 @@ export async function deleteAlertRule(
   ruleId: string,
 ): Promise<void> {
   await api.delete(
-    `${ALERTS_BASE}/alerts/cloudhub/${ruleId}`,
+    `${getArmBase()}/alerts/cloudhub/${ruleId}`,
   );
 }

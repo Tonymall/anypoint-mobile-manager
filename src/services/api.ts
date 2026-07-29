@@ -25,6 +25,7 @@ import {
   resolveRequestAuth,
   type StoredCredentialReader,
 } from './authMode';
+import { resetArmVersion } from './armApiVersionState';
 
 const TOKEN_KEY = 'anypoint_access_token';
 const REFRESH_TOKEN_KEY = 'anypoint_refresh_token';
@@ -81,6 +82,7 @@ const api: AxiosInstance = axios.create({
 export async function setRegion(regionId: ControlPlaneRegionId): Promise<void> {
   currentBaseUrl = getRegionUrl(regionId);
   api.defaults.baseURL = currentBaseUrl;
+  resetArmVersion();
   await SecureStore.setItemAsync(REGION_KEY, regionId);
 }
 
@@ -235,6 +237,7 @@ export function clearHeaders(): void {
 export async function resetApiState(): Promise<void> {
   await clearTokens();
   await clearSessionAuth();
+  resetArmVersion();
 
   authState.token = null;
   authState.sessionMode = false;

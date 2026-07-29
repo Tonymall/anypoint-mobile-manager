@@ -10,3 +10,4 @@ export * from './useDeploymentQueries';
 export * from './useInfrastructureQueries';
 export * from './useAccessManagementQueries';
 export * from './useSecretManagerQueries';
+export * from './useInsightsQueries';

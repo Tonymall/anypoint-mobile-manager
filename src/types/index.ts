@@ -815,3 +815,60 @@ export interface AppNotification {
   domain?: string;
   environmentId?: string;
 }
+
+// --- Insights (Observability / AMQL over "mulesoft.entity") ---
+// Replaces the classic built-in dashboards (EOL 2026-10-15).
+
+/** Inclusive epoch-millisecond window used by every insights query. */
+export interface InsightsTimeRange {
+  startMs: number;
+  endMs: number;
+}
+
+/** Business-group + environment scope sent as sub_org.id / env.id filters. */
+export interface InsightsScope {
+  orgId: string;
+  envId: string;
+}
+
+/** One row of the entity overview query (health + traffic per entity). */
+export interface InsightsEntityOverview {
+  id: string;
+  type: string | null;
+  name: string | null;
+  orgId: string | null;
+  orgName: string | null;
+  envId: string | null;
+  envName: string | null;
+  p99RequestLatency: number | null;
+  requestVolume: number;
+  deploymentType: string | null;
+  deploymentId: string | null;
+}
+
+/** Entity overview enriched with failed-request counts and a derived rate. */
+export interface InsightsEntityHealth extends InsightsEntityOverview {
+  /** Requests whose entity.response.status was FAILED in the window. */
+  errorCount: number;
+  /** errorCount / requestVolume, clamped to 0..1 (0 when there is no traffic). */
+  errorRate: number;
+}
+
+/** One row of the slowest-entities query. */
+export interface InsightsSlowEntity {
+  id: string;
+  envId: string | null;
+  p99RequestLatency: number | null;
+}
+
+/** A single time-bucketed sample returned by the time-series queries. */
+export interface InsightsTimeSeriesPoint {
+  timestamp: number;
+  value: number;
+}
+
+/** Field descriptor returned by metric_types/mulesoft.entity:describe. */
+export interface InsightsMetricDescriptor {
+  dimensions: string[];
+  measurements: string[];
+}

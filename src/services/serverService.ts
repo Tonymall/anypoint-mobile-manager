@@ -3,6 +3,7 @@
 // ============================================================
 
 import api from './api';
+import { armGetCollection, getArmBase } from './armApiVersion';
 import type {
   Server,
   ServerGroup,
@@ -12,7 +13,6 @@ import type {
   PaginatedResponse,
 } from '../types';
 
-const SERVERS_BASE = '/armui/api/v1';
 const CLOUDHUB_BASE = '/cloudhub/api/v2';
 const HYBRID_BASE = '/hybrid/api/v2';
 
@@ -30,11 +30,7 @@ export async function getServers(
     searchTerm?: string;
   },
 ): Promise<PaginatedResponse<Server>> {
-  const { data } = await api.get<PaginatedResponse<Server>>(
-    `${SERVERS_BASE}/servers`,
-    { params },
-  );
-  return data;
+  return armGetCollection<PaginatedResponse<Server>>('/servers', { params });
 }
 
 /**
@@ -46,7 +42,7 @@ export async function getServer(
   serverId: number,
 ): Promise<Server> {
   const { data } = await api.get<Server>(
-    `${SERVERS_BASE}/servers/${serverId}`,
+    `${getArmBase()}/servers/${serverId}`,
   );
   return data;
 }
@@ -63,7 +59,7 @@ export async function addServer(
   },
 ): Promise<Server> {
   const { data } = await api.post<Server>(
-    `${SERVERS_BASE}/servers`,
+    `${getArmBase()}/servers`,
     server,
   );
   return data;
@@ -78,7 +74,7 @@ export async function removeServer(
   serverId: number,
 ): Promise<void> {
   await api.delete(
-    `${SERVERS_BASE}/servers/${serverId}`,
+    `${getArmBase()}/servers/${serverId}`,
   );
 }
 
@@ -96,7 +92,7 @@ export async function createServerGroup(
   },
 ): Promise<ServerGroup> {
   const { data } = await api.post<ServerGroup>(
-    `${SERVERS_BASE}/serverGroups`,
+    `${getArmBase()}/serverGroups`,
     group,
   );
   return data;
@@ -117,7 +113,7 @@ export async function createCluster(
   },
 ): Promise<Cluster> {
   const { data } = await api.post<Cluster>(
-    `${SERVERS_BASE}/clusters`,
+    `${getArmBase()}/clusters`,
     cluster,
   );
   return data;
@@ -134,7 +130,7 @@ export async function restartServer(
   serverId: number,
 ): Promise<Server> {
   const { data } = await api.post<Server>(
-    `${SERVERS_BASE}/servers/${serverId}/restart`,
+    `${getArmBase()}/servers/${serverId}/restart`,
   );
   return data;
 }
@@ -154,7 +150,7 @@ export async function getServerLogs(
   },
 ): Promise<PaginatedResponse<AppLogEntry>> {
   const { data } = await api.get<PaginatedResponse<AppLogEntry>>(
-    `${SERVERS_BASE}/servers/${serverId}/logs`,
+    `${getArmBase()}/servers/${serverId}/logs`,
     { params },
   );
   return data;
