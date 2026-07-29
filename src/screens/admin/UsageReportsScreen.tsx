@@ -229,6 +229,9 @@ const UsageReportsScreen: React.FC = () => {
               anypointColors.warning,
               anypointColors.secondary,
             ][index % 5];
+            const summary = section.status === 'unavailable'
+              ? 'Unavailable'
+              : formatMetricValue(value, section.category.summaryUnit);
             return (
               <Button
                 key={section.category.id}
@@ -239,7 +242,7 @@ const UsageReportsScreen: React.FC = () => {
                   selected ? { borderColor: accent } : undefined,
                 ]}
               >
-                {`${section.category.title}: ${formatMetricValue(value, section.category.summaryUnit)}`}
+                {`${section.category.title}: ${summary}`}
               </Button>
             );
           })}
@@ -277,6 +280,10 @@ const UsageReportsScreen: React.FC = () => {
             {isLoading || !selectedSection ? (
               <Text variant="bodySmall" style={styles.emptyCopy}>
                 Loading usage data...
+              </Text>
+            ) : selectedSection.status === 'unavailable' ? (
+              <Text variant="bodySmall" style={styles.emptyCopy}>
+                {`This meter is unavailable right now${selectedSection.error ? ` (${selectedSection.error})` : ''}. Other categories are unaffected - pull refresh to try again.`}
               </Text>
             ) : (
               <>
