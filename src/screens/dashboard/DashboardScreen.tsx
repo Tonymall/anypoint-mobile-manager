@@ -5,7 +5,7 @@
 // large bold metrics, generous spacing, vibrant accents
 // ============================================================
 
-import React, { useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -20,7 +20,7 @@ import {
   ProgressBar,
   type MD3Theme,
 } from 'react-native-paper';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Icon from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter, useIsFocused } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -30,13 +30,26 @@ import { anypointColors } from '../../theme';
 import { useApplications, useManagedAPIs } from '../../hooks/queries';
 import { getAppName, getAppId, getMuleVersion, getWorkerInfo } from '../../utils/appHelpers';
 import { useResponsiveLayout } from '../../hooks/useResponsiveLayout';
+import IncidentFeed from './incidents/IncidentFeed';
+import { useIncidentFeed } from './incidents/useIncidentFeed';
+import type { Incident } from '../../services/incidentFeed';
+import type { IconName } from '../../types/icons';
+
+// ── Quick Actions ──
+
+const QUICK_ACTIONS: { icon: IconName; label: string; color: string; route: string }[] = [
+  { icon: 'rocket-launch', label: 'Apps', color: anypointColors.primary, route: '/(main)/runtime' },
+  { icon: 'api', label: 'APIs', color: anypointColors.secondary, route: '/(main)/apis' },
+  { icon: 'chart-line', label: 'Monitor', color: anypointColors.accent, route: '/(main)/monitoring' },
+  { icon: 'cog', label: 'Settings', color: anypointColors.mulePurple, route: '/(main)/settings' },
+];
 
 // ── Glassmorphic Stat Card ──
 
 interface StatCardProps {
   title: string;
   value: string | number;
-  icon: string;
+  icon: IconName;
   color: string;
   subtitle?: string;
   onPress?: () => void;
@@ -210,7 +223,22 @@ const DashboardScreen: React.FC = () => {
   const { data: applications, isLoading: appsLoading, error: appsError, refetch: refetchApps } = useApplications({ enabled: isFocused });
   const { data: apisResponse, isLoading: apisLoading, error: apisError, refetch: refetchApis } = useManagedAPIs(undefined, { enabled: isFocused });
 
-  const handleRefresh = () => { refetchApps(); refetchApis(); };
+  const {
+    incidents,
+    summary: incidentSummary,
+    isLoading: incidentsLoading,
+    refetch: refetchIncidents,
+  } = useIncidentFeed({ enabled: isFocused });
+
+  const handleRefresh = () => { refetchApps(); refetchApis(); refetchIncidents(); };
+
+  const handleIncidentPress = useCallback((incident: Incident) => {
+    if (!incident.route) return;
+    router.navigate({
+      pathname: incident.route as never,
+      params: (incident.routeParams ?? {}) as never,
+    });
+  }, [router]);
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -318,6 +346,15 @@ const DashboardScreen: React.FC = () => {
           </Pressable>
         </View>
       )}
+
+      {/* ── Incident Feed: what needs attention right now ── */}
+      <IncidentFeed
+        incidents={incidents}
+        summary={incidentSummary}
+        isLoading={incidentsLoading}
+        onSelect={handleIncidentPress}
+        onViewAll={() => router.navigate('/(main)/alerts')}
+      />
 
       {/* ── Section: Platform Overview ── */}
       <View style={styles.sectionHeader}>
@@ -444,12 +481,7 @@ const DashboardScreen: React.FC = () => {
           </View>
 
           <View style={styles.actionsRow}>
-            {[
-              { icon: 'rocket-launch', label: 'Apps', color: anypointColors.primary, route: '/(main)/runtime' },
-              { icon: 'api', label: 'APIs', color: anypointColors.secondary, route: '/(main)/apis' },
-              { icon: 'chart-line', label: 'Monitor', color: anypointColors.accent, route: '/(main)/monitoring' },
-              { icon: 'cog', label: 'Settings', color: anypointColors.mulePurple, route: '/(main)/settings' },
-            ].map((action) => (
+            {QUICK_ACTIONS.map((action) => (
               <Pressable
                 key={action.label}
                 onPress={() => router.navigate(action.route as any)}
